@@ -1,0 +1,36 @@
+name: Python
+on: [push, pull_request]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+        dependencies: ['minimum', 'current']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --group dev
+      - if: matrix.dependencies == 'minimum'
+        run: uv pip install 'pyopenms==3.5.0' 'sdrf-pipelines==0.1.6' 'pridepy==0.0.16'
+      - run: uv run --no-sync python -m unittest discover -s tests -v
+        env:
+          PRIDE_QC_REQUIRE_INTEGRATION: '1'
+          OMP_NUM_THREADS: '1'
+          OPENBLAS_NUM_THREADS: '1'
+      - run: uv build
+      - run: uv tree --no-dev
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --group dev
+      - run: uv run ruff check .
+      - run: uv run mypy
