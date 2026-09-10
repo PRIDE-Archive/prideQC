@@ -100,16 +100,25 @@ def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
     source, output, options = task
     try:
         path = source
-        if not source.name.lower().endswith((".mzml", ".mzml.gz")):
-            if options.converter is None:
-                raise ValueError("Vendor data requires --converter or prior conversion to mzML.")
-            path = ExternalConverter(options.converter, options.converter_executable,
-                                     options.conversion_timeout).convert(source, output / "converted" / source.name)
         collectors = [DiagnosticIonCollector()] if options.diagnostics else []
-        result = Analyzer(estimate_peak_type=options.estimate_peak_type).analyze(
-            path,
-            collectors=collectors,
-        )
+        from prideqc.readers import PyOpenMSReader, vendor_format
+
+        reader = PyOpenMSReader(estimate_peak_type=options.estimate_peak_type)
+        is_mzml = source.name.casefold().endswith((".mzml", ".mzml.gz"))
+        detected_vendor = vendor_format(source)
+        if not is_mzml and (detected_vendor is None or not reader.supports_direct(source)):
+            if options.converter is None:
+                # Keep this as a reader-level capability error so users get the
+                # installed version and upgrade/converter guidance.
+                if detected_vendor is not None:
+                    raise reader.unavailable_error(source)
+                raise ValueError("Vendor data requires --converter or prior conversion to mzML.")
+            path = ExternalConverter(
+                options.converter,
+                options.converter_executable,
+                options.conversion_timeout,
+            ).convert(source, output / "converted" / source.name)
+        result = Analyzer(reader=reader).analyze(path, collectors=collectors)
         if path != source:
             result.source_path = source
         return FileOutcome(source, result)
@@ -154,10 +163,24 @@ class Workflow:
         if filenames is None:
             filenames = [(aliases or {}).get(name, name) for name in document.data_files()] if document else []
         names = selected_files(filenames)
-        if self.options.converter is None and any(
-            not name.lower().endswith((".mzml", ".mzml.gz")) for name in names
-        ):
-            raise ValueError("Selected vendor files require --converter or a separate fetch/conversion step.")
+        if self.options.converter is None:
+            vendor_names = [
+                name for name in names
+                if not name.lower().endswith((".mzml", ".mzml.gz"))
+            ]
+            if vendor_names:
+                from prideqc.readers import PyOpenMSReader
+
+                try:
+                    reader = PyOpenMSReader()
+                    unsupported = [name for name in vendor_names if not reader.supports_direct(Path(name))]
+                except RuntimeError:
+                    unsupported = vendor_names
+                if unsupported:
+                    raise ValueError(
+                        "Selected vendor files require a native pyOpenMS reader or "
+                        "--converter: " + ", ".join(unsupported),
+                    )
         if sdrf:
             # Resolve validator/template/ontology setup before potentially large
             # downloads. run() validates the actual input again before analysis.
