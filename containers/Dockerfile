@@ -111,6 +111,8 @@ RUN set -eux; \
     mkdir -p /work/tmp; \
     PYTHON_VERSION="$(python --version 2>&1)"; \
     PYOPENMS_VERSION="$(python -c 'import importlib.metadata as m; print(m.version("pyopenms"))')"; \
+    DOTNET_RUNTIME_VERSION="$(dotnet --list-runtimes | awk '$1 == "Microsoft.NETCore.App" {print $2; exit}')"; \
+    test -n "$DOTNET_RUNTIME_VERSION"; \
     { \
       echo "project=prideQC"; \
       echo "project_version=${PROJECT_VERSION}"; \
@@ -130,7 +132,7 @@ RUN set -eux; \
       echo "rust_base_image=${RUST_IMAGE}"; \
       echo "uv_image=${UV_IMAGE}"; \
       echo "dotnet_base_image=${DOTNET_IMAGE}"; \
-      printf 'dotnet_version='; dotnet --version; \
+      echo "dotnet_runtime_version=${DOTNET_RUNTIME_VERSION}"; \
       echo "build_id=${BUILD_ID}"; \
     } > /opt/prideqc/build-info.txt; \
     rm -f /tmp/rustc-version.txt /tmp/cargo-version.txt; \
