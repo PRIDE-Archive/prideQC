@@ -70,9 +70,12 @@ else
     echo "No Rust binaries in this source revision (current prideQC is Python-only)."
 fi
 
+docker_repo_digest="$(docker image inspect "$IMAGE" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}not-available{{end}}')"
+
 {
     echo "docker_image=$IMAGE"
     echo "docker_image_id=$(docker image inspect "$IMAGE" --format '{{.Id}}')"
+    echo "docker_repo_digest=$docker_repo_digest"
     echo "sif_sha256=$(sha256sum "$SIF" | awk '{print $1}')"
     echo "converter=$CONTAINER_BIN"
     printf 'converter_version='; "$CONTAINER_BIN" --version | head -n 1
