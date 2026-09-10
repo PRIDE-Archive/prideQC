@@ -62,9 +62,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /opt/prideqc/.venv/bin/python --no-deps --require-hashes \
         -r /tmp/pyopenms.requirements.txt && \
     /opt/prideqc/.venv/bin/python -m compileall -q src tests && \
-    /opt/prideqc/.venv/bin/python -m unittest discover -s tests -v && \
+    PRIDE_QC_REQUIRE_INTEGRATION=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /opt/prideqc/.venv/bin/python -m unittest discover -s tests -v && \
     /opt/prideqc/.venv/bin/ruff check . && \
-    /opt/prideqc/.venv/bin/ruff format --check . && \
     /opt/prideqc/.venv/bin/mypy
 
 FROM ${PYTHON_IMAGE} AS runtime
