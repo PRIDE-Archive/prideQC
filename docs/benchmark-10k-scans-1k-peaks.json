@@ -1,0 +1,15 @@
+{
+  "mode": "synthetic-no-file-IO",
+  "input": null,
+  "pride_qc": "0.1.0",
+  "python": "3.12.14",
+  "numpy": "2.3.5",
+  "engine": "synthetic-stream-no-IO",
+  "platform": "Linux-6.18.35-x86_64-with-glibc2.39",
+  "scans": 10000,
+  "peak_data_points": 10000000,
+  "wall_seconds": 0.17092719100037357,
+  "scans_per_second": 58504.44239722014,
+  "peak_rss_bytes": 28979200,
+  "note": "Synthetic mode excludes mzML decoding, conversion and output I/O; not an upstream speedup comparison."
+}

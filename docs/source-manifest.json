@@ -1,0 +1,12 @@
+[
+  {
+    "archive": "01-rawQC.tar.gz",
+    "sha256": "0a38567a6794e943d818a9077988b7f119a7997b33eb3fae1a34744594e53372",
+    "bytes": 1681694
+  },
+  {
+    "archive": "02-techsdrf.tar.gz",
+    "sha256": "29709c7b1c92f3cf53ac06e0744d5f3abde8d88ccd8d1b7fd1ebcfd5534e2790",
+    "bytes": 113804
+  }
+]
