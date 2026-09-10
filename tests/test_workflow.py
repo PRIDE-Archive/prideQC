@@ -256,6 +256,8 @@ class WorkflowTests(unittest.TestCase):
                 with redirect_stderr(stream):
                     Workflow(WorkflowOptions(progress=True)).run([source], root / "progress")
                 self.assertIn("Analyzing files: 1/1", stream.getvalue())
+                self.assertIn("Analyzing files: 0/1", stream.getvalue())
+                self.assertNotIn("\r", stream.getvalue())
             with patch("prideqc.pipeline._analyze_file", return_value=FileOutcome(source, result)):
                 stream = io.StringIO()
                 with redirect_stderr(stream):
