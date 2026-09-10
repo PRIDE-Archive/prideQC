@@ -207,8 +207,11 @@ class PyOpenMSReader:
             import pyopenms
         except ImportError as exc:
             raise RuntimeError("pyOpenMS is required for mzML input; run `uv sync` first.") from exc
-        self._oms = pyopenms
-        self.engine_version = str(pyopenms.__version__)
+        # pyOpenMS exposes a dynamic binding surface without complete typing
+        # stubs (notably MzMLFile.transform and __version__). Keep the native
+        # boundary typed as Any while the rest of the reader remains checked.
+        self._oms: Any = pyopenms
+        self.engine_version = str(getattr(pyopenms, "__version__", "unknown"))
         self.estimate_peak_type = estimate_peak_type
 
     def read(self, path: Path, sink: SpectrumSink) -> RunMetadata:

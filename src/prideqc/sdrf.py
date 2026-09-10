@@ -114,8 +114,8 @@ class SDRFDocument:
         changes = []
         for row_number, row in enumerate(self.rows, start=2):
             name = row[self.file_column]
-            result = lookup.get(file_name(name))
-            if result is None:
+            matched_result = lookup.get(file_name(name))
+            if matched_result is None:
                 changes.append(
                     SDRFChange(
                         row_number,
@@ -128,7 +128,7 @@ class SDRFDocument:
                     ),
                 )
                 continue
-            for annotation in result.annotations:
+            for annotation in matched_result.annotations:
                 column, proposed = annotation.sdrf_column, annotation.sdrf_value
                 if not column or not proposed:
                     continue
