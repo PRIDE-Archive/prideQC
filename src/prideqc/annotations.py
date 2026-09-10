@@ -32,6 +32,13 @@ class TechnicalAnnotator:
                 sdrf_column=column,
                 sdrf_value=terms[0].sdrf_value() if len(terms) == 1 and column else None,
             ))
+        annotations.append(Annotation(
+            "instrument_details",
+            metadata.instrument_details or None,
+            OBSERVED if metadata.instrument_details else UNAVAILABLE,
+            "OpenMS ExperimentalSettings instrument fields",
+            "Plain instrument fields are preserved as observed metadata; no CV accession is inferred.",
+        ))
         annotations.append(Annotation("instrument_serial_numbers", metadata.serial_numbers or None,
                                       OBSERVED if metadata.serial_numbers else UNAVAILABLE,
                                       "mzML instrument serial number"))

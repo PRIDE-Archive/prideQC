@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import csv
 import multiprocessing
+import sys
 import time
 from collections.abc import Iterable
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -79,6 +80,7 @@ class WorkflowOptions:
     overwrite_sdrf_values: bool = False
     sdrf_template: str = "ms-proteomics"
     validate_ontology: bool = False
+    progress: bool = False
 
     def __post_init__(self) -> None:
         if self.workers < 1:
@@ -94,6 +96,28 @@ class FileOutcome:
     source: Path
     result: AnalysisResult | None = None
     error: str | None = None
+
+
+class _Progress:
+    """Dependency-free progress display updated as workers finish files."""
+
+    def __init__(self, total: int, enabled: bool) -> None:
+        self.total = total
+        self.done = 0
+        self.enabled = enabled
+
+    def update(self, outcome: FileOutcome) -> None:
+        if not self.enabled:
+            return
+        self.done += 1
+        status = "ok" if outcome.error is None else "failed"
+        sys.stderr.write(f"\rAnalyzing files: {self.done}/{self.total} ({status}: {outcome.source.name})")
+        sys.stderr.flush()
+
+    def close(self) -> None:
+        if self.enabled and self.done:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
 
 
 def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
@@ -219,11 +243,16 @@ class Workflow:
             write_json(output / "sdrf-validation.json", {"input": input_validation.to_dict()})
         tasks = [(source, output, self.options) for source in inputs]
         outcomes: list[FileOutcome] = []
+        progress = _Progress(len(inputs), self.options.progress)
         executor = None
         if self.options.workers > 1:
             executor = ProcessPoolExecutor(max_workers=self.options.workers,
                                            mp_context=multiprocessing.get_context("spawn"))
-            stream = executor.map(_analyze_file, tasks, chunksize=1)
+            # Submit individually so progress reflects completion order rather
+            # than waiting behind a slow first file in executor.map().
+            stream = (future.result() for future in as_completed(
+                [executor.submit(_analyze_file, task) for task in tasks],
+            ))
         else:
             stream = map(_analyze_file, tasks)
         try:
@@ -240,6 +269,7 @@ class Workflow:
                         for suffix in (".mzQC", ".obo", ".summary.json"):
                             Path(f"{prefix}{suffix}").unlink(missing_ok=True)
                 outcomes.append(outcome)
+                progress.update(outcome)
                 if outcome.error and not self.options.continue_on_error:
                     break
         except Exception as exc:
@@ -252,8 +282,14 @@ class Workflow:
                     ),
                 )
         finally:
+            progress.close()
             if executor:
                 executor.shutdown(wait=True, cancel_futures=True)
+        # Completion order drives progress, while reports remain deterministic
+        # and unprocessed inputs are calculated from the actual completed set.
+        positions = {path: index for index, path in enumerate(inputs)}
+        outcomes.sort(key=lambda outcome: positions[outcome.source])
+        processed = {outcome.source for outcome in outcomes}
         results = [outcome.result for outcome in outcomes if outcome.result is not None]
         manifest: dict[str, Any] = {
             "prideqc_version": __version__, "options": asdict(self.options),
@@ -261,7 +297,7 @@ class Workflow:
                        "error": o.error, "mzqc": f"{o.source.name}.mzQC" if o.result else None,
                        "elapsed_seconds": o.result.elapsed_seconds if o.result else None}
                       for o in outcomes],
-            "unprocessed": [str(p) for p in inputs[len(outcomes):]],
+            "unprocessed": [str(p) for p in inputs if p not in processed],
             "errors": [],
             "sdrf_validation": {"input": input_validation.to_dict()} if input_validation else None,
         }

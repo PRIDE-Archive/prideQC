@@ -1,6 +1,7 @@
 """Evidence, SDRF, serialization and orchestration contracts."""
 
 import importlib.util
+import io
 import json
 import math
 import subprocess
@@ -8,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from contextlib import redirect_stderr
 from unittest.mock import patch
 
 import numpy as np
@@ -243,6 +245,23 @@ class ReaderHeaderTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_progress_reports_completed_files_and_can_be_disabled(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "run.mzML"
+            source.touch()
+            result = analyze(name=str(source))
+            with patch("prideqc.pipeline._analyze_file", return_value=FileOutcome(source, result)):
+                stream = io.StringIO()
+                with redirect_stderr(stream):
+                    Workflow(WorkflowOptions(progress=True)).run([source], root / "progress")
+                self.assertIn("Analyzing files: 1/1", stream.getvalue())
+            with patch("prideqc.pipeline._analyze_file", return_value=FileOutcome(source, result)):
+                stream = io.StringIO()
+                with redirect_stderr(stream):
+                    Workflow(WorkflowOptions(progress=False)).run([source], root / "quiet")
+                self.assertEqual(stream.getvalue(), "")
+
     def test_partial_failure_writes_manifest_and_successful_mzqc(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

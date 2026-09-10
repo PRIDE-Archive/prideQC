@@ -42,46 +42,12 @@ def vendor_format(path: Path) -> str | None:
     return None
 
 
-def _version_tuple(version: str) -> tuple[int, ...]:
-    numbers = []
-    for part in version.split("."):
-        digits = "".join(ch for ch in part if ch.isdigit())
-        if not digits:
-            break
-        numbers.append(int(digits))
-    return tuple(numbers)
-
-
-def _has_vendor_marker(oms: Any, format_name: str) -> bool:
-    """Find a FileHandler vendor enum without depending on one binding spelling."""
-    needles = ("THERMO", "RAW") if format_name == "Thermo RAW" else ("BRUKER", "TIMS", "TDF")
-    for owner in (oms, getattr(oms, "FileType", None), getattr(oms, "FileTypes", None)):
-        if owner is None:
-            continue
-        for name in dir(owner):
-            upper = name.upper()
-            if any(needle in upper for needle in needles):
-                return True
-    return False
-
-
-def _loader_for(oms: Any, format_name: str) -> tuple[Any, tuple[str, ...]] | None:
-    """Locate a native reader by capabilities, tolerating pyOpenMS API variants."""
+def _loader_for(oms: Any, format_name: str) -> Any | None:
+    """Return the concrete native reader class exposed by pyOpenMS."""
     class_name = "ThermoRawFile" if format_name == "Thermo RAW" else "BrukerTimsFile"
-    cls = getattr(oms, class_name, None)
-    method_names = ("load", "read", "loadExperiment", "load_experiment")
-    if cls is not None and any(callable(getattr(cls, name, None)) for name in method_names):
-        return cls, method_names
-
-    # Some builds expose the vendor readers only through FileHandler.  A
-    # generic FileHandler is present in older pyOpenMS versions too, so require
-    # either a vendor enum marker or the newer API version before selecting it.
-    handler = getattr(oms, "FileHandler", None)
-    version = str(getattr(oms, "__version__", ""))
-    if handler is not None and any(callable(getattr(handler, name, None)) for name in method_names):
-        if _has_vendor_marker(oms, format_name) or _version_tuple(version) >= (3, 6):
-            return handler, method_names
-    return None
+    if not hasattr(oms, class_name):
+        return None
+    return getattr(oms, class_name, None)
 
 
 def direct_vendor_support(oms: Any, path: Path) -> bool:
@@ -94,8 +60,10 @@ def _vendor_error(path: Path, version: str) -> VendorReaderUnavailable:
     format_name = vendor_format(path) or "vendor"
     return VendorReaderUnavailable(
         f"Direct reading of {format_name} input {path.name!r} is unavailable in pyOpenMS "
-        f"{version}. Newer pyOpenMS builds (likely >=3.6) add native vendor readers; "
-        "upgrade pyOpenMS or provide --converter thermorawfileparser/msconvert."
+        f"{version}. Direct reading requires a pyOpenMS build exposing "
+        "ThermoRawFile or BrukerTimsFile. Current development builds are available from "
+        "https://pypi.openms.de/simple/pyopenms/. Alternatively upgrade pyOpenMS or "
+        "provide --converter thermorawfileparser/msconvert."
     )
 
 
@@ -188,6 +156,104 @@ def _meta_number(obj: Any, keys: tuple[str, ...]) -> float | None:
             if math.isfinite(value):
                 return value
     return None
+
+
+def _text_value(obj: Any, names: tuple[str, ...]) -> str | None:
+    """Read a string-valued OpenMS property when the binding exposes it."""
+    for name in names:
+        getter = getattr(obj, name, None)
+        if not callable(getter):
+            continue
+        try:
+            value = getter()
+        except (AttributeError, TypeError, RuntimeError):
+            continue
+        if isinstance(value, bytes):
+            value = value.decode(errors="replace")
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _metadata_from_experiment(experiment: Any, source: Path) -> RunMetadata:
+    """Copy metadata exposed by MSExperiment without guessing CV accessions."""
+    metadata = RunMetadata(source_files=[source.name])
+    settings_getter = getattr(experiment, "getExperimentalSettings", None)
+    settings = settings_getter() if callable(settings_getter) else experiment
+
+    source_getter = getattr(settings, "getSourceFiles", None)
+    if callable(source_getter):
+        try:
+            for source_file in source_getter():
+                name = _text_value(source_file, ("getNameOfFile", "getName", "getPathToFile"))
+                if name:
+                    metadata.source_files.append(name)
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+
+    date_getter = getattr(settings, "getDateTime", None)
+    if callable(date_getter):
+        try:
+            value = date_getter()
+            if value:
+                metadata.started_at = str(value)
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+
+    instrument = None
+    instrument_getter = getattr(settings, "getInstrument", None)
+    if callable(instrument_getter):
+        try:
+            instrument = instrument_getter()
+        except (AttributeError, TypeError, RuntimeError):
+            instrument = None
+        if instrument is not None:
+            for key, names in (
+                ("name", ("getName",)),
+                ("vendor", ("getVendor",)),
+                ("model", ("getModel",)),
+                ("software", ("getSoftware",)),
+            ):
+                value = _text_value(instrument, names)
+                if value:
+                    metadata.instrument_details[key] = value
+            serial = _text_value(instrument, ("getSerialNumber",))
+            if serial is None:
+                exists = getattr(instrument, "metaValueExists", None)
+                getter = getattr(instrument, "getMetaValue", None)
+                if callable(exists) and callable(getter):
+                    for key in ("MS:1000529", "serial number"):
+                        try:
+                            if exists(key):
+                                serial = str(getter(key))
+                                break
+                        except (AttributeError, TypeError, RuntimeError):
+                            continue
+            if serial:
+                metadata.serial_numbers.append(serial)
+
+    for key, getter_names in (
+        ("analyzers", ("getMassAnalyzers",)),
+        ("ionization", ("getIonSources",)),
+    ):
+        getter = getattr(instrument if instrument is not None else settings, getter_names[0], None)
+        if not callable(getter):
+            continue
+        try:
+            values = getter()
+        except (AttributeError, TypeError, RuntimeError):
+            continue
+        target = getattr(metadata, key)
+        for value in values:
+            accession = _text_value(value, ("getAccession", "accession"))
+            name = _text_value(value, ("getName", "name"))
+            if accession and name and accession.startswith(("MS:", "UO:", "PRIDE:")):
+                target.append(CVTerm(accession, name))
+
+    for key in ("instruments", "analyzers", "ionization", "serial_numbers", "source_files"):
+        setattr(metadata, key, list(dict.fromkeys(getattr(metadata, key))))
+    return metadata
 
 
 class _Consumer:
@@ -323,60 +389,13 @@ class PyOpenMSReader:
         )
         return metadata
 
-    def _new_experiment(self) -> Any:
-        experiment_type = getattr(self._oms, "MSExperiment", None)
-        if experiment_type is None:
-            raise RuntimeError("Installed pyOpenMS does not expose MSExperiment for vendor input.")
-        return experiment_type()
-
-    @staticmethod
-    def _experiment_like(value: Any) -> bool:
-        return value is not None and (
-            callable(getattr(value, "getSpectra", None))
-            or callable(getattr(value, "get_spectra", None))
-            or callable(getattr(value, "getNrSpectra", None))
-        )
-
-    def _invoke_loader(self, cls: Any, method_names: tuple[str, ...], path: Path) -> Any:
-        """Invoke the first compatible binding spelling and return its experiment."""
-        try:
-            instance = cls()
-        except TypeError:
-            instance = cls(str(path))
-        if self._experiment_like(instance):
-            return instance
-        experiment = self._new_experiment()
-        for method_name in method_names:
-            method = getattr(instance, method_name, None)
-            if not callable(method):
-                continue
-            for args in ((str(path), experiment), (path, experiment), (str(path),), (path,)):
-                try:
-                    returned = method(*args)
-                except TypeError:
-                    continue
-                if isinstance(returned, (tuple, list)):
-                    returned = next(
-                        (item for item in returned if self._experiment_like(item)),
-                        returned,
-                    )
-                if self._experiment_like(returned):
-                    return returned
-                if self._experiment_like(experiment):
-                    return experiment
-                # A successful loader may expose spectra through iteration only.
-                if returned is not None and hasattr(returned, "__iter__"):
-                    return returned
-                return experiment
-        for name in ("getExperiment", "get_experiment", "getMSExperiment", "get_ms_experiment"):
-            getter = getattr(instance, name, None)
-            if callable(getter):
-                returned = getter()
-                if self._experiment_like(returned):
-                    return returned
-        raise VendorReaderUnavailable(
-            f"pyOpenMS {self.engine_version} exposes a vendor reader but no supported load method."
-        )
+    def _load_vendor(self, path: Path, format_name: str) -> Any:
+        """Use the public pyOpenMS vendor APIs without signature guessing."""
+        if format_name == "Thermo RAW":
+            experiment = self._oms.MSExperiment()
+            self._oms.ThermoRawFile().load(str(path), experiment)
+            return experiment
+        return self._oms.BrukerTimsFile().load(str(path))
 
     def _consume_experiment(self, experiment: Any, sink: SpectrumSink) -> None:
         consumer = _Consumer(sink, self._oms, self.estimate_peak_type)
@@ -421,29 +440,21 @@ class PyOpenMSReader:
     def _read_vendor(self, path: Path, sink: SpectrumSink) -> RunMetadata:
         format_name = vendor_format(path)
         assert format_name is not None
-        candidate = _loader_for(self._oms, format_name)
-        if candidate is None:
+        if _loader_for(self._oms, format_name) is None:
             raise self.unavailable_error(path)
-        cls, methods = candidate
         temporary = None
         try:
             if format_name == "Bruker TDF (.d)" and path.name.casefold().endswith(".d.zip"):
-                try:
-                    experiment = self._invoke_loader(cls, methods, path)
-                except (OSError, RuntimeError, ValueError, TypeError):
-                    # pyOpenMS readers generally accept a directory, not the archive.
-                    temporary, extracted = self._extract_d_archive(path)
-                    experiment = self._invoke_loader(cls, methods, extracted)
+                temporary, extracted = self._extract_d_archive(path)
+                experiment = self._load_vendor(extracted, format_name)
             else:
-                experiment = self._invoke_loader(cls, methods, path)
+                experiment = self._load_vendor(path, format_name)
             # Consume before removing a temporary archive extraction: some
             # reader implementations expose lazy/on-disc experiment objects.
             self._consume_experiment(experiment, sink)
         finally:
             if temporary is not None:
                 temporary.cleanup()
-        # Vendor readers do not expose mzML's bounded XML header.  Preserve the
-        # original basename for SDRF matching; instrument CVs are only reported
-        # when the source format provides an accession, never guessed from a
-        # model string.
-        return RunMetadata(source_files=[path.name])
+        # Vendor readers do not expose mzML's bounded XML header. Preserve all
+        # metadata that the loaded experiment provides, without inventing CVs.
+        return _metadata_from_experiment(experiment, path)

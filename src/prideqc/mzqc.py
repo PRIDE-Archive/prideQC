@@ -216,6 +216,23 @@ LEVEL_DEFINITIONS = {
 }
 
 
+FILE_FORMATS = {
+    ".raw": ("MS:1000563", "Thermo RAW format"),
+    ".d": ("MS:1002817", "Bruker TDF format"),
+    ".d.zip": ("MS:1002817", "Bruker TDF format"),
+}
+
+
+def file_format(path: Path) -> dict[str, str]:
+    """Return the PSI-MS file-format term for an input or original source."""
+    name = path.name.casefold()
+    accession_name = next(
+        (value for suffix, value in FILE_FORMATS.items() if name.endswith(suffix)),
+        ("MS:1000584", "mzML format"),
+    )
+    return {"accession": accession_name[0], "name": accession_name[1]}
+
+
 def _local_accession(key: str) -> str:
     return "QCPRIDE:" + hashlib.sha256(key.encode()).hexdigest()[:20].upper()
 
@@ -269,9 +286,10 @@ class MzQCWriter:
         if result.source_path:
             properties.append({"accession": "QCPRIDE:SOURCEFILE", "name": "original vendor file",
                                "value": str(result.source_path)})
+        provenance_path = result.source_path or result.input_path
         input_file: dict[str, Any] = {
-            "name": result.input_path.name, "location": result.input_path.resolve().as_uri(),
-            "fileFormat": {"accession": "MS:1000584", "name": "mzML format"},
+            "name": provenance_path.name, "location": provenance_path.resolve().as_uri(),
+            "fileFormat": file_format(provenance_path),
         }
         if properties:
             input_file["fileProperties"] = properties
