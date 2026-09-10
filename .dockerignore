@@ -1,0 +1,27 @@
+.git
+.gitignore
+/.venv
+/__pycache__
+/.pytest_cache
+/.mypy_cache
+/.ruff_cache
+/build
+/dist
+/htmlcov
+/.coverage
+
+# Large/generated scientific artifacts should not enter the build context.
+# Keep these root-scoped so packaged resources such as src/prideqc/data and
+# tests/data remain available to the build and test stages.
+/data
+/datasets
+/models
+/results
+/persistent_cache
+/logs
+/downloads
+
+# Converted HPC images are deployment artifacts, not Docker build inputs.
+containers/*.sif
+containers/*.sif.sha256
+containers/*.sif.meta.txt

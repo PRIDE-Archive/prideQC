@@ -1,0 +1,4 @@
+*.sif
+*.sif.sha256
+*.sif.meta.txt
+*.docker.tar
