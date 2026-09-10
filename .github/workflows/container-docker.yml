@@ -1,0 +1,194 @@
+name: Container - Docker
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/container-docker.yml'
+      - 'containers/**'
+      - 'src/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+concurrency:
+  group: container-docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_METADATA_SHORT_SHA_LENGTH: '12'
+
+jobs:
+  docker:
+    name: Build and publish linux/amd64
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Require a clean checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
+            git status --short
+            echo "GitHub Actions checkout is unexpectedly dirty" >&2
+            exit 2
+          fi
+
+      - name: Compute image and build provenance
+        id: buildinfo
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          project_version="$(awk -F '"' '/^version = "/ {print $2; exit}' pyproject.toml)"
+          python_lock_hash="$(sha256sum uv.lock | awk '{print $1}')"
+          pyopenms_pin_hash="$(sha256sum containers/pyopenms.requirements.txt | awk '{print $1}')"
+
+          if [[ -f Cargo.toml ]]; then
+            test -f Cargo.lock
+            cargo_lock_hash="$(sha256sum Cargo.lock | awk '{print $1}')"
+          else
+            cargo_lock_hash="not-present"
+          fi
+
+          source_fingerprint="$(git ls-files -co --exclude-standard -z \
+            | LC_ALL=C sort -z \
+            | xargs -0 sha256sum \
+            | sha256sum \
+            | awk '{print $1}')"
+
+          build_id="${image}:sha-${GITHUB_SHA}@${GITHUB_SHA:0:12}-${source_fingerprint:0:12}"
+
+          {
+            echo "image=${image}"
+            echo "project_version=${project_version}"
+            echo "python_lock_hash=${python_lock_hash}"
+            echo "pyopenms_pin_hash=${pyopenms_pin_hash}"
+            echo "cargo_lock_hash=${cargo_lock_hash}"
+            echo "source_fingerprint=${source_fingerprint}"
+            echo "build_id=${build_id}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate Docker tags and OCI labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.buildinfo.outputs.image }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+          labels: |
+            org.opencontainers.image.title=prideQC
+            org.opencontainers.image.description=PRIDE-scale mass-spectrometry QC with pinned pyOpenMS vendor readers
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build quality gate
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: containers/Dockerfile
+          target: quality
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=prideqc-container
+          cache-to: type=gha,mode=max,scope=prideqc-container
+
+      - name: Build and publish runtime image
+        id: docker
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: containers/Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          build-args: |
+            PROJECT_VERSION=${{ steps.buildinfo.outputs.project_version }}
+            VCS_REF=${{ github.sha }}
+            SOURCE_STATE=clean
+            SOURCE_FINGERPRINT=${{ steps.buildinfo.outputs.source_fingerprint }}
+            PYTHON_LOCK_HASH=${{ steps.buildinfo.outputs.python_lock_hash }}
+            CARGO_LOCK_HASH=${{ steps.buildinfo.outputs.cargo_lock_hash }}
+            BUILD_ID=${{ steps.buildinfo.outputs.build_id }}
+            PYOPENMS_PIN_HASH=${{ steps.buildinfo.outputs.pyopenms_pin_hash }}
+          cache-from: type=gha,scope=prideqc-container
+          cache-to: type=gha,mode=max,scope=prideqc-container
+          provenance: mode=max
+          sbom: true
+
+      - name: Verify published immutable tag
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          immutable="${{ steps.buildinfo.outputs.image }}:sha-${GITHUB_SHA}"
+          docker buildx imagetools inspect "$immutable"
+          echo "Published Docker image: $immutable"
+          echo "Buildx digest: ${{ steps.docker.outputs.digest }}"
+
+      - name: Write Docker build record
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > docker-build-record.txt <<EOF2
+          image=${{ steps.buildinfo.outputs.image }}
+          immutable_tag=sha-${GITHUB_SHA}
+          digest=${{ steps.docker.outputs.digest }}
+          git_sha=${GITHUB_SHA}
+          project_version=${{ steps.buildinfo.outputs.project_version }}
+          source_fingerprint_sha256=${{ steps.buildinfo.outputs.source_fingerprint }}
+          python_lock_sha256=${{ steps.buildinfo.outputs.python_lock_hash }}
+          cargo_lock_sha256=${{ steps.buildinfo.outputs.cargo_lock_hash }}
+          pyopenms_pin_sha256=${{ steps.buildinfo.outputs.pyopenms_pin_hash }}
+          platform=linux/amd64
+          EOF2
+
+      - name: Upload Docker build record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-build-record-${{ github.sha }}
+          path: docker-build-record.txt
+          if-no-files-found: error
+          retention-days: 30
