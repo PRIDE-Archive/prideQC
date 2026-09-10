@@ -311,8 +311,8 @@ class MzQCWriter:
                 if not term.accession.startswith("QCPRIDE:"):
                     continue
                 parent = {"scalar": "MS:4000003", "tuple": "MS:4000004", "table": "MS:4000005"}[term.shape]
+                description = json.dumps(term.description)
                 handle.write(
-                    f"\n[Term]\nid: {term.accession}\nname: {term.name}\ndef: {json.dumps(
-                        term.description,
-                    )} [QCPRIDE:SOFTWARE]\nis_a: {parent}\n",
+                    f"\n[Term]\nid: {term.accession}\nname: {term.name}\ndef: {description} "
+                    f"[QCPRIDE:SOFTWARE]\nis_a: {parent}\n",
                 )
