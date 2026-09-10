@@ -19,8 +19,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 MISSING = {"", "not available", "not provided", "not applicable"}
 
@@ -314,4 +314,4 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except (OSError, RuntimeError, ValueError, csv.Error) as exc:
         print(f"prepare_prideqc_file_manifest: {exc}", file=sys.stderr)
-        raise SystemExit(2)
+        raise SystemExit(2) from exc
