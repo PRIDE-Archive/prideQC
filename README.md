@@ -88,7 +88,13 @@ memory and can saturate storage; select it using representative benchmarks.
 Native analysis supports indexed or non-indexed `.mzML` and `.mzML.gz`.
 Gzip input is expanded to a temporary disk file and cleaned up after analysis.
 
-Vendor RAW formats require an external converter installed separately:
+Thermo `.raw` and Bruker `.d` inputs are read directly when the installed
+pyOpenMS build exposes its native `ThermoRawFile` or `BrukerTimsFile` reader
+(or equivalent `FileHandler` support). Capability detection, rather than only
+the version string, also works with nightly/development builds. Bruker
+`.d.zip` files are extracted to a temporary directory when the native reader
+accepts only a directory; the extraction is removed after analysis. Older
+builds fall back to an explicitly selected external converter:
 
 ```bash
 uv run prideqc analyze run.raw \
@@ -98,12 +104,18 @@ uv run prideqc analyze run.d \
   --converter msconvert -o results/bruker
 ```
 
+If no native reader is available and no converter is selected, prideqc reports
+the installed pyOpenMS version and suggests upgrading to a newer build (likely
+pyOpenMS >=3.6) or installing ThermoRawFileParser/msconvert. The dependency
+constraint remains `pyopenms>=3.5,<4` so environments can choose a stable or
+development build; no converter is installed as a Python dependency.
+
 `--converter-executable /path/to/program` selects a specific executable.
 Use a wrapper executable for a converter that requires Mono or a launcher;
 this argument is not a shell command. Conversion has a timeout, logs its output,
 and must produce exactly one nonempty mzML. Converted data are retained under
-`converted/` so input provenance remains resolvable. Vendor support depends on
-the converter and platform, not pyOpenMS. No centroiding filter is added by
+`converted/` so input provenance remains resolvable. External conversion still
+depends on the converter and platform. No centroiding filter is added by
 prideqc; converter defaults still apply. Directory input and sidecar files
 must be provided as the converter requires.
 

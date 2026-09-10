@@ -1,4 +1,4 @@
-"""pyOpenMS streaming adapter and a bounded mzML header reader."""
+"""pyOpenMS adapters for mzML and optional native vendor readers."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
+from zipfile import ZipFile
 
 import numpy as np
 
@@ -25,6 +26,77 @@ ACTIVATION = {
     "ETHCD": CVTerm("MS:1002631", "electron-transfer/higher-energy collision dissociation"),
     "ETCID": CVTerm("MS:1002632", "electron-transfer/collision-induced dissociation"),
 }
+
+
+class VendorReaderUnavailable(RuntimeError):
+    """Raised when the installed pyOpenMS build has no native vendor reader."""
+
+
+def vendor_format(path: Path) -> str | None:
+    """Return the supported vendor format represented by *path*, if any."""
+    name = path.name.casefold()
+    if name.endswith(".raw"):
+        return "Thermo RAW"
+    if name.endswith(".d.zip") or name.endswith(".d"):
+        return "Bruker TDF (.d)"
+    return None
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    numbers = []
+    for part in version.split("."):
+        digits = "".join(ch for ch in part if ch.isdigit())
+        if not digits:
+            break
+        numbers.append(int(digits))
+    return tuple(numbers)
+
+
+def _has_vendor_marker(oms: Any, format_name: str) -> bool:
+    """Find a FileHandler vendor enum without depending on one binding spelling."""
+    needles = ("THERMO", "RAW") if format_name == "Thermo RAW" else ("BRUKER", "TIMS", "TDF")
+    for owner in (oms, getattr(oms, "FileType", None), getattr(oms, "FileTypes", None)):
+        if owner is None:
+            continue
+        for name in dir(owner):
+            upper = name.upper()
+            if any(needle in upper for needle in needles):
+                return True
+    return False
+
+
+def _loader_for(oms: Any, format_name: str) -> tuple[Any, tuple[str, ...]] | None:
+    """Locate a native reader by capabilities, tolerating pyOpenMS API variants."""
+    class_name = "ThermoRawFile" if format_name == "Thermo RAW" else "BrukerTimsFile"
+    cls = getattr(oms, class_name, None)
+    method_names = ("load", "read", "loadExperiment", "load_experiment")
+    if cls is not None and any(callable(getattr(cls, name, None)) for name in method_names):
+        return cls, method_names
+
+    # Some builds expose the vendor readers only through FileHandler.  A
+    # generic FileHandler is present in older pyOpenMS versions too, so require
+    # either a vendor enum marker or the newer API version before selecting it.
+    handler = getattr(oms, "FileHandler", None)
+    version = str(getattr(oms, "__version__", ""))
+    if handler is not None and any(callable(getattr(handler, name, None)) for name in method_names):
+        if _has_vendor_marker(oms, format_name) or _version_tuple(version) >= (3, 6):
+            return handler, method_names
+    return None
+
+
+def direct_vendor_support(oms: Any, path: Path) -> bool:
+    """Feature-detect whether *oms* can directly read this vendor path."""
+    format_name = vendor_format(path)
+    return format_name is not None and _loader_for(oms, format_name) is not None
+
+
+def _vendor_error(path: Path, version: str) -> VendorReaderUnavailable:
+    format_name = vendor_format(path) or "vendor"
+    return VendorReaderUnavailable(
+        f"Direct reading of {format_name} input {path.name!r} is unavailable in pyOpenMS "
+        f"{version}. Newer pyOpenMS builds (likely >=3.6) add native vendor readers; "
+        "upgrade pyOpenMS or provide --converter thermorawfileparser/msconvert."
+    )
 
 
 def _tag(element: ET.Element) -> str:
@@ -200,33 +272,48 @@ class _Consumer:
 
 
 class PyOpenMSReader:
-    """Read indexed and non-indexed mzML without holding MSExperiment in memory."""
+    """Read mzML and, when available, Thermo/Bruker vendor files."""
 
-    def __init__(self, *, estimate_peak_type: bool = False) -> None:
-        try:
-            import pyopenms
-        except ImportError as exc:
-            raise RuntimeError("pyOpenMS is required for mzML input; run `uv sync` first.") from exc
+    def __init__(self, *, estimate_peak_type: bool = False, oms: Any | None = None) -> None:
+        if oms is None:
+            try:
+                import pyopenms
+            except ImportError as exc:
+                raise RuntimeError("pyOpenMS is required for mzML input; run `uv sync` first.") from exc
+            oms = pyopenms
         # pyOpenMS exposes a dynamic binding surface without complete typing
         # stubs (notably MzMLFile.transform and __version__). Keep the native
         # boundary typed as Any while the rest of the reader remains checked.
-        self._oms: Any = pyopenms
-        self.engine_version = str(getattr(pyopenms, "__version__", "unknown"))
+        self._oms: Any = oms
+        self.engine_version = str(getattr(oms, "__version__", "unknown"))
         self.estimate_peak_type = estimate_peak_type
+
+    def supports_direct(self, path: Path) -> bool:
+        """Return whether a native reader is exposed for this vendor path."""
+        return direct_vendor_support(self._oms, path)
+
+    def unavailable_error(self, path: Path) -> VendorReaderUnavailable:
+        """Build the actionable fallback error for an unsupported vendor path."""
+        return _vendor_error(path, self.engine_version)
 
     def read(self, path: Path, sink: SpectrumSink) -> RunMetadata:
         path = path.resolve(strict=True)
-        name = path.name.lower()
-        if not name.endswith((".mzml", ".mzml.gz")):
+        name = path.name.casefold()
+        if name.endswith((".mzml", ".mzml.gz")):
+            if name.endswith(".gz"):
+                # Use disk, not RAM, for decompression; parser support is then identical.
+                with tempfile.TemporaryDirectory(prefix="prideqc-gzip-") as folder:
+                    expanded = Path(folder) / path.stem
+                    with gzip.open(path, "rb") as source, expanded.open("wb") as destination:
+                        shutil.copyfileobj(source, destination, length=1024 * 1024)
+                    return self._read_mzml(expanded, sink)
+            return self._read_mzml(path, sink)
+
+        if vendor_format(path) is None:
             raise ValueError(f"Unsupported input {path.name!r}; convert vendor data to mzML first.")
-        if name.endswith(".gz"):
-            # Use disk, not RAM, for decompression; parser support is then identical.
-            with tempfile.TemporaryDirectory(prefix="prideqc-gzip-") as folder:
-                expanded = Path(folder) / path.stem
-                with gzip.open(path, "rb") as source, expanded.open("wb") as destination:
-                    shutil.copyfileobj(source, destination, length=1024 * 1024)
-                return self._read_mzml(expanded, sink)
-        return self._read_mzml(path, sink)
+        if not self.supports_direct(path):
+            raise self.unavailable_error(path)
+        return self._read_vendor(path, sink)
 
     def _read_mzml(self, path: Path, sink: SpectrumSink) -> RunMetadata:
         metadata = read_header(path)
@@ -235,3 +322,128 @@ class PyOpenMSReader:
             _Consumer(sink, self._oms, self.estimate_peak_type),
         )
         return metadata
+
+    def _new_experiment(self) -> Any:
+        experiment_type = getattr(self._oms, "MSExperiment", None)
+        if experiment_type is None:
+            raise RuntimeError("Installed pyOpenMS does not expose MSExperiment for vendor input.")
+        return experiment_type()
+
+    @staticmethod
+    def _experiment_like(value: Any) -> bool:
+        return value is not None and (
+            callable(getattr(value, "getSpectra", None))
+            or callable(getattr(value, "get_spectra", None))
+            or callable(getattr(value, "getNrSpectra", None))
+        )
+
+    def _invoke_loader(self, cls: Any, method_names: tuple[str, ...], path: Path) -> Any:
+        """Invoke the first compatible binding spelling and return its experiment."""
+        try:
+            instance = cls()
+        except TypeError:
+            instance = cls(str(path))
+        if self._experiment_like(instance):
+            return instance
+        experiment = self._new_experiment()
+        for method_name in method_names:
+            method = getattr(instance, method_name, None)
+            if not callable(method):
+                continue
+            for args in ((str(path), experiment), (path, experiment), (str(path),), (path,)):
+                try:
+                    returned = method(*args)
+                except TypeError:
+                    continue
+                if isinstance(returned, (tuple, list)):
+                    returned = next(
+                        (item for item in returned if self._experiment_like(item)),
+                        returned,
+                    )
+                if self._experiment_like(returned):
+                    return returned
+                if self._experiment_like(experiment):
+                    return experiment
+                # A successful loader may expose spectra through iteration only.
+                if returned is not None and hasattr(returned, "__iter__"):
+                    return returned
+                return experiment
+        for name in ("getExperiment", "get_experiment", "getMSExperiment", "get_ms_experiment"):
+            getter = getattr(instance, name, None)
+            if callable(getter):
+                returned = getter()
+                if self._experiment_like(returned):
+                    return returned
+        raise VendorReaderUnavailable(
+            f"pyOpenMS {self.engine_version} exposes a vendor reader but no supported load method."
+        )
+
+    def _consume_experiment(self, experiment: Any, sink: SpectrumSink) -> None:
+        consumer = _Consumer(sink, self._oms, self.estimate_peak_type)
+        spectra_getter = getattr(experiment, "getSpectra", None) or getattr(experiment, "get_spectra", None)
+        chromatograms_getter = getattr(experiment, "getChromatograms", None) or getattr(
+            experiment, "get_chromatograms", None
+        )
+        if callable(spectra_getter):
+            spectra = spectra_getter()
+        elif callable(getattr(experiment, "getNrSpectra", None)) and callable(
+            getattr(experiment, "getSpectrum", None),
+        ):
+            spectra = (experiment.getSpectrum(index) for index in range(experiment.getNrSpectra()))
+        else:
+            spectra = experiment
+        for spectrum in spectra:
+            consumer.consumeSpectrum(spectrum)
+        if callable(chromatograms_getter):
+            for chromatogram in chromatograms_getter():
+                consumer.consumeChromatogram(chromatogram)
+
+    @staticmethod
+    def _extract_d_archive(path: Path) -> tuple[Any, Path]:
+        temporary = tempfile.TemporaryDirectory(prefix="prideqc-bruker-")
+        root = Path(temporary.name)
+        try:
+            with ZipFile(path) as archive:
+                for member in archive.infolist():
+                    target = (root / member.filename).resolve()
+                    if not target.is_relative_to(root):
+                        raise ValueError("Bruker .d.zip contains an unsafe archive path.")
+                archive.extractall(root)
+            directories = [candidate for candidate in root.rglob("*")
+                           if candidate.is_dir() and candidate.name.casefold().endswith(".d")]
+            if len(directories) != 1:
+                raise ValueError("Bruker .d.zip must contain exactly one .d directory.")
+            return temporary, directories[0]
+        except Exception:
+            temporary.cleanup()
+            raise
+
+    def _read_vendor(self, path: Path, sink: SpectrumSink) -> RunMetadata:
+        format_name = vendor_format(path)
+        assert format_name is not None
+        candidate = _loader_for(self._oms, format_name)
+        if candidate is None:
+            raise self.unavailable_error(path)
+        cls, methods = candidate
+        temporary = None
+        try:
+            if format_name == "Bruker TDF (.d)" and path.name.casefold().endswith(".d.zip"):
+                try:
+                    experiment = self._invoke_loader(cls, methods, path)
+                except (OSError, RuntimeError, ValueError, TypeError):
+                    # pyOpenMS readers generally accept a directory, not the archive.
+                    temporary, extracted = self._extract_d_archive(path)
+                    experiment = self._invoke_loader(cls, methods, extracted)
+            else:
+                experiment = self._invoke_loader(cls, methods, path)
+            # Consume before removing a temporary archive extraction: some
+            # reader implementations expose lazy/on-disc experiment objects.
+            self._consume_experiment(experiment, sink)
+        finally:
+            if temporary is not None:
+                temporary.cleanup()
+        # Vendor readers do not expose mzML's bounded XML header.  Preserve the
+        # original basename for SDRF matching; instrument CVs are only reported
+        # when the source format provides an accession, never guessed from a
+        # model string.
+        return RunMetadata(source_files=[path.name])
