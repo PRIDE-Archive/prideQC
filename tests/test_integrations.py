@@ -23,7 +23,9 @@ def report(path, *issues):
 
 
 def write_download(**arguments):
-    (Path(arguments["output_folder"]) / arguments["file_name"]).write_bytes(b"test mzML bytes")
+    (Path(arguments["output_folder"]) / arguments["file_name"]).write_bytes(
+        b"test mzML bytes"
+    )
 
 
 class ValidatorTests(unittest.TestCase):
@@ -38,11 +40,18 @@ class ValidatorTests(unittest.TestCase):
 
     def test_native_parser_template_and_ontology_are_used(self):
         reader = MagicMock()
-        reader.return_value.validate_sdrf.return_value = [types.SimpleNamespace(message="missing instrument"), "bad value"]
+        reader.return_value.validate_sdrf.return_value = [
+            types.SimpleNamespace(message="missing instrument"),
+            "bad value",
+        ]
         with patch.dict("sys.modules", self.native_modules(reader)):
-            result = SDRFPipelinesValidator("dia-acquisition", ontology=True).validate(Path("study.tsv"))
+            result = SDRFPipelinesValidator("dia-acquisition", ontology=True).validate(
+                Path("study.tsv")
+            )
         reader.assert_called_once_with("study.tsv")
-        reader.return_value.validate_sdrf.assert_called_once_with(template="dia-acquisition", skip_ontology=False)
+        reader.return_value.validate_sdrf.assert_called_once_with(
+            template="dia-acquisition", skip_ontology=False
+        )
         self.assertEqual(result.issues, ("missing instrument", "bad value"))
         self.assertFalse(result.valid)
         self.assertEqual(result.to_dict()["engine"], "sdrf-pipelines")
@@ -53,7 +62,9 @@ class ValidatorTests(unittest.TestCase):
         with patch.dict("sys.modules", self.native_modules(reader)):
             result = SDRFPipelinesValidator().validate(Path("study.tsv"))
         self.assertTrue(result.valid)
-        reader.return_value.validate_sdrf.assert_called_once_with(template="ms-proteomics", skip_ontology=True)
+        reader.return_value.validate_sdrf.assert_called_once_with(
+            template="ms-proteomics", skip_ontology=True
+        )
 
     def test_missing_dependency_and_validator_failure_never_pass(self):
         with patch.dict("sys.modules", {"sdrf_pipelines.sdrf.sdrf": None}):
@@ -67,7 +78,10 @@ class ValidatorTests(unittest.TestCase):
     def test_cli_validation_findings_exit_nonzero_and_write_report(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "report.json"
-            with patch("prideqc.validation.SDRFPipelinesValidator.validate", return_value=report("in.tsv", "missing column")):
+            with patch(
+                "prideqc.validation.SDRFPipelinesValidator.validate",
+                return_value=report("in.tsv", "missing column"),
+            ):
                 with redirect_stderr(io.StringIO()):
                     code = main(["validate-sdrf", "in.tsv", "--json", str(path)])
             self.assertEqual(code, 1)
@@ -81,12 +95,23 @@ class ValidatorTests(unittest.TestCase):
             sdrf = root / "study.tsv"
             sdrf.write_text("comment[data file]\nrun.mzML\n")
             validator = MagicMock()
-            validator.validate.side_effect = [report(sdrf, "missing instrument"), report("refined.tsv", "missing source")]
-            with patch("prideqc.pipeline._analyze_file", return_value=FileOutcome(source, analyze(name=str(source)))):
-                result = Workflow(validator=validator).run([source], root / "qc", sdrf=sdrf)
+            validator.validate.side_effect = [
+                report(sdrf, "missing instrument"),
+                report("refined.tsv", "missing source"),
+            ]
+            with patch(
+                "prideqc.pipeline._analyze_file",
+                return_value=FileOutcome(source, analyze(name=str(source))),
+            ):
+                result = Workflow(validator=validator).run(
+                    [source], root / "qc", sdrf=sdrf
+                )
             self.assertFalse(result["success"])
             self.assertEqual(validator.validate.call_args_list[0].args, (sdrf,))
-            self.assertEqual(validator.validate.call_args_list[1].args, (root / "qc/refined.sdrf.tsv",))
+            self.assertEqual(
+                validator.validate.call_args_list[1].args,
+                (root / "qc/refined.sdrf.tsv",),
+            )
             self.assertTrue((root / "qc/run.mzML.mzQC").exists())
             data = json.loads((root / "qc/sdrf-validation.json").read_text())
             self.assertFalse(data["refined"]["valid"])
@@ -100,8 +125,13 @@ class ValidatorTests(unittest.TestCase):
             sdrf.write_text("comment[data file]\nrun.mzML\n")
             validator = MagicMock()
             validator.validate.side_effect = [report(sdrf, "missing instrument"), report("refined.tsv")]
-            with patch("prideqc.pipeline._analyze_file", return_value=FileOutcome(source, analyze(name=str(source)))):
-                result = Workflow(validator=validator).run([source], root / "qc", sdrf=sdrf)
+            with patch(
+                "prideqc.pipeline._analyze_file",
+                return_value=FileOutcome(source, analyze(name=str(source))),
+            ):
+                result = Workflow(validator=validator).run(
+                    [source], root / "qc", sdrf=sdrf
+                )
             self.assertTrue(result["success"])
             self.assertTrue((root / "qc/sdrf-changes.tsv").exists())
 
@@ -113,10 +143,15 @@ class ValidatorTests(unittest.TestCase):
             sdrf = root / "study.tsv"
             sdrf.write_text("comment[data file]\nrun.mzML\n")
             validator = MagicMock()
-            validator.validate.side_effect = [report(sdrf), RuntimeError("validator failed")]
+            validator.validate.side_effect = [
+                report(sdrf),
+                RuntimeError("validator failed"),
+            ]
             outcome = FileOutcome(source, analyze(name=str(source)))
             with patch("prideqc.pipeline._analyze_file", return_value=outcome):
-                result = Workflow(validator=validator).run([source], root / "qc", sdrf=sdrf)
+                result = Workflow(validator=validator).run(
+                    [source], root / "qc", sdrf=sdrf
+                )
             self.assertFalse(result["success"])
             self.assertTrue((root / "qc/sdrf-changes.tsv").exists())
             data = json.loads((root / "qc/sdrf-validation.json").read_text())
@@ -129,10 +164,14 @@ class PrideTests(unittest.TestCase):
         module.Client = MagicMock()
         repository = PrideRepository()
         module.Client.assert_not_called()
-        with patch.dict("sys.modules", {
-            "pridepy": types.ModuleType("pridepy"), "pridepy.download": types.ModuleType("pridepy.download"),
-            "pridepy.download.client": module,
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "pridepy": types.ModuleType("pridepy"),
+                "pridepy.download": types.ModuleType("pridepy.download"),
+                "pridepy.download.client": module,
+            },
+        ):
             self.assertIs(repository._get_client(), module.Client.return_value)
             self.assertIs(repository._get_client(), module.Client.return_value)
         module.Client.assert_called_once_with()
@@ -142,7 +181,9 @@ class PrideTests(unittest.TestCase):
         client.download_file_by_name.side_effect = write_download
         with tempfile.TemporaryDirectory() as folder:
             destination = Path(folder) / "downloads"
-            paths = PrideRepository(client).download_files("pxd008644", ["run.mzML", "run.mzML"], destination)
+            paths = PrideRepository(client).download_files(
+                "pxd008644", ["run.mzML", "run.mzML"], destination
+            )
             self.assertEqual(paths, [destination / "run.mzML"])
             args = client.download_file_by_name.call_args.kwargs
             self.assertEqual(args["accession"], "PXD008644")
@@ -159,8 +200,12 @@ class PrideTests(unittest.TestCase):
         client.download_file_by_name.side_effect = write_download
         with tempfile.TemporaryDirectory() as folder:
             PrideRepository(client).download_files(
-                "PXD008644", ["run.mzML"], folder,
-                options=DownloadOptions("globus", False, "50M"), username="private-user", password="secret-value",
+                "PXD008644",
+                ["run.mzML"],
+                folder,
+                options=DownloadOptions("globus", False, "50M"),
+                username="private-user",
+                password="secret-value",
             )
             args = client.download_file_by_name.call_args.kwargs
             self.assertEqual(args["protocol"], "globus")
@@ -173,6 +218,7 @@ class PrideTests(unittest.TestCase):
     def test_incomplete_download_is_removed_and_not_reported_as_success(self):
         for failure in ("empty", "missing", "exception", "reported"):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as folder:
+
                 def fail(*, _failure=failure, **arguments):
                     path = Path(arguments["output_folder"]) / arguments["file_name"]
                     if _failure == "empty":
@@ -183,13 +229,18 @@ class PrideTests(unittest.TestCase):
                     if _failure == "reported":
                         path.write_bytes(b"partial")
                         return False
+
                 client = MagicMock()
                 client.download_file_by_name.side_effect = fail
                 with self.assertRaises(RuntimeError) as raised:
-                    PrideRepository(client).download_files("PXD008644", ["a.mzML", "b.mzML"], folder)
+                    PrideRepository(client).download_files(
+                        "PXD008644", ["a.mzML", "b.mzML"], folder
+                    )
                 self.assertNotIn("secret", str(raised.exception))
                 self.assertFalse((Path(folder) / "a.mzML").exists())
-                receipt = json.loads((Path(folder) / "download-manifest.json").read_text())
+                receipt = json.loads(
+                    (Path(folder) / "download-manifest.json").read_text()
+                )
                 self.assertFalse(receipt["success"])
                 self.assertEqual(receipt["unprocessed"], ["b.mzML"])
                 self.assertEqual(len(list(Path(folder).iterdir())), 1)
@@ -199,8 +250,16 @@ class PrideTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / "old.mzML").touch()
             with self.assertRaises(FileExistsError):
-                PrideRepository(client).download_files("PXD008644", ["a.mzML"], folder)
-        for names in (["../escape.raw"], ["a.raw", "A.raw"], ["not available"], ["download-manifest.json"], []):
+                PrideRepository(client).download_files(
+                    "PXD008644", ["a.mzML"], folder
+                )
+        for names in (
+            ["../escape.raw"],
+            ["a.raw", "A.raw"],
+            ["not available"],
+            ["download-manifest.json"],
+            [],
+        ):
             with self.subTest(names=names), self.assertRaises(ValueError):
                 selected_files(names)
         client.download_file_by_name.assert_not_called()
@@ -215,35 +274,93 @@ class PrideTests(unittest.TestCase):
             sdrf = root / "study.tsv"
             sdrf.write_text("comment[data file]\nrun.mzML\nrun.mzML\n")
             source = root / "downloads/run.mzML"
-            with patch("prideqc.pipeline._analyze_file", return_value=FileOutcome(source, analyze(name=str(source)))):
+            with patch(
+                "prideqc.pipeline._analyze_file",
+                return_value=FileOutcome(source, analyze(name=str(source))),
+            ):
                 manifest = Workflow(validator=validator).run_project(
-                    "PXD008644", root / "qc", download_directory=root / "downloads", sdrf=sdrf,
+                    "PXD008644",
+                    root / "qc",
+                    download_directory=root / "downloads",
+                    sdrf=sdrf,
                     repository=PrideRepository(client),
                 )
             self.assertTrue(manifest["success"])
             self.assertEqual(client.download_file_by_name.call_count, 1)
             self.assertEqual(manifest["acquisition"]["accession"], "PXD008644")
             self.assertTrue((root / "qc/run.mzML.mzQC").exists())
-            self.assertIn("Orbitrap Fusion", (root / "qc/refined.sdrf.tsv").read_text())
+            self.assertIn(
+                "Orbitrap Fusion", (root / "qc/refined.sdrf.tsv").read_text()
+            )
 
-    def test_project_preflight_rejects_nested_outputs_and_vendor_data_without_converter(self):
+    def test_project_preflight_rejects_nested_outputs_and_unsupported_vendor_data_without_converter(self):
         repository = MagicMock()
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             with self.assertRaisesRegex(ValueError, "non-nested"):
-                Workflow().run_project("PXD008644", root, download_directory=root / "downloads", filenames=["a.mzML"], repository=repository)
-            with self.assertRaisesRegex(ValueError, "converter"):
-                Workflow().run_project("PXD008644", root / "qc", download_directory=root / "downloads", filenames=["a.raw"], repository=repository)
+                Workflow().run_project(
+                    "PXD008644",
+                    root,
+                    download_directory=root / "downloads",
+                    filenames=["a.mzML"],
+                    repository=repository,
+                )
+            # Native vendor support is intentionally environment-dependent.
+            # Force the unsupported-reader branch so this test remains valid
+            # with the pyOpenMS 3.6 development build used by the container.
+            with patch("prideqc.readers.PyOpenMSReader") as reader_type:
+                reader_type.return_value.supports_direct.return_value = False
+                with self.assertRaisesRegex(ValueError, "converter"):
+                    Workflow().run_project(
+                        "PXD008644",
+                        root / "qc",
+                        download_directory=root / "downloads",
+                        filenames=["a.raw"],
+                        repository=repository,
+                    )
         repository.download_files.assert_not_called()
 
     def test_cli_fetch_and_remote_analysis_dispatch(self):
-        with patch("prideqc.pride.PrideRepository.download_files", return_value=[Path("downloads/a.mzML")]) as download:
+        with patch(
+            "prideqc.pride.PrideRepository.download_files",
+            return_value=[Path("downloads/a.mzML")],
+        ) as download:
             with redirect_stdout(io.StringIO()):
-                self.assertEqual(main(["fetch", "PXD008644", "--file", "a.mzML", "-o", "downloads"]), 0)
+                self.assertEqual(
+                    main(
+                        [
+                            "fetch",
+                            "PXD008644",
+                            "--file",
+                            "a.mzML",
+                            "-o",
+                            "downloads",
+                        ]
+                    ),
+                    0,
+                )
             self.assertEqual(download.call_args.args[:2], ("PXD008644", ["a.mzML"]))
-        with patch("prideqc.pipeline.Workflow.run_project", return_value={"files": [], "errors": [], "success": True}) as run:
+        with patch(
+            "prideqc.pipeline.Workflow.run_project",
+            return_value={"files": [], "errors": [], "success": True},
+        ) as run:
             with redirect_stdout(io.StringIO()):
-                self.assertEqual(main(["analyze", "--accession", "PXD008644", "--file", "a.mzML", "--download-dir", "downloads", "-o", "qc"]), 0)
+                self.assertEqual(
+                    main(
+                        [
+                            "analyze",
+                            "--accession",
+                            "PXD008644",
+                            "--file",
+                            "a.mzML",
+                            "--download-dir",
+                            "downloads",
+                            "-o",
+                            "qc",
+                        ]
+                    ),
+                    0,
+                )
             self.assertEqual(run.call_args.kwargs["filenames"], ["a.mzML"])
 
 
@@ -251,19 +368,31 @@ class InstalledDependencyTests(unittest.TestCase):
     def test_ci_requires_maintained_dependencies(self):
         if os.environ.get("PRIDE_QC_REQUIRE_INTEGRATION") == "1":
             for module in ("pridepy", "sdrf_pipelines"):
-                self.assertIsNotNone(importlib.util.find_spec(module), f"Required CI dependency missing: {module}")
+                self.assertIsNotNone(
+                    importlib.util.find_spec(module),
+                    f"Required CI dependency missing: {module}",
+                )
 
-    @unittest.skipUnless(importlib.util.find_spec("sdrf_pipelines"), "sdrf-pipelines not installed")
+    @unittest.skipUnless(
+        importlib.util.find_spec("sdrf_pipelines"), "sdrf-pipelines not installed"
+    )
     def test_installed_validator_returns_upstream_findings(self):
         from sdrf_pipelines.sdrf.sdrf import read_sdrf
 
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "invalid.sdrf.tsv"
             path.write_text("source name\tcomment[data file]\nsample\trun.mzML\n")
-            expected = read_sdrf(str(path)).validate_sdrf(template="ms-proteomics", skip_ontology=True)
+            expected = read_sdrf(str(path)).validate_sdrf(
+                template="ms-proteomics", skip_ontology=True
+            )
             actual = SDRFPipelinesValidator().validate(path)
-            self.assertTrue(expected, "Deliberately incomplete SDRF must have validation findings")
-            self.assertEqual(actual.issues, tuple(str(getattr(item, "message", item)) for item in expected))
+            self.assertTrue(
+                expected, "Deliberately incomplete SDRF must have validation findings"
+            )
+            self.assertEqual(
+                actual.issues,
+                tuple(str(getattr(item, "message", item)) for item in expected),
+            )
             self.assertFalse(actual.valid)
 
     @unittest.skipUnless(importlib.util.find_spec("pridepy"), "pridepy not installed")
@@ -274,5 +403,7 @@ class InstalledDependencyTests(unittest.TestCase):
         client = create_autospec(Client, instance=True)
         client.download_file_by_name.side_effect = write_download
         with tempfile.TemporaryDirectory() as folder:
-            paths = PrideRepository(client).download_files("PXD008644", ["run.mzML"], folder)
+            paths = PrideRepository(client).download_files(
+                "PXD008644", ["run.mzML"], folder
+            )
             self.assertEqual(len(paths), 1)
