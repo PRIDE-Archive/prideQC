@@ -106,18 +106,35 @@ class _Progress:
         self.done = 0
         self.enabled = enabled
 
+    def start(self) -> None:
+        if not self.enabled:
+            return
+        self._write(self._line("starting", ""))
+
+    def _line(self, status: str, filename: str) -> str:
+        width = 20
+        filled = round(width * self.done / self.total) if self.total else width
+        bar = "#" * filled + "-" * (width - filled)
+        suffix = f" ({status}: {filename})" if filename else ""
+        return f"Analyzing files: {self.done}/{self.total} [{bar}]{suffix}"
+
+    def _write(self, line: str) -> None:
+        # A newline per event is deliberate: carriage-return repainting is
+        # commonly hidden or interleaved by CI/log collectors and native
+        # OpenMS messages.  Flushing makes each completed file visible while
+        # the remaining files are still being decoded.
+        sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+
     def update(self, outcome: FileOutcome) -> None:
         if not self.enabled:
             return
         self.done += 1
         status = "ok" if outcome.error is None else "failed"
-        sys.stderr.write(f"\rAnalyzing files: {self.done}/{self.total} ({status}: {outcome.source.name})")
-        sys.stderr.flush()
+        self._write(self._line(status, outcome.source.name))
 
     def close(self) -> None:
-        if self.enabled and self.done:
-            sys.stderr.write("\n")
-            sys.stderr.flush()
+        return
 
 
 def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
@@ -244,6 +261,7 @@ class Workflow:
         tasks = [(source, output, self.options) for source in inputs]
         outcomes: list[FileOutcome] = []
         progress = _Progress(len(inputs), self.options.progress)
+        progress.start()
         executor = None
         if self.options.workers > 1:
             executor = ProcessPoolExecutor(max_workers=self.options.workers,
