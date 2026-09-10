@@ -36,6 +36,9 @@ The destination must be new or empty. Each successful input receives its own
 `annotations.tsv`, and `manifest.json`. Supplying an SDRF also produces
 `refined.sdrf.tsv`, `sdrf-changes.tsv` and `sdrf-validation.json`. Keep each mzQC with its companion OBO.
 Output filenames retain the entire input basename, e.g. `sample.mzML.mzQC`.
+Use `--overwrite` when intentionally rerunning into an existing results
+directory; it clears that directory's contents before analysis. Without this
+flag, prideqc refuses to touch a non-empty destination.
 
 The implementation was developed in an environment that blocks PyPI, so it
 does **not** include a fabricated or stale `uv.lock`. On the first networked
@@ -86,9 +89,10 @@ processes, with small final summaries returned to the parent. CLI defaults
 OpenMP/BLAS threads to one unless already configured. Worker count multiplies
 memory and can saturate storage; select it using representative benchmarks.
 For independent local files, `--workers 3` (or the number of files, bounded by
-available CPU/RAM and storage bandwidth) analyzes them concurrently. A
-dependency-free progress indicator reports each completed file; use
-`--no-progress` in non-interactive logs.
+available CPU/RAM and storage bandwidth) analyzes them concurrently. The
+dependency-free progress indicator prints an initial line and one flushed line
+per completed/failed file; fail-fast runs also report files that were not
+processed. Use `--no-progress` in non-interactive logs.
 
 ## Input formats and vendor RAW
 

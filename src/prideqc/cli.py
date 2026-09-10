@@ -58,7 +58,7 @@ def parser() -> argparse.ArgumentParser:
         "--output-dir",
         required=True,
         type=Path,
-        help="New or empty output directory",
+        help="Output directory (must be empty unless --overwrite is given)",
     )
     analyze.add_argument("--sdrf", type=Path)
     analyze.add_argument("--accession", help="Download selected PRIDE files before analysis")
@@ -104,6 +104,11 @@ def parser() -> argparse.ArgumentParser:
         "--continue-on-error",
         action="store_true",
         help="Process remaining local inputs after analysis failure; exit code still nonzero",
+    )
+    analyze.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Clear an existing output directory before writing results",
     )
     analyze.add_argument(
         "--no-progress",
@@ -189,7 +194,7 @@ def _analyze(arguments: argparse.Namespace) -> int:
         conversion_timeout=arguments.conversion_timeout, continue_on_error=arguments.continue_on_error,
         include_inferred=arguments.include_inferred, overwrite_sdrf_values=arguments.overwrite_sdrf_values,
         sdrf_template=arguments.sdrf_template, validate_ontology=arguments.validate_ontology,
-        progress=arguments.progress,
+        progress=arguments.progress, overwrite=arguments.overwrite,
     ))
     if arguments.accession:
         if arguments.files or not arguments.download_dir:

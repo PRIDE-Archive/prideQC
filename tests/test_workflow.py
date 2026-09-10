@@ -299,6 +299,21 @@ class WorkflowTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 Workflow().run([source], root / "out")
 
+    def test_overwrite_clears_existing_results_directory(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "run.mzML"
+            source.touch()
+            output = root / "out"
+            output.mkdir()
+            (output / "old-result.txt").write_text("stale")
+            result = analyze(name=str(source))
+            with patch("prideqc.pipeline._analyze_file", return_value=FileOutcome(source, result)):
+                manifest = Workflow(WorkflowOptions(overwrite=True)).run([source], output)
+            self.assertTrue(manifest["success"])
+            self.assertFalse((output / "old-result.txt").exists())
+            self.assertTrue((output / "run.mzML.mzQC").exists())
+
     def test_fail_fast_records_unprocessed_files(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import multiprocessing
+import shutil
 import sys
 import time
 from collections.abc import Iterable
@@ -81,6 +82,7 @@ class WorkflowOptions:
     sdrf_template: str = "ms-proteomics"
     validate_ontology: bool = False
     progress: bool = False
+    overwrite: bool = False
 
     def __post_init__(self) -> None:
         if self.workers < 1:
@@ -133,8 +135,11 @@ class _Progress:
         status = "ok" if outcome.error is None else "failed"
         self._write(self._line(status, outcome.source.name))
 
-    def close(self) -> None:
-        return
+    def close(self, *, unprocessed: int = 0) -> None:
+        if self.enabled and unprocessed:
+            self._write(
+                f"Analysis stopped: {unprocessed} file(s) were not processed after the first failure."
+            )
 
 
 def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
@@ -198,7 +203,9 @@ class Workflow:
         download = Path(download_directory).resolve()
         if output.is_relative_to(download) or download.is_relative_to(output):
             raise ValueError("QC and download directories must be separate, non-nested directories.")
-        if output.exists() and any(output.iterdir()):
+        if output.exists() and not output.is_dir():
+            raise FileExistsError(f"Output path is not a directory: {output}")
+        if output.exists() and any(output.iterdir()) and not self.options.overwrite:
             raise FileExistsError(f"Output directory is not empty: {output}")
         document = SDRFDocument.read(sdrf) if sdrf else None
         if filenames is None:
@@ -250,10 +257,25 @@ class Workflow:
             raise ValueError("Duplicate input paths are not allowed.")
         document = SDRFDocument.read(sdrf) if sdrf else None
         output = Path(output_directory).resolve()
+        if any(output == source or output.is_relative_to(source) or source.is_relative_to(output)
+               for source in inputs):
+            raise ValueError("Output directory must be separate from all input files/directories.")
+        if output.exists() and not output.is_dir():
+            raise FileExistsError(f"Output path is not a directory: {output}")
         if output.exists() and any(output.iterdir()):
-            raise FileExistsError(
-                f"Output directory is not empty: {output}. Choose a new directory.",
-            )
+            if not self.options.overwrite:
+                raise FileExistsError(
+                    f"Output directory is not empty: {output}. Choose a new directory "
+                    "or pass --overwrite.",
+                )
+            # The user opted in explicitly.  Remove only children of the
+            # requested results directory; never remove the directory itself
+            # or anything outside it.
+            for child in output.iterdir():
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
         input_validation = self.validator.validate(sdrf) if sdrf else None
         output.mkdir(parents=True, exist_ok=True)
         if input_validation:
@@ -300,9 +322,9 @@ class Workflow:
                     ),
                 )
         finally:
-            progress.close()
             if executor:
                 executor.shutdown(wait=True, cancel_futures=True)
+            progress.close(unprocessed=len(inputs) - len(outcomes))
         # Completion order drives progress, while reports remain deterministic
         # and unprocessed inputs are calculated from the actual completed set.
         positions = {path: index for index, path in enumerate(inputs)}
