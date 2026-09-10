@@ -1,0 +1,1 @@
+pyopenms @ https://pypi.openms.de/packages/pyopenms-3.6.0.dev20260910-cp312-cp312-manylinux_2_34_x86_64.whl#sha256=9c7cbb35f3a9557c1988b99a8ec51ef3ac2bc961fd818844e4cfc645ad73a7d6
