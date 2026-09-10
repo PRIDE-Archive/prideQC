@@ -8,8 +8,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
 from contextlib import redirect_stderr
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
