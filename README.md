@@ -58,6 +58,9 @@ SDRF imports neither library; CLI help imports none of the scientific stack.
 | `sdrf-pipelines>=0.1.6,<0.2` | SDRF parsing for validation, templates and optional ontology checks |
 | `pridepy>=0.0.16,<0.1` | PRIDE API access and file transfers through its current `Client` API |
 
+To try a current OpenMS development build, configure uv/pip to use the
+OpenMS package index (`https://pypi.openms.de/simple/pyopenms/`).
+
 The base install uses sdrf-pipelines' structural/template validation. Add
 `uv sync --extra ontology` for its ontology dependencies and explicitly request
 `--validate-ontology` to use them. RunAssessor and Param-Medic remain excluded.
@@ -82,6 +85,10 @@ Defaults use one process per file sequentially. `--workers N` uses separate
 processes, with small final summaries returned to the parent. CLI defaults
 OpenMP/BLAS threads to one unless already configured. Worker count multiplies
 memory and can saturate storage; select it using representative benchmarks.
+For independent local files, `--workers 3` (or the number of files, bounded by
+available CPU/RAM and storage bandwidth) analyzes them concurrently. A
+dependency-free progress indicator reports each completed file; use
+`--no-progress` in non-interactive logs.
 
 ## Input formats and vendor RAW
 
@@ -89,8 +96,8 @@ Native analysis supports indexed or non-indexed `.mzML` and `.mzML.gz`.
 Gzip input is expanded to a temporary disk file and cleaned up after analysis.
 
 Thermo `.raw` and Bruker `.d` inputs are read directly when the installed
-pyOpenMS build exposes its native `ThermoRawFile` or `BrukerTimsFile` reader
-(or equivalent `FileHandler` support). Capability detection, rather than only
+pyOpenMS build exposes its native `ThermoRawFile` or `BrukerTimsFile` reader.
+Capability detection, rather than only
 the version string, also works with nightly/development builds. Bruker
 `.d.zip` files are extracted to a temporary directory when the native reader
 accepts only a directory; the extraction is removed after analysis. Older
@@ -105,10 +112,11 @@ uv run prideqc analyze run.d \
 ```
 
 If no native reader is available and no converter is selected, prideqc reports
-the installed pyOpenMS version and suggests upgrading to a newer build (likely
-pyOpenMS >=3.6) or installing ThermoRawFileParser/msconvert. The dependency
-constraint remains `pyopenms>=3.5,<4` so environments can choose a stable or
-development build; no converter is installed as a Python dependency.
+the installed pyOpenMS version and suggests upgrading to a newer/current
+development build or installing ThermoRawFileParser/msconvert. Development
+builds are published at `https://pypi.openms.de/simple/pyopenms/`. The
+dependency constraint remains `pyopenms>=3.5,<4` so environments can choose a
+stable or development build; no converter is installed as a Python dependency.
 
 `--converter-executable /path/to/program` selects a specific executable.
 Use a wrapper executable for a converter that requires Mono or a launcher;

@@ -106,6 +106,12 @@ def parser() -> argparse.ArgumentParser:
         help="Process remaining local inputs after analysis failure; exit code still nonzero",
     )
     analyze.add_argument(
+        "--no-progress",
+        dest="progress",
+        action="store_false",
+        help="Disable the live per-file progress display",
+    )
+    analyze.add_argument(
         "--converter",
         choices=["thermorawfileparser", "msconvert"],
         help="Optional installed vendor converter",
@@ -183,6 +189,7 @@ def _analyze(arguments: argparse.Namespace) -> int:
         conversion_timeout=arguments.conversion_timeout, continue_on_error=arguments.continue_on_error,
         include_inferred=arguments.include_inferred, overwrite_sdrf_values=arguments.overwrite_sdrf_values,
         sdrf_template=arguments.sdrf_template, validate_ontology=arguments.validate_ontology,
+        progress=arguments.progress,
     ))
     if arguments.accession:
         if arguments.files or not arguments.download_dir:

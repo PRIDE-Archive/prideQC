@@ -78,6 +78,10 @@ class RunMetadata:
     serial_numbers: list[str] = field(default_factory=list)
     source_files: list[str] = field(default_factory=list)
     started_at: str | None = None
+    # Native vendor readers expose some instrument fields as plain strings
+    # rather than PSI-MS CV terms. Preserve those values without fabricating
+    # accessions from model-name heuristics.
+    instrument_details: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
