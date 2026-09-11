@@ -366,6 +366,18 @@ class QCMetricCalculator:
                 ) if intensity.size > 1 else None,
                 f"PrecursorIntensity_{label}_MissingCount": summary.count - intensity.size,
                 f"IsolationWidth_{label}_Median": float(np.median(widths)) if widths.size else None,
+                f"IsolationWidth_{label}_Quantiles": _quantiles(widths),
+                f"IsolationWidth_{label}_Min": float(widths.min()) if widths.size else None,
+                f"IsolationWidth_{label}_Max": float(widths.max()) if widths.size else None,
+                f"IsolationWidth_{label}_Count": int(widths.size),
+                f"IsolationWidth_{label}_FractionLe15": (
+                    float(np.count_nonzero(widths <= 15) / widths.size)
+                    if widths.size else None
+                ),
+                f"IsolationWidth_{label}_FractionGe15": (
+                    float(np.count_nonzero(widths >= 15) / widths.size)
+                    if widths.size else None
+                ),
                 f"MultiplePrecursors_{label}_Count": summary.multiple_precursors,
             })
             if level == 2:

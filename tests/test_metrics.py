@@ -122,6 +122,34 @@ class MetricTests(unittest.TestCase):
         self.assertIsNone(metrics["PrecursorIntensity_MS2_Mean"])
         self.assertEqual(metrics["PrecursorIntensity_MS2_MissingCount"], 1)
 
+
+    def test_isolation_width_distribution_metrics(self):
+        metrics, _ = calculate([
+            spectrum(0, [1], 2, charge=2, width=10),
+            spectrum(1, [1], 2, charge=2, width=15),
+            spectrum(2, [1], 2, charge=2, width=20),
+            spectrum(3, [1], 2, charge=2, width=30),
+        ])
+        self.assertEqual(metrics["IsolationWidth_MS2_Median"], 17.5)
+        self.assertEqual(metrics["IsolationWidth_MS2_Quantiles"], [13.75, 17.5, 22.5])
+        self.assertEqual(metrics["IsolationWidth_MS2_Min"], 10)
+        self.assertEqual(metrics["IsolationWidth_MS2_Max"], 30)
+        self.assertEqual(metrics["IsolationWidth_MS2_Count"], 4)
+        self.assertAlmostEqual(metrics["IsolationWidth_MS2_FractionLe15"], 0.5)
+        self.assertAlmostEqual(metrics["IsolationWidth_MS2_FractionGe15"], 0.75)
+
+    def test_isolation_width_metrics_ignore_missing_widths(self):
+        summary = RunSummary()
+        summary.consume_spectrum(Spectrum(2, 0, np.array([100.]), np.array([1.]),
+                                          (Precursor(500, 2, 100, 10, ()),)))
+        summary.consume_spectrum(Spectrum(2, 1, np.array([100.]), np.array([1.]),
+                                          (Precursor(500, 2, 100, None, ()),)))
+        metrics = {m.key: m.value for m in QCMetricCalculator().calculate(summary)}
+        self.assertEqual(metrics["NumberOfSpectra_MS2"], 2)
+        self.assertEqual(metrics["IsolationWidth_MS2_Count"], 1)
+        self.assertEqual(metrics["IsolationWidth_MS2_FractionLe15"], 1.0)
+        self.assertEqual(metrics["IsolationWidth_MS2_FractionGe15"], 0.0)
+
     def test_multiple_precursor_rule_is_visible(self):
         item = Spectrum(2, 0, np.array([100.]), np.array([1.]),
                         (Precursor(400, 2, 10), Precursor(600, 4, 20)))
