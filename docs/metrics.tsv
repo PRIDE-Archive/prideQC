@@ -70,6 +70,12 @@ PrecursorIntensity_MS2_Mean	QCPRIDE:36D2085F9869CE667625	scalar	Mean recorded po
 PrecursorIntensity_MS2_Sd	QCPRIDE:AA281BF4225DD99B5942	scalar	Sample SD of recorded positive first-precursor intensity (ddof=1), MS2.
 PrecursorIntensity_MS2_MissingCount	QCPRIDE:37ABD88F90B17EAA841D	scalar	Scans lacking a positive finite first-precursor intensity, including the OpenMS unset default zero, MS2.
 IsolationWidth_MS2_Median	QCPRIDE:652589C44AB88BC96F40	scalar	Median positive first-precursor lower+upper isolation offsets in Th (m/z), MS2.
+IsolationWidth_MS2_Quantiles	QCPRIDE:482962258BA982FED6BB	tuple	25th, 50th, 75th percentiles of positive first-precursor isolation widths in Th (m/z), MS2.
+IsolationWidth_MS2_Min	QCPRIDE:228CD009EF66CB6342FD	scalar	Minimum positive first-precursor isolation width in Th (m/z), MS2.
+IsolationWidth_MS2_Max	QCPRIDE:E0ADF25D530854F3543D	scalar	Maximum positive first-precursor isolation width in Th (m/z), MS2.
+IsolationWidth_MS2_Count	QCPRIDE:0F163ECB26874F0C65C7	scalar	Count of first-precursor isolation widths with a finite positive value, MS2.
+IsolationWidth_MS2_FractionLe15	QCPRIDE:C093A5D8209394150C2B	scalar	Fraction of recorded positive first-precursor isolation widths <=15 Th (m/z), MS2.
+IsolationWidth_MS2_FractionGe15	QCPRIDE:DE0B3E119A726F58C6C1	scalar	Fraction of recorded positive first-precursor isolation widths >=15 Th (m/z), MS2.
 MultiplePrecursors_MS2_Count	QCPRIDE:82C9F41E70F7A9F93FCC	scalar	Scans with multiple precursors; first precursor supplies precursor-distribution metrics, MS2.
 ExtentPrecursorIntensity_95over5_MS2	QCPRIDE:BD6FAF3B9FAECC3FF579	scalar	95th/5th percentile ratio of positive recorded first-precursor MS2 intensities; ID-free proxy, no fragment-TIC fallback.
 MS1_to_MS2_Ratio	QCPRIDE:3E6B36C0810EEDA24D7A	scalar	MS1 scan count divided by MS2 scan count; undefined when denominator is zero.

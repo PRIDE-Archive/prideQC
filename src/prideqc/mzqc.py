@@ -209,6 +209,12 @@ LEVEL_DEFINITIONS = {
         "default zero, MS{n}."
     ),
     "IsolationWidth_MS{n}_Median": "Median positive first-precursor lower+upper isolation offsets in Th (m/z), MS{n}.",
+    "IsolationWidth_MS{n}_Quantiles": "25th, 50th, 75th percentiles of positive first-precursor isolation widths in Th (m/z), MS{n}.",
+    "IsolationWidth_MS{n}_Min": "Minimum positive first-precursor isolation width in Th (m/z), MS{n}.",
+    "IsolationWidth_MS{n}_Max": "Maximum positive first-precursor isolation width in Th (m/z), MS{n}.",
+    "IsolationWidth_MS{n}_Count": "Count of first-precursor isolation widths with a finite positive value, MS{n}.",
+    "IsolationWidth_MS{n}_FractionLe15": "Fraction of recorded positive first-precursor isolation widths <=15 Th (m/z), MS{n}.",
+    "IsolationWidth_MS{n}_FractionGe15": "Fraction of recorded positive first-precursor isolation widths >=15 Th (m/z), MS{n}.",
     "MultiplePrecursors_MS{n}_Count": (
         "Scans with multiple precursors; first precursor supplies precursor-distribution "
         "metrics, MS{n}."
