@@ -44,16 +44,47 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--repo", default="bigbio/sdrf-annotated-datasets")
     parser.add_argument("--ref", default="main")
+    parser.add_argument(
+        "--allow-pride-api-failure",
+        action="store_true",
+        help=(
+            "Continue without authoritative PRIDE file-name reconciliation if "
+            "the project-files API is unavailable. By default API failure is fatal "
+            "so aliases cannot silently become duplicate/missing analysis tasks."
+        ),
+    )
     return parser.parse_args()
 
 
-def request_bytes(url: str, timeout: int = 120) -> bytes:
+def request_bytes(
+    url: str,
+    timeout: int = 120,
+    *,
+    accept: str = "*/*",
+) -> bytes:
     request = urllib.request.Request(
         url,
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "prideQC-HPC"},
+        headers={"Accept": accept, "User-Agent": "prideQC-HPC"},
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()
+
+
+def request_json_with_headers(
+    url: str,
+    timeout: int = 120,
+    *,
+    accept: str = "application/json",
+) -> tuple[object, dict[str, str]]:
+    """Return parsed JSON plus normalized response headers."""
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": accept, "User-Agent": "prideQC-HPC"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read())
+        headers = {key.casefold(): value for key, value in response.headers.items()}
+    return payload, headers
 
 
 def unique_in_order(values: Iterable[str]) -> list[str]:
@@ -138,22 +169,59 @@ def _page_file_names(payload: object, pxd: str) -> tuple[set[str], int | None, i
         for item in items
         if isinstance(item, dict) and str(item.get("fileName", "")).strip()
     }
+    if items and not names:
+        sample_keys = sorted(
+            {
+                str(key)
+                for item in items[:5]
+                if isinstance(item, dict)
+                for key in item
+            }
+        )
+        raise RuntimeError(
+            f"PRIDE file-list response for {pxd} had records but no fileName values; "
+            f"sample keys: {sample_keys}"
+        )
     return names, page_number, total_pages
 
 
+def _total_records(headers: dict[str, str]) -> int | None:
+    """Parse PRIDE's v3 total-record count response header when available."""
+    raw = headers.get("total_records") or headers.get("total-records")
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
 def pride_project_file_names(pxd: str) -> set[str]:
-    """Return current PRIDE project file names using the paginated API."""
+    """Return current PRIDE project file names using the paginated v3 API.
+
+    The current v3 endpoint returns a bare JSON list and exposes the total count
+    in the ``total_records`` response header.  Older HAL/Spring-style wrappers
+    are still accepted by ``_page_file_names`` for compatibility.
+    """
     names: set[str] = set()
     page = 0
     page_size = 100
+    expected_total: int | None = None
     while True:
         url = (
             f"{PRIDE_API}/projects/{pxd}/files"
             f"?pageSize={page_size}&page={page}"
         )
-        payload = json.loads(request_bytes(url, timeout=300))
+        payload, headers = request_json_with_headers(url, timeout=300)
         page_names, page_number, total_pages = _page_file_names(payload, pxd)
         names.update(page_names)
+
+        header_total = _total_records(headers)
+        if header_total is not None:
+            expected_total = header_total
+            if len(names) >= expected_total:
+                break
 
         if total_pages is not None:
             next_page = (page_number + 1) if page_number is not None else page + 1
@@ -169,6 +237,11 @@ def pride_project_file_names(pxd: str) -> set[str]:
 
     if not names:
         raise RuntimeError(f"PRIDE returned no project files for {pxd}.")
+    if expected_total is not None and len(names) != expected_total:
+        raise RuntimeError(
+            f"PRIDE file pagination for {pxd} returned {len(names)} unique file names "
+            f"but total_records={expected_total}."
+        )
     return names
 
 
@@ -203,11 +276,14 @@ def resolve_pride_archive_name(name: str, pride_names: set[str]) -> tuple[str, s
 def resolve_and_deduplicate_records(
     records: list[dict[str, str]], pride_names: set[str]
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    """Resolve archive aliases and emit one task per physical PRIDE object."""
-    resolved: list[dict[str, str]] = []
-    aliases: list[dict[str, str]] = []
-    seen_physical: dict[str, dict[str, str]] = {}
-    for original in records:
+    """Resolve archive aliases and emit one task per physical PRIDE object.
+
+    If both an alias row and an exact SDRF row resolve to the same archive
+    object, prefer the exact SDRF row as the canonical analysis task regardless
+    of their input order.  Unresolved names are never deduplicated fuzzily.
+    """
+    prepared: list[tuple[int, dict[str, str]]] = []
+    for index, original in enumerate(records):
         record = dict(original)
         candidate = record["archive_file"]
         physical, resolution = resolve_pride_archive_name(candidate, pride_names)
@@ -220,26 +296,56 @@ def resolve_and_deduplicate_records(
             "1" if physical != record["sdrf_data_file"] else "0"
         )
         record["archive_resolution"] = resolution
+        prepared.append((index, record))
 
-        previous = seen_physical.get(physical)
-        if previous is not None and physical in pride_names:
+    groups: dict[str, list[tuple[int, dict[str, str]]]] = defaultdict(list)
+    for indexed_record in prepared:
+        _, record = indexed_record
+        groups[record["archive_file"]].append(indexed_record)
+
+    canonical: list[tuple[int, dict[str, str]]] = []
+    aliases: list[dict[str, str]] = []
+    for physical, group in groups.items():
+        first_index = min(index for index, _ in group)
+        if physical not in pride_names or len(group) == 1:
+            canonical.append((first_index, group[0][1]))
+            continue
+
+        ranked_group = []
+        for index, record in group:
+            if record["sdrf_data_file"] == physical:
+                rank = 0
+            elif record["archive_resolution"] == "exact":
+                rank = 1
+            else:
+                rank = 2
+            ranked_group.append((rank, index, record))
+
+        _, _, canonical_record = min(
+            ranked_group, key=lambda ranked: (ranked[0], ranked[1])
+        )
+        canonical.append((first_index, canonical_record))
+        for _, record in group:
+            if record is canonical_record:
+                continue
             aliases.append(
                 {
                     "sdrf_data_file": record["sdrf_data_file"],
                     "archive_file": physical,
-                    "canonical_sdrf_data_file": previous["sdrf_data_file"],
-                    "resolution": resolution,
+                    "canonical_sdrf_data_file": canonical_record["sdrf_data_file"],
+                    "resolution": record["archive_resolution"],
                 }
             )
-            continue
-        seen_physical[physical] = record
-        resolved.append(record)
-    return resolved, aliases
+
+    canonical.sort(key=lambda item: item[0])
+    return [record for _, record in canonical], aliases
 
 def discover_urls(pxd: str, repo: str, ref: str) -> list[str]:
     quoted_ref = urllib.parse.quote(ref, safe="")
     url = f"https://api.github.com/repos/{repo}/contents/datasets/{pxd}?ref={quoted_ref}"
-    entries = json.loads(request_bytes(url, timeout=60))
+    entries = json.loads(
+        request_bytes(url, timeout=60, accept="application/vnd.github+json")
+    )
     urls = sorted(
         str(item["download_url"])
         for item in entries
@@ -382,6 +488,13 @@ def main() -> int:
             urllib.error.URLError,
             json.JSONDecodeError,
         ) as exc:
+            if not args.allow_pride_api_failure:
+                raise RuntimeError(
+                    f"Authoritative PRIDE project-file lookup failed for {pxd}; "
+                    "refusing to generate a potentially duplicated manifest. "
+                    "Use --allow-pride-api-failure only for an explicitly "
+                    f"unreconciled manifest. Cause: {type(exc).__name__}: {exc}"
+                ) from exc
             pride_names = set()
             pride_file_counts[pxd] = 0
             discovery_notes.append(
