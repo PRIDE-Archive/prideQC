@@ -23,6 +23,9 @@ from collections.abc import Iterable
 from pathlib import Path
 
 MISSING = {"", "not available", "not provided", "not applicable"}
+PRIDE_API = "https://www.ebi.ac.uk/pride/ws/archive/v3"
+DATE_PREFIX_RE = re.compile(r"^\d{8}_(.+)$")
+PY_ALIAS_RE = re.compile(r"^pY_(.+)$", re.IGNORECASE)
 
 
 def parse_args() -> argparse.Namespace:
@@ -101,6 +104,137 @@ def load_gt(path: Path) -> tuple[list[dict[str, str]], list[str]]:
         raise ValueError(f"Unexpected PRIDE accessions in ground truth: {bad}")
     return rows, accessions
 
+
+
+def _page_file_names(payload: object, pxd: str) -> tuple[set[str], int | None, int | None]:
+    """Extract file names and optional pagination metadata from a PRIDE API page."""
+    items: object = payload
+    page_number: int | None = None
+    total_pages: int | None = None
+    if isinstance(payload, dict):
+        embedded = payload.get("_embedded")
+        if isinstance(embedded, dict):
+            for key in ("files", "content", "data"):
+                if isinstance(embedded.get(key), list):
+                    items = embedded[key]
+                    break
+        else:
+            for key in ("files", "content", "data"):
+                if isinstance(payload.get(key), list):
+                    items = payload[key]
+                    break
+        page = payload.get("page")
+        if isinstance(page, dict):
+            raw_number = page.get("number")
+            raw_total = page.get("totalPages")
+            if isinstance(raw_number, int):
+                page_number = raw_number
+            if isinstance(raw_total, int):
+                total_pages = raw_total
+    if not isinstance(items, list):
+        raise RuntimeError(f"Unexpected PRIDE file-list response for {pxd}.")
+    names = {
+        str(item.get("fileName", "")).strip()
+        for item in items
+        if isinstance(item, dict) and str(item.get("fileName", "")).strip()
+    }
+    return names, page_number, total_pages
+
+
+def pride_project_file_names(pxd: str) -> set[str]:
+    """Return current PRIDE project file names using the paginated API."""
+    names: set[str] = set()
+    page = 0
+    page_size = 100
+    while True:
+        url = (
+            f"{PRIDE_API}/projects/{pxd}/files"
+            f"?pageSize={page_size}&page={page}"
+        )
+        payload = json.loads(request_bytes(url, timeout=300))
+        page_names, page_number, total_pages = _page_file_names(payload, pxd)
+        names.update(page_names)
+
+        if total_pages is not None:
+            next_page = (page_number + 1) if page_number is not None else page + 1
+            if next_page >= total_pages:
+                break
+            page = next_page
+            continue
+
+        if not page_names:
+            break
+
+        page += 1
+
+    if not names:
+        raise RuntimeError(f"PRIDE returned no project files for {pxd}.")
+    return names
+
+
+def resolve_pride_archive_name(name: str, pride_names: set[str]) -> tuple[str, str]:
+    """Resolve an SDRF/archive name to a current PRIDE object conservatively.
+
+    Exact names always win.  The only legacy alias currently normalized is the
+    observed ``pY_<rest>`` form when PRIDE contains exactly one
+    ``YYYYMMDD_<rest>`` object.  Ambiguous or unknown names are left unchanged.
+    """
+    if name in pride_names:
+        return name, "exact"
+    match = PY_ALIAS_RE.fullmatch(name)
+    if match is None:
+        return name, "unresolved"
+    core = match.group(1)
+    candidates = sorted(
+        candidate
+        for candidate in pride_names
+        if (dated := DATE_PREFIX_RE.fullmatch(candidate)) is not None
+        and dated.group(1) == core
+    )
+    if len(candidates) == 1:
+        return candidates[0], "py-date-alias"
+    if len(candidates) > 1:
+        raise ValueError(
+            f"Ambiguous PRIDE pY/date alias {name!r}: {candidates}"
+        )
+    return name, "unresolved"
+
+
+def resolve_and_deduplicate_records(
+    records: list[dict[str, str]], pride_names: set[str]
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Resolve archive aliases and emit one task per physical PRIDE object."""
+    resolved: list[dict[str, str]] = []
+    aliases: list[dict[str, str]] = []
+    seen_physical: dict[str, dict[str, str]] = {}
+    for original in records:
+        record = dict(original)
+        candidate = record["archive_file"]
+        physical, resolution = resolve_pride_archive_name(candidate, pride_names)
+        if physical == candidate and candidate not in pride_names:
+            physical, resolution = resolve_pride_archive_name(
+                record["sdrf_data_file"], pride_names
+            )
+        record["archive_file"] = physical
+        record["needs_file_map"] = (
+            "1" if physical != record["sdrf_data_file"] else "0"
+        )
+        record["archive_resolution"] = resolution
+
+        previous = seen_physical.get(physical)
+        if previous is not None and physical in pride_names:
+            aliases.append(
+                {
+                    "sdrf_data_file": record["sdrf_data_file"],
+                    "archive_file": physical,
+                    "canonical_sdrf_data_file": previous["sdrf_data_file"],
+                    "resolution": resolution,
+                }
+            )
+            continue
+        seen_physical[physical] = record
+        resolved.append(record)
+    return resolved, aliases
 
 def discover_urls(pxd: str, repo: str, ref: str) -> list[str]:
     quoted_ref = urllib.parse.quote(ref, safe="")
@@ -234,8 +368,25 @@ def main() -> int:
     mapped_count = 0
     sdrf_count = 0
     discovery_notes: list[str] = []
+    physical_aliases: list[dict[str, str]] = []
+    pride_file_counts: dict[str, int] = {}
 
     for pxd in accessions:
+        try:
+            pride_names = pride_project_file_names(pxd)
+            pride_file_counts[pxd] = len(pride_names)
+        except (
+            OSError,
+            RuntimeError,
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            json.JSONDecodeError,
+        ) as exc:
+            pride_names = set()
+            pride_file_counts[pxd] = 0
+            discovery_notes.append(
+                f"{pxd}\tpride-api-unavailable\t0\t{type(exc).__name__}"
+            )
         try:
             urls = discover_urls(pxd, args.repo, args.ref)
             discovery_notes.append(f"{pxd}\tgithub-api\t{len(urls)}")
@@ -267,8 +418,15 @@ def main() -> int:
             template = infer_template(target, rows, url)
             digest = sha256(target)
             records = file_records(target)
+            if pride_names:
+                records, aliases = resolve_and_deduplicate_records(records, pride_names)
+                for alias in aliases:
+                    physical_aliases.append(
+                        {"pxd_accession": pxd, "sdrf_basename": basename, **alias}
+                    )
             sdrf_count += 1
             for record in records:
+                record.pop("archive_resolution", None)
                 if record["needs_file_map"] == "1":
                     mapped_count += 1
                 manifest_rows.append(
@@ -307,6 +465,22 @@ def main() -> int:
         writer.writerows(manifest_rows)
     os.replace(tmp_manifest, args.manifest)
 
+    alias_report = args.manifest.with_name(args.manifest.stem + ".aliases.tsv")
+    alias_fields = [
+        "pxd_accession",
+        "sdrf_basename",
+        "sdrf_data_file",
+        "archive_file",
+        "canonical_sdrf_data_file",
+        "resolution",
+    ]
+    with alias_report.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle, fieldnames=alias_fields, delimiter="\t", lineterminator="\n"
+        )
+        writer.writeheader()
+        writer.writerows(physical_aliases)
+
     with args.meta.open("w", encoding="utf-8") as handle:
         handle.write(f"gt={args.gt.resolve()}\n")
         handle.write(f"gt_sha256={sha256(args.gt)}\n")
@@ -316,6 +490,10 @@ def main() -> int:
         handle.write(f"sdrf_count={sdrf_count}\n")
         handle.write(f"file_task_count={len(manifest_rows)}\n")
         handle.write(f"archive_alias_count={mapped_count}\n")
+        handle.write(f"physical_alias_deduplicated_count={len(physical_aliases)}\n")
+        handle.write(f"alias_report={alias_report.resolve()}\n")
+        for pxd in accessions:
+            handle.write(f"pride_files_{pxd}={pride_file_counts[pxd]}\n")
         for pxd in accessions:
             handle.write(f"files_{pxd}={per_pxd[pxd]}\n")
         handle.write("\n[discovery]\n")
@@ -325,6 +503,8 @@ def main() -> int:
     print(f"sdrfs={sdrf_count}")
     print(f"file_tasks={len(manifest_rows)}")
     print(f"archive_aliases={mapped_count}")
+    print(f"physical_aliases_deduplicated={len(physical_aliases)}")
+    print(f"alias_report={alias_report}")
     for pxd in accessions:
         print(f"{pxd}\t{per_pxd[pxd]}")
     print(f"manifest={args.manifest}")
