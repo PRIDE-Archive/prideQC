@@ -57,15 +57,19 @@ echo "==> Resolve annotated SDRFs and expand to one file per Slurm task"
       --sdrf-root "/persist/${SDRF_ROOT#"$PERSIST_ROOT"/}/$SDRF_GITHUB_REF" \
       --manifest "/persist/${MANIFEST#"$PERSIST_ROOT"/}" \
       --meta "/persist/${MANIFEST_META#"$PERSIST_ROOT"/}" \
+      --manifest-path-base /persist \
       --repo "$SDRF_GITHUB_REPO" \
       --ref "$SDRF_GITHUB_REF"
 
-TASK_COUNT="$(awk 'END {print NR > 0 ? NR - 1 : 0}' "$MANIFEST")"
+TASK_COUNT="$(awk 'END {print (NR > 0 ? NR - 1 : 0)}' "$MANIFEST")"
 (( TASK_COUNT > 0 )) || { echo "No file tasks generated: $MANIFEST" >&2; exit 2; }
+TASK_RANGE="${TASK_RANGE:-1-${TASK_COUNT}}"
+[[ "$TASK_RANGE" =~ ^[0-9,:-]+$ ]] || { echo "Invalid TASK_RANGE: $TASK_RANGE" >&2; exit 2; }
 
 printf '%s\n' \
     "manifest=$MANIFEST" \
     "file_tasks=$TASK_COUNT" \
+    "task_range=$TASK_RANGE" \
     "partition=${PARTITION:-scheduler-default}" \
     "cpus_per_file=$CPUS" \
     "memory_per_file=$MEMORY" \
@@ -104,7 +108,7 @@ sbatch_args=(
     --cpus-per-task="$CPUS"
     --mem="$MEMORY"
     --time="$TIME_LIMIT"
-    --array="1-${TASK_COUNT}%${MAX_PARALLEL}"
+    --array="${TASK_RANGE}%${MAX_PARALLEL}"
     --output="$LOG_ROOT/prideqc-file_%A_%a.out"
     --error="$LOG_ROOT/prideqc-file_%A_%a.err"
     --export="$export_list"
