@@ -35,10 +35,25 @@ test -r "${SIF}.sha256" || { echo "SIF checksum not readable: ${SIF}.sha256" >&2
 
 ROW="$(awk -F '\t' -v id="$TASK_ID" 'NR>1 && $1==id {print; exit}' "$MANIFEST")"
 [[ -n "$ROW" ]] || { echo "No manifest row for task $TASK_ID" >&2; exit 2; }
-IFS=$'\t' read -r ROW_ID PXD SDRF_BASENAME SDRF_PATH SDRF_SHA SDRF_URL SDRF_TEMPLATE SDRF_DATA_FILE ARCHIVE_FILE FILE_URI NEEDS_FILE_MAP <<< "$ROW"
+# Bash treats tab as IFS whitespace and collapses adjacent tabs, which loses empty
+# TSV fields (for example a blank file_uri). Translate tabs to a non-whitespace
+# separator before read so empty columns retain their positions.
+ROW_PARSE="${ROW//$'\t'/$'\x1f'}"
+IFS=$'\x1f' read -r ROW_ID PXD SDRF_BASENAME SDRF_MANIFEST_PATH SDRF_SHA SDRF_URL SDRF_TEMPLATE SDRF_DATA_FILE ARCHIVE_FILE FILE_URI NEEDS_FILE_MAP <<< "$ROW_PARSE"
 [[ "$ROW_ID" == "$TASK_ID" ]] || { echo "Manifest task mismatch" >&2; exit 2; }
 [[ "$PXD" =~ ^PXD[0-9]{6,}$ ]] || { echo "Invalid accession in manifest: $PXD" >&2; exit 2; }
-test -r "$SDRF_PATH" || { echo "SDRF not readable: $SDRF_PATH" >&2; exit 2; }
+
+# Manifest preparation runs with PERSIST_ROOT bound at /persist inside the SIF.
+# Resolve persisted paths back to the real host NFS root before host-side checks/copies.
+case "$SDRF_MANIFEST_PATH" in
+    /persist/*) SDRF_PATH="$PERSIST_ROOT/${SDRF_MANIFEST_PATH#/persist/}" ;;
+    /*) SDRF_PATH="$SDRF_MANIFEST_PATH" ;;
+    *) SDRF_PATH="$PERSIST_ROOT/$SDRF_MANIFEST_PATH" ;;
+esac
+test -r "$SDRF_PATH" || {
+    echo "SDRF not readable: $SDRF_PATH (manifest path: $SDRF_MANIFEST_PATH)" >&2
+    exit 2
+}
 [[ "$(sha256sum "$SDRF_PATH" | awk '{print $1}')" == "$SDRF_SHA" ]] || {
     echo "SDRF checksum mismatch: $SDRF_PATH" >&2
     exit 2
@@ -184,8 +199,56 @@ set +e
       "${analysis_flags[@]}" \
       -o /work/results \
     > >(tee "$RUN_LOG") 2> >(tee -a "$RUN_LOG" >&2)
-STATUS=$?
+PRIDEQC_STATUS=$?
 set -e
+
+# prideQC exit 1 can mean either a true scientific/file failure or only that
+# the refined SDRF has validation findings. Classify the produced manifest so
+# Slurm reflects whether the file analysis itself succeeded.
+TASK_OUTCOME="failure"
+TASK_REASON="prideqc_exit_${PRIDEQC_STATUS}"
+if [[ -f "$LOCAL_RESULTS/manifest.json" ]]; then
+    CLASSIFICATION="$(
+        "$CONTAINER_BIN" exec --cleanenv --bind "$WORK_ROOT:/work" "$LOCAL_SIF" \
+            python - /work/results/manifest.json <<'PYCLASSIFY'
+import json
+import sys
+from pathlib import Path
+
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+files = manifest.get("files", [])
+unprocessed = manifest.get("unprocessed", [])
+errors = manifest.get("errors", [])
+failed_files = [item for item in files if item.get("status") != "success" or item.get("error")]
+validation_prefix = "Refined SDRF has sdrf-pipelines validation findings"
+validation_only = bool(errors) and all(
+    isinstance(error, str) and error.startswith(validation_prefix) for error in errors
+)
+if failed_files:
+    print("failure\tfile_failure")
+elif unprocessed:
+    print("failure\tunprocessed_files")
+elif errors and not validation_only:
+    print("failure\tmanifest_error")
+elif validation_only:
+    print("warning\trefined_sdrf_validation")
+else:
+    print("success\tok")
+PYCLASSIFY
+    )" || {
+        CLASSIFICATION="failure	manifest_parse_error"
+    }
+    IFS=$'\t' read -r TASK_OUTCOME TASK_REASON <<< "$CLASSIFICATION"
+fi
+
+# A process-level error remains a failure even if no useful manifest was written.
+if [[ $PRIDEQC_STATUS -eq 2 ]]; then
+    TASK_OUTCOME="failure"
+    TASK_REASON="prideqc_usage_or_runtime_error"
+elif [[ $PRIDEQC_STATUS -ne 0 && "$TASK_OUTCOME" == "success" ]]; then
+    TASK_OUTCOME="failure"
+    TASK_REASON="unexpected_prideqc_exit_${PRIDEQC_STATUS}"
+fi
 
 [[ -f "$LOCAL_DOWNLOAD/download-manifest.json" ]] && cp -a "$LOCAL_DOWNLOAD/download-manifest.json" "$LOCAL_RESULTS/download-manifest.json"
 cp -a "$LOCAL_SDRF" "$LOCAL_RESULTS/input.sdrf.tsv"
@@ -193,11 +256,13 @@ cp -a "$LOCAL_SDRF" "$LOCAL_RESULTS/input.sdrf.tsv"
 cp -a "$RUN_LOG" "$LOCAL_RESULTS/hpc-analysis.log"
 printf 'task_id\tpxd_accession\tsdrf_basename\tsdrf_path\tsdrf_sha256\tsource_sdrf_url\tsdrf_template\tsdrf_data_file\tarchive_file\tfile_uri\tneeds_file_map\n' > "$LOCAL_RESULTS/manifest-row.tsv"
 printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$ROW_ID" "$PXD" "$SDRF_BASENAME" "$SDRF_PATH" "$SDRF_SHA" "$SDRF_URL" "$SDRF_TEMPLATE" \
+    "$ROW_ID" "$PXD" "$SDRF_BASENAME" "$SDRF_MANIFEST_PATH" "$SDRF_SHA" "$SDRF_URL" "$SDRF_TEMPLATE" \
     "$SDRF_DATA_FILE" "$ARCHIVE_FILE" "$FILE_URI" "$NEEDS_FILE_MAP" >> "$LOCAL_RESULTS/manifest-row.tsv"
 "$CONTAINER_BIN" exec "$LOCAL_SIF" cat /opt/prideqc/build-info.txt > "$LOCAL_RESULTS/container-build-info.txt"
 {
-    echo "scientific_status=$STATUS"
+    echo "prideqc_exit_code=$PRIDEQC_STATUS"
+    echo "task_outcome=$TASK_OUTCOME"
+    echo "task_reason=$TASK_REASON"
     echo "job_id=$JOB_ID"
     echo "task_id=$TASK_ID"
     echo "pxd=$PXD"
@@ -233,7 +298,22 @@ touch "$WORK_ROOT/.results-synced"
 ELAPSED=$(( $(date +%s) - START_EPOCH ))
 echo "elapsed_seconds=$ELAPSED"
 echo "final_result_path=$FINAL_RESULTS"
-if [[ $STATUS -ne 0 ]]; then
-    echo "prideQC returned status $STATUS; compact diagnostics were retained at $FINAL_RESULTS" >&2
-fi
-exit "$STATUS"
+case "$TASK_OUTCOME" in
+    success)
+        echo "task_outcome=success"
+        exit 0
+        ;;
+    warning)
+        echo "task_outcome=warning ($TASK_REASON)"
+        echo "prideQC returned status $PRIDEQC_STATUS because of SDRF validation findings; QC analysis succeeded and diagnostics were retained at $FINAL_RESULTS" >&2
+        exit 0
+        ;;
+    *)
+        echo "task_outcome=failure ($TASK_REASON)" >&2
+        echo "prideQC returned status $PRIDEQC_STATUS; compact diagnostics were retained at $FINAL_RESULTS" >&2
+        if [[ $PRIDEQC_STATUS -ne 0 ]]; then
+            exit "$PRIDEQC_STATUS"
+        fi
+        exit 1
+        ;;
+esac

@@ -31,6 +31,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sdrf-root", required=True, type=Path)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--meta", required=True, type=Path)
+    parser.add_argument(
+        "--manifest-path-base",
+        type=Path,
+        help=(
+            "Optional base path to strip from persisted file paths. "
+            "Use this when manifest preparation runs inside a container bind mount."
+        ),
+    )
     parser.add_argument("--repo", default="bigbio/sdrf-annotated-datasets")
     parser.add_argument("--ref", default="main")
     return parser.parse_args()
@@ -200,6 +208,20 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def manifest_path(path: Path, base: Path | None) -> str:
+    """Return a host-portable path for storage in the manifest."""
+    resolved = path.resolve()
+    if base is None:
+        return str(resolved)
+    resolved_base = base.resolve()
+    try:
+        return resolved.relative_to(resolved_base).as_posix()
+    except ValueError as exc:
+        raise ValueError(
+            f"Manifest path {resolved} is outside manifest path base {resolved_base}"
+        ) from exc
+
+
 def main() -> int:
     args = parse_args()
     rows, accessions = load_gt(args.gt)
@@ -254,7 +276,7 @@ def main() -> int:
                         "task_id": str(len(manifest_rows) + 1),
                         "pxd_accession": pxd,
                         "sdrf_basename": basename,
-                        "sdrf_path": str(target.resolve()),
+                        "sdrf_path": manifest_path(target, args.manifest_path_base),
                         "sdrf_sha256": digest,
                         "source_sdrf_url": url,
                         "sdrf_template": template,
