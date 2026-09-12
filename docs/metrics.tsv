@@ -76,6 +76,11 @@ IsolationWidth_MS2_Max	QCPRIDE:E0ADF25D530854F3543D	scalar	Maximum positive firs
 IsolationWidth_MS2_Count	QCPRIDE:0F163ECB26874F0C65C7	scalar	Count of first-precursor isolation widths with a finite positive value, MS2.
 IsolationWidth_MS2_FractionLe15	QCPRIDE:C093A5D8209394150C2B	scalar	Fraction of recorded positive first-precursor isolation widths <=15 Th (m/z), MS2.
 IsolationWidth_MS2_FractionGe15	QCPRIDE:DE0B3E119A726F58C6C1	scalar	Fraction of recorded positive first-precursor isolation widths >=15 Th (m/z), MS2.
+IsolationPrecursorMz_MS2_Count	QCPRIDE:5C5E15B79F1D0F5E5C1F	scalar	Count of finite positive first-precursor m/z values paired with positive isolation widths, MS2.
+IsolationPrecursorMz_MS2_UniqueCount	QCPRIDE:C98D3B2F6D4A5E4D3E1B	scalar	Count of unique first-precursor m/z values after rounding to 0.1 Th, MS2.
+IsolationPrecursorMz_MS2_UniqueFraction	QCPRIDE:B7B2C4A7F8F6D1A4C6E9	scalar	Unique first-precursor m/z target count divided by paired isolation-width observations, after 0.1 Th rounding, MS2.
+IsolationPrecursorMz_MS2_MaxRepeatFraction	QCPRIDE:AAE8B64F7E3D2B6C4D9A	scalar	Largest fraction of paired isolation-width observations sharing one rounded (0.1 Th) first-precursor m/z target, MS2.
+IsolationPrecursorMz_MS2_RepeatedFraction	QCPRIDE:8D2E4B9C7A1F6E5B3C0D	scalar	Fraction of paired isolation-width observations whose rounded (0.1 Th) first-precursor m/z target occurs at least twice, MS2.
 MultiplePrecursors_MS2_Count	QCPRIDE:82C9F41E70F7A9F93FCC	scalar	Scans with multiple precursors; first precursor supplies precursor-distribution metrics, MS2.
 ExtentPrecursorIntensity_95over5_MS2	QCPRIDE:BD6FAF3B9FAECC3FF579	scalar	95th/5th percentile ratio of positive recorded first-precursor MS2 intensities; ID-free proxy, no fragment-TIC fallback.
 MS1_to_MS2_Ratio	QCPRIDE:3E6B36C0810EEDA24D7A	scalar	MS1 scan count divided by MS2 scan count; undefined when denominator is zero.

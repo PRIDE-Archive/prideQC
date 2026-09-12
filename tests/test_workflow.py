@@ -63,6 +63,16 @@ class AnnotationTests(unittest.TestCase):
         self.assertEqual(evidence.kind, EvidenceKind.INFERRED)
         self.assertIn("PRIDE:0000450", evidence.sdrf_value)
 
+    def test_narrow_repeated_target_metrics_do_not_change_acquisition_yet(self):
+        widths = [2.0] * 100
+        targets = [400.0, 500.0, 600.0, 700.0] * 25
+        result = analyze([
+            spectrum(i, [1], 2, charge=2, width=w, precursor_mz=targets[i])
+            for i, w in enumerate(widths)
+        ])
+        evidence = next(a for a in result.annotations if a.field == "acquisition_method")
+        self.assertEqual(evidence.value, "Data-dependent acquisition")
+
     def test_sparse_or_mixed_widths_abstain(self):
         for widths in ([20] * 10, [2] * 50 + [20] * 50):
             result = analyze([spectrum(i, [1], 2, charge=2, width=w) for i, w in enumerate(widths)])

@@ -215,6 +215,11 @@ LEVEL_DEFINITIONS = {
     "IsolationWidth_MS{n}_Count": "Count of first-precursor isolation widths with a finite positive value, MS{n}.",
     "IsolationWidth_MS{n}_FractionLe15": "Fraction of recorded positive first-precursor isolation widths <=15 Th (m/z), MS{n}.",
     "IsolationWidth_MS{n}_FractionGe15": "Fraction of recorded positive first-precursor isolation widths >=15 Th (m/z), MS{n}.",
+    "IsolationPrecursorMz_MS{n}_Count": "Count of finite positive first-precursor m/z values paired with positive isolation widths, MS{n}.",
+    "IsolationPrecursorMz_MS{n}_UniqueCount": "Count of unique first-precursor m/z values after rounding to 0.1 Th, MS{n}.",
+    "IsolationPrecursorMz_MS{n}_UniqueFraction": "Unique first-precursor m/z target count divided by paired isolation-width observations, after 0.1 Th rounding, MS{n}.",
+    "IsolationPrecursorMz_MS{n}_MaxRepeatFraction": "Largest fraction of paired isolation-width observations sharing one rounded (0.1 Th) first-precursor m/z target, MS{n}.",
+    "IsolationPrecursorMz_MS{n}_RepeatedFraction": "Fraction of paired isolation-width observations whose rounded (0.1 Th) first-precursor m/z target occurs at least twice, MS{n}.",
     "MultiplePrecursors_MS{n}_Count": (
         "Scans with multiple precursors; first precursor supplies precursor-distribution "
         "metrics, MS{n}."
