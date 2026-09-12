@@ -105,3 +105,25 @@ Downloaded spectra are not copied back to NFS.
 Start with `MEMORY=32G`, `MAX_PARALLEL=4`, and one prideQC worker per file. If an individual task still reaches 32 GiB, that is a genuine single-file memory requirement rather than worker multiplication. Re-submit that file/task with 48 or 64 GiB as appropriate. Do not increase `--workers` for file-level jobs.
 
 The old accession-level launcher can still be useful for small mzML projects, but it should not be used with 16 workers under a 32 GiB memory cap for heterogeneous vendor RAW files.
+
+## Pull an immutable PRIDE QC SIF on Codon
+
+Codon uses Singularity. Pull the immutable Git-SHA-tagged SIF through the
+repository helper rather than calling `singularity pull` directly. The helper
+uses the ORAS transport and the installer automatically writes and verifies the
+SIF SHA-256 sidecar and records provenance.
+
+```bash
+cd /nfs/research/juan/DIA/singj/prideQC
+export PERSIST_ROOT=/nfs/research/juan/DIA/singj/prideQC
+
+scripts/slurm/pull_prideqc_sif.sh 489757a400161146f77234a02a8fac137e03cc5a
+```
+
+The resulting files are written under `$PERSIST_ROOT/containers/`:
+
+- `prideqc_sha-<git-sha>.sif`
+- `prideqc_sha-<git-sha>.sif.sha256`
+- `prideqc_sha-<git-sha>.sif.meta.txt`
+
+Do not manually create the checksum when using this helper.
