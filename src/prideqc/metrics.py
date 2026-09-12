@@ -92,6 +92,30 @@ def _quartile_areas(rt: FloatArray, tic: FloatArray) -> list[float] | None:
     return np.diff(areas).tolist()
 
 
+def _quantized_counts(values: Any, decimal_places: int = 1) -> np.ndarray:
+    values = _finite(values)
+    if not values.size:
+        return np.array([], dtype=np.float64)
+    return np.round(values, decimal_places)
+
+
+def _max_repeat_fraction(values: Any, decimal_places: int = 1) -> float | None:
+    quantized = _quantized_counts(values, decimal_places)
+    if not quantized.size:
+        return None
+    _, counts = np.unique(quantized, return_counts=True)
+    return float(counts.max() / quantized.size)
+
+
+def _repeated_fraction(values: Any, decimal_places: int = 1) -> float | None:
+    quantized = _quantized_counts(values, decimal_places)
+    if not quantized.size:
+        return None
+    _, counts = np.unique(quantized, return_counts=True)
+    repeated = counts[counts >= 2].sum() if np.any(counts >= 2) else 0
+    return float(repeated / quantized.size)
+
+
 def _log_ratios(values: FloatArray) -> list[float | None] | None:
     if not values.size:
         return None
@@ -115,6 +139,7 @@ class LevelSummary:
     precursor_intensity: array = field(default_factory=_doubles)
     charges: array = field(default_factory=_doubles)
     isolation_widths: array = field(default_factory=_doubles)
+    isolation_precursor_mz: array = field(default_factory=_doubles)
     polarity: Counter[str] = field(default_factory=Counter)
     representation: Counter[str] = field(default_factory=Counter)
     estimated_representation: Counter[str] = field(default_factory=Counter)
@@ -175,6 +200,8 @@ class LevelSummary:
         if first and first.isolation_width is not None:
             if math.isfinite(first.isolation_width) and first.isolation_width > 0:
                 self.isolation_widths.append(first.isolation_width)
+                if math.isfinite(first.mz) and first.mz > 0:
+                    self.isolation_precursor_mz.append(first.mz)
         methods = {(t.accession, t.name) for p in precursors for t in p.activation}
         self.activation.update(methods)
         self.missing_activation += int(not methods)
@@ -378,6 +405,20 @@ class QCMetricCalculator:
                     float(np.count_nonzero(widths >= 15) / widths.size)
                     if widths.size else None
                 ),
+                f"IsolationPrecursorMz_{label}_Count": int(len(summary.isolation_precursor_mz)),
+                f"IsolationPrecursorMz_{label}_UniqueCount": (
+                    int(np.unique(np.round(np.asarray(summary.isolation_precursor_mz), 1)).size)
+                    if summary.isolation_precursor_mz else 0
+                ),
+                f"IsolationPrecursorMz_{label}_UniqueFraction": (
+                    float(
+                        np.unique(np.round(np.asarray(summary.isolation_precursor_mz), 1)).size
+                        / len(summary.isolation_precursor_mz)
+                    )
+                    if summary.isolation_precursor_mz else None
+                ),
+                f"IsolationPrecursorMz_{label}_MaxRepeatFraction": _max_repeat_fraction(summary.isolation_precursor_mz),
+                f"IsolationPrecursorMz_{label}_RepeatedFraction": _repeated_fraction(summary.isolation_precursor_mz),
                 f"MultiplePrecursors_{label}_Count": summary.multiple_precursors,
             })
             if level == 2:

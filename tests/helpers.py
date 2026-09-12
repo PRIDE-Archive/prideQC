@@ -14,11 +14,11 @@ FUSION = CVTerm("MS:1002416", "Orbitrap Fusion")
 
 def spectrum(rt: float, intensities: list[float], level: int = 1,
              charge: int | None = None, precursor_intensity: float = 100.0,
-             width: float = 2.0, mz: list[float] | None = None,
+             width: float = 2.0, mz: list[float] | None = None, precursor_mz: float = 500.0,
              representation: str = "centroid") -> Spectrum:
     peaks = np.array(mz if mz is not None else [100.0 + i for i in range(len(intensities))])
     precursors = () if charge is None else (Precursor(
-        500,
+        precursor_mz,
         charge,
         precursor_intensity,
         width,
