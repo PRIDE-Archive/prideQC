@@ -12,6 +12,7 @@ PRIDE_PROTOCOL="${PRIDE_PROTOCOL:-ftp}"
 PRIDEQC_DIAGNOSTICS="${PRIDEQC_DIAGNOSTICS:-1}"
 PRIDEQC_INCLUDE_INFERRED="${PRIDEQC_INCLUDE_INFERRED:-0}"
 PRIDEQC_ESTIMATE_PEAK_TYPE="${PRIDEQC_ESTIMATE_PEAK_TYPE:-0}"
+PRIDEQC_ESTIMATE_MASS_ERROR="${PRIDEQC_ESTIMATE_MASS_ERROR:-0}"
 
 TASK_ID="${SLURM_ARRAY_TASK_ID:-${TASK_ID:-1}}"
 JOB_ID="${SLURM_JOB_ID:-local-$$}"
@@ -171,6 +172,7 @@ analysis_flags=()
 [[ "$PRIDEQC_DIAGNOSTICS" == 1 ]] && analysis_flags+=(--diagnostics)
 [[ "$PRIDEQC_INCLUDE_INFERRED" == 1 ]] && analysis_flags+=(--include-inferred)
 [[ "$PRIDEQC_ESTIMATE_PEAK_TYPE" == 1 ]] && analysis_flags+=(--estimate-peak-type)
+[[ "$PRIDEQC_ESTIMATE_MASS_ERROR" == 1 ]] && analysis_flags+=(--estimate-mass-error)
 
 file_map_flags=()
 if [[ "$NEEDS_FILE_MAP" == 1 ]]; then
