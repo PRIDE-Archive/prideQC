@@ -41,6 +41,7 @@ class GroundTruthTaskSubsetTests(unittest.TestCase):
             rows = subset.resolve_tasks(gt, manifest)
             subset.write_task_subset(output, rows)
 
+            self.assertEqual(subset.task_count(rows), 2)
             self.assertEqual(subset.slurm_array(rows), "7,11")
             self.assertEqual([row["task_id"] for row in rows], ["7", "11"])
 

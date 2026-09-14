@@ -85,17 +85,20 @@ python scripts/slurm/prepare_ground_truth_task_subset.py \
   --output "$PERSIST_ROOT/benchmarks/manifests/ground-truth-v6-tasks.tsv"
 ```
 
-The helper prints a validated `task_array=...` value that can be passed directly
-to Slurm, for example:
+The helper prints validated `task_count=...` and `task_array=...` values that can be passed directly
+to Slurm. Prefer the reported `task_count` over counting newlines in the comma-separated array string, because a shell variable normally has no trailing newline:
 
 ```bash
-TASKS=$(python scripts/slurm/prepare_ground_truth_task_subset.py \
+HELPER_OUT=$(python scripts/slurm/prepare_ground_truth_task_subset.py \
   --gt "$PERSIST_ROOT/benchmarks/data/prideqc_ground_truth.tsv" \
   --manifest "$PERSIST_ROOT/benchmarks/manifests/ground-truth-files-v6.tsv" \
-  --output "$PERSIST_ROOT/benchmarks/manifests/ground-truth-v6-tasks.tsv" \
-  | awk -F= '$1 == "task_array" {print $2}')
+  --output "$PERSIST_ROOT/benchmarks/manifests/ground-truth-v6-tasks.tsv")
 
-printf 'TASKS=<%s>\n' "$TASKS"
+printf '%s\n' "$HELPER_OUT"
+TASK_COUNT=$(printf '%s\n' "$HELPER_OUT" | awk -F= '$1 == "task_count" {print $2}')
+TASKS=$(printf '%s\n' "$HELPER_OUT" | awk -F= '$1 == "task_array" {print $2}')
+
+printf 'TASK_COUNT=%s\nTASKS=<%s>\n' "$TASK_COUNT" "$TASKS"
 ```
 
 The helper writes TSV files with `lineterminator="\\n"`. This avoids hidden CR

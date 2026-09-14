@@ -96,6 +96,10 @@ def write_task_subset(path: Path, rows: list[dict[str, str]]) -> None:
         writer.writerows(rows)
 
 
+def task_count(rows: list[dict[str, str]]) -> int:
+    return len(rows)
+
+
 def slurm_array(rows: list[dict[str, str]]) -> str:
     return ",".join(row["task_id"] for row in rows)
 
@@ -105,6 +109,7 @@ def main() -> int:
     rows = resolve_tasks(args.gt, args.manifest)
     write_task_subset(args.output, rows)
     print(f"resolved={len(rows)}")
+    print(f"task_count={task_count(rows)}")
     print(f"output={args.output}")
     print(f"task_array={slurm_array(rows)}")
     return 0

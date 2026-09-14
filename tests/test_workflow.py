@@ -274,6 +274,50 @@ class AnnotationTests(unittest.TestCase):
         self.assertEqual(da.kind, EvidenceKind.UNAVAILABLE)
         self.assertIsNone(da.value)
 
+    def test_fragment_tolerance_reports_robust_inlier_diagnostics(self):
+        collector = RepeatSpectrumMassErrorCollector(
+            min_fragment_pairs=10,
+            min_fragment_tolerance_pairs=20,
+            min_fragment_tolerance_spectra=5,
+        )
+        core_da = [math.sin(i * 0.47) * 0.001 for i in range(200)]
+        core_ppm = [math.sin(i * 0.47) * 2.0 for i in range(200)]
+        collector.fragment_errors_da = core_da + [0.05, -0.05] * 10
+        collector.fragment_errors_ppm = core_ppm + [100.0, -100.0] * 10
+        collector.fragment_paired_spectra = 25
+        collector.fragment_eligible_ms2 = 220
+
+        annotations = collector.annotations()
+        precision = next(
+            a for a in annotations
+            if a.field == "estimated_fragment_mass_error_ppm"
+        )
+        suggestion = next(
+            a for a in annotations
+            if a.field == "suggested_fragment_search_tolerance_ppm"
+        )
+
+        self.assertEqual(suggestion.kind, EvidenceKind.INFERRED)
+        self.assertGreater(precision.value["robust_inlier_fraction"], 0.8)
+        self.assertLess(precision.value["robust_inlier_fraction"], 1.0)
+        self.assertEqual(
+            precision.value["robust_inlier_count"]
+            + precision.value["robust_outlier_count"],
+            220,
+        )
+        self.assertAlmostEqual(
+            suggestion.value["robust_inlier_fraction"],
+            precision.value["robust_inlier_fraction"],
+        )
+        self.assertEqual(
+            suggestion.value["robust_inlier_count"],
+            precision.value["robust_inlier_count"],
+        )
+        self.assertEqual(
+            suggestion.value["robust_outlier_count"],
+            precision.value["robust_outlier_count"],
+        )
+
     def test_fragment_search_tolerance_suggestion_uses_da_for_low_resolution(self):
         collector = RepeatSpectrumMassErrorCollector(
             min_fragment_pairs=10,
