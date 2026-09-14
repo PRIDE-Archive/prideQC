@@ -206,11 +206,17 @@ a six-sigma envelope. A clearly high-resolution precision regime (<=10 ppm and
 The unused unit remains explicitly unavailable. Fragment precision payloads also
 report a mixture-model-free robust core diagnostic: the fraction/count of matched
 fragment deltas within three robust pairwise sigmas of the median. This quantifies
-the outlier component admitted by the deliberately broad fragment matching window;
-v17 reports it for validation and confidence analysis but does not yet use it to
-change or suppress the tolerance recommendation. This is a recommended starting
-envelope, not reconstructed search provenance. `--estimate-peak-type` can also be
-requested independently.
+the outlier component admitted by fragment matching. Starting with v18, repeated
+spectrum pairs are still selected with the conservative 0.2 Da overlap window, but
+runs provisionally classified as low-resolution also collect a 0.5 Da fragment-error
+distribution. High-resolution precision remains based on the 0.2 Da distribution;
+low-resolution precision and tolerance recommendations use the wider distribution
+only when its robust three-sigma pairwise core remains comfortably inside that
+window. If the 0.5 Da distribution is still window-censored, the low-resolution
+tolerance recommendation abstains rather than reporting a truncated estimate. The
+robust inlier fraction remains diagnostic and is not used as a hard quality cutoff.
+This is a recommended starting envelope, not reconstructed search provenance.
+`--estimate-peak-type` can also be requested independently.
 
 Supplying `--sdrf` validates the input and refined output through
 `sdrf_pipelines.sdrf.sdrf.read_sdrf(...).validate_sdrf(...)`. The default template

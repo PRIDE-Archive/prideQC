@@ -247,6 +247,7 @@ class RepeatSpectrumMassErrorCollector:
     rt_window_seconds: float = 120.0
     precursor_candidate_ppm: float = 20.0
     fragment_match_da: float = 0.2
+    fragment_low_res_match_da: float = 0.5
     top_peaks: int = 50
     min_matched_peaks: int = 8
     min_overlap_fraction: float = 0.25
@@ -275,6 +276,8 @@ class RepeatSpectrumMassErrorCollector:
     precursor_errors_da: list[float] = field(default_factory=list)
     fragment_errors_da: list[float] = field(default_factory=list)
     fragment_errors_ppm: list[float] = field(default_factory=list)
+    fragment_low_res_errors_da: list[float] = field(default_factory=list)
+    fragment_low_res_errors_ppm: list[float] = field(default_factory=list)
     precursor_eligible_ms2: int = 0
     fragment_eligible_ms2: int = 0
     precursor_paired_spectra: int = 0
@@ -296,6 +299,13 @@ class RepeatSpectrumMassErrorCollector:
             raise ValueError("precursor_candidate_ppm must be finite and positive")
         if not math.isfinite(self.fragment_match_da) or self.fragment_match_da <= 0:
             raise ValueError("fragment_match_da must be finite and positive")
+        if (
+            not math.isfinite(self.fragment_low_res_match_da)
+            or self.fragment_low_res_match_da <= self.fragment_match_da
+        ):
+            raise ValueError(
+                "fragment_low_res_match_da must be finite and greater than fragment_match_da"
+            )
         if self.top_peaks < 8 or self.min_matched_peaks < 3:
             raise ValueError("top_peaks/min_matched_peaks are too small")
         if not 0 < self.min_overlap_fraction <= 1:
@@ -455,11 +465,22 @@ class RepeatSpectrumMassErrorCollector:
                 best = (score, candidate, deltas, means)
 
         if best is not None:
-            _, _, deltas, means = best
+            _, candidate, deltas, means = best
             self.fragment_errors_da.extend(float(x) for x in deltas)
             self.fragment_errors_ppm.extend(
                 float(delta / mean_mz * 1e6)
                 for delta, mean_mz in zip(deltas, means, strict=True)
+                if mean_mz > 0
+            )
+            wide_deltas, wide_means = _matched_deltas(
+                candidate.mz,
+                mz,
+                self.fragment_low_res_match_da,
+            )
+            self.fragment_low_res_errors_da.extend(float(x) for x in wide_deltas)
+            self.fragment_low_res_errors_ppm.extend(
+                float(delta / mean_mz * 1e6)
+                for delta, mean_mz in zip(wide_deltas, wide_means, strict=True)
                 if mean_mz > 0
             )
             self.fragment_paired_spectra += 1
@@ -487,17 +508,56 @@ class RepeatSpectrumMassErrorCollector:
     def annotations(self) -> list[Annotation]:
         precursor_ppm = _robust_error(self.precursor_errors_ppm)
         precursor_da = _robust_error(self.precursor_errors_da)
-        fragment_da = _robust_error(self.fragment_errors_da)
-        fragment_ppm = _robust_error(self.fragment_errors_ppm)
+        fragment_da_narrow = _robust_error(self.fragment_errors_da)
+        fragment_ppm_narrow = _robust_error(self.fragment_errors_ppm)
+        fragment_da_wide = _robust_error(self.fragment_low_res_errors_da)
+        fragment_ppm_wide = _robust_error(self.fragment_low_res_errors_ppm)
+
+        fragment_resolution_regime = "unavailable"
+        fragment_match_window_da = self.fragment_match_da
+        fragment_da = fragment_da_narrow
+        fragment_ppm = fragment_ppm_narrow
+        fragment_window_censored = False
+        if (
+            fragment_da_narrow is not None
+            and fragment_ppm_narrow is not None
+            and fragment_da_narrow["single_measurement_sigma"] > 0
+            and fragment_ppm_narrow["single_measurement_sigma"] > 0
+        ):
+            narrow_sigma_da = float(fragment_da_narrow["single_measurement_sigma"])
+            narrow_sigma_ppm = float(fragment_ppm_narrow["single_measurement_sigma"])
+            if (
+                narrow_sigma_da <= self.fragment_high_res_max_sigma_da
+                and narrow_sigma_ppm <= self.fragment_high_res_max_sigma_ppm
+            ):
+                fragment_resolution_regime = "high-resolution"
+            elif (
+                narrow_sigma_da >= self.fragment_low_res_min_sigma_da
+                and narrow_sigma_ppm >= self.fragment_low_res_min_sigma_ppm
+            ):
+                fragment_resolution_regime = "low-resolution"
+                if fragment_da_wide is not None and fragment_ppm_wide is not None:
+                    fragment_da = fragment_da_wide
+                    fragment_ppm = fragment_ppm_wide
+                    fragment_match_window_da = self.fragment_low_res_match_da
+                    fragment_window_censored = (
+                        float(fragment_da_wide["robust_inlier_threshold_3sigma"])
+                        >= 0.9 * self.fragment_low_res_match_da
+                    )
+                else:
+                    fragment_window_censored = True
+
         enough_precursor = (
             self.precursor_paired_spectra >= self.min_spectrum_pairs
             and self.precursor_clusters_used >= self.min_precursor_clusters
         )
         enough_fragment = len(self.fragment_errors_da) >= self.min_fragment_pairs
         method = (
-            "repeat-observation mass-error estimator v4; precursor: same positive charge, <=120 s, "
+            "repeat-observation mass-error estimator v5; precursor: same positive charge, <=120 s, "
             "<=20 ppm repeat clusters with >=3 observations; fragment: top-50 peak centers, "
-            "centroid directly or profile local Gaussian-apex estimate, <=0.2 Da matching"
+            "centroid directly or profile local Gaussian-apex estimate; repeated-spectrum pairing "
+            f"uses <={self.fragment_match_da:g} Da and low-resolution precision may use "
+            f"<={self.fragment_low_res_match_da:g} Da after regime classification"
         )
         detail = (
             "Measurement-precision evidence from repeated precursor observations and, where centroid "
@@ -529,7 +589,14 @@ class RepeatSpectrumMassErrorCollector:
                 "estimated_fragment_mass_error_da",
                 fragment_da,
                 enough_fragment,
-                len(self.fragment_errors_da),
+                (
+                    len(self.fragment_low_res_errors_da)
+                    if (
+                        fragment_resolution_regime == "low-resolution"
+                        and fragment_da is fragment_da_wide
+                    )
+                    else len(self.fragment_errors_da)
+                ),
                 self.fragment_eligible_ms2,
                 "Da",
             ),
@@ -537,7 +604,14 @@ class RepeatSpectrumMassErrorCollector:
                 "estimated_fragment_mass_error_ppm",
                 fragment_ppm,
                 enough_fragment,
-                len(self.fragment_errors_ppm),
+                (
+                    len(self.fragment_low_res_errors_ppm)
+                    if (
+                        fragment_resolution_regime == "low-resolution"
+                        and fragment_ppm is fragment_ppm_wide
+                    )
+                    else len(self.fragment_errors_ppm)
+                ),
                 self.fragment_eligible_ms2,
                 "ppm",
             ),
@@ -545,6 +619,14 @@ class RepeatSpectrumMassErrorCollector:
             payload: dict[str, Any] | None = None
             if enough and value is not None and value["single_measurement_sigma"] > 0:
                 payload = {"unit": unit, **value}
+                if field_name.startswith("estimated_fragment_mass_error_"):
+                    payload.update(
+                        {
+                            "resolution_regime": fragment_resolution_regime,
+                            "fragment_match_window_da": fragment_match_window_da,
+                            "window_censored": fragment_window_censored,
+                        }
+                    )
             result.append(Annotation(
                 field_name,
                 payload,
@@ -604,9 +686,17 @@ class RepeatSpectrumMassErrorCollector:
         ))
         fragment_tolerance_ppm: dict[str, Any] | None = None
         fragment_tolerance_da: dict[str, Any] | None = None
+        selected_fragment_pairs = (
+            len(self.fragment_low_res_errors_da)
+            if (
+                fragment_resolution_regime == "low-resolution"
+                and fragment_da is fragment_da_wide
+            )
+            else len(self.fragment_errors_da)
+        )
         enough_fragment_tolerance_support = (
             enough_fragment
-            and len(self.fragment_errors_da) >= self.min_fragment_tolerance_pairs
+            and selected_fragment_pairs >= self.min_fragment_tolerance_pairs
             and self.fragment_paired_spectra >= self.min_fragment_tolerance_spectra
         )
         if (
@@ -620,20 +710,19 @@ class RepeatSpectrumMassErrorCollector:
             sigma_ppm = float(fragment_ppm["single_measurement_sigma"])
             confidence = (
                 "high"
-                if len(self.fragment_errors_da) >= 10_000
+                if selected_fragment_pairs >= 10_000
                 and self.fragment_paired_spectra >= 500
                 else "moderate"
             )
             common_payload = {
                 "sigma_multiplier": self.fragment_tolerance_sigma_multiplier,
                 "confidence": confidence,
-                "fragment_pairs": len(self.fragment_errors_da),
+                "fragment_pairs": selected_fragment_pairs,
                 "paired_spectra": self.fragment_paired_spectra,
+                "fragment_match_window_da": fragment_match_window_da,
+                "window_censored": fragment_window_censored,
             }
-            if (
-                sigma_da <= self.fragment_high_res_max_sigma_da
-                and sigma_ppm <= self.fragment_high_res_max_sigma_ppm
-            ):
+            if fragment_resolution_regime == "high-resolution":
                 fragment_tolerance_ppm = {
                     "unit": "ppm",
                     "suggested_tolerance": self.fragment_tolerance_sigma_multiplier * sigma_ppm,
@@ -644,10 +733,7 @@ class RepeatSpectrumMassErrorCollector:
                     "robust_outlier_count": fragment_ppm["robust_outlier_count"],
                     **common_payload,
                 }
-            elif (
-                sigma_da >= self.fragment_low_res_min_sigma_da
-                and sigma_ppm >= self.fragment_low_res_min_sigma_ppm
-            ):
+            elif fragment_resolution_regime == "low-resolution" and not fragment_window_censored:
                 fragment_tolerance_da = {
                     "unit": "Da",
                     "suggested_tolerance": self.fragment_tolerance_sigma_multiplier * sigma_da,
@@ -660,16 +746,22 @@ class RepeatSpectrumMassErrorCollector:
                 }
 
         fragment_tolerance_method = (
-            "precision-derived fragment search-tolerance heuristic v2; "
+            "precision-derived fragment search-tolerance heuristic v3; "
             f"{self.fragment_tolerance_sigma_multiplier:g} x robust single-measurement sigma; "
             f">={self.min_fragment_tolerance_pairs} matched fragment differences; "
             f">={self.min_fragment_tolerance_spectra} paired spectra; unit selected only for "
-            "clearly separated high- or low-resolution precision regimes"
+            "clearly separated high- or low-resolution precision regimes; low-resolution "
+            f"precision uses a {self.fragment_low_res_match_da:g} Da window only after repeated-spectrum "
+            f"pairing with {self.fragment_match_da:g} Da"
         )
         fragment_tolerance_detail = (
             "Suggested starting fragment tolerance from repeated-spectrum measurement precision. "
             "High-resolution evidence emits ppm only; low-resolution evidence emits Da only; "
-            "intermediate or discordant regimes abstain. The payload also reports the fraction of broad-match fragment deltas within three robust pairwise sigmas of the median as a diagnostic only; v2 does not gate on that fraction yet. Profile-mode evidence uses ephemeral local "
+            "intermediate or discordant regimes abstain. Low-resolution recommendations also abstain "
+            "when the robust 3-sigma pairwise core approaches the wider matching-window boundary, "
+            "preventing a window-truncated precision estimate from becoming a tolerance suggestion. "
+            "The payload reports the fraction of broad-match fragment deltas within three robust "
+            "pairwise sigmas as a diagnostic only. Profile-mode evidence uses ephemeral local "
             "peak-center estimates and never modifies the input spectra. The suggestion cannot "
             "recover historical search settings or guarantee search-optimal parameters and is never "
             "written into SDRF automatically."
@@ -684,7 +776,7 @@ class RepeatSpectrumMassErrorCollector:
                 EvidenceKind.INFERRED if payload is not None else EvidenceKind.UNAVAILABLE,
                 fragment_tolerance_method,
                 fragment_tolerance_detail,
-                support=len(self.fragment_errors_da),
+                support=selected_fragment_pairs,
                 total=self.fragment_eligible_ms2,
             ))
         result.append(Annotation(
@@ -696,6 +788,10 @@ class RepeatSpectrumMassErrorCollector:
                 "fragment_eligible_ms2": self.fragment_eligible_ms2,
                 "fragment_paired_spectra": self.fragment_paired_spectra,
                 "fragment_pairs": len(self.fragment_errors_da),
+                "fragment_low_res_pairs": len(self.fragment_low_res_errors_da),
+                "fragment_resolution_regime": fragment_resolution_regime,
+                "fragment_match_window_da": fragment_match_window_da,
+                "fragment_window_censored": fragment_window_censored,
                 "fragment_centroid_spectra": self.fragment_centroid_spectra,
                 "fragment_profile_spectra": self.fragment_profile_spectra,
                 "fragment_profile_centroids": self.fragment_profile_centroids,
