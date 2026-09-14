@@ -195,11 +195,17 @@ requires at least 200 repeat differences and abstains on small fixed-target grid
 does not observe fixed calibration bias or isotope-error handling, is not a recovered
 historical setting, and is never treated as search-provenance ground truth. Historical
 SDRF `comment[precursor mass tolerance]` and `comment[fragment mass tolerance]` remain
-separate and are never filled or overwritten from RAW-derived estimates. Fragment
-search-tolerance suggestion remains intentionally unimplemented until the derived
-profile-fragment precision is validated against the existing centroid controls and
-additional datasets. `--estimate-peak-type` can also be requested
-independently.
+separate and are never filled or overwritten from RAW-derived estimates. After
+profile-fragment precision is established, the estimator can also emit one of
+`suggested_fragment_search_tolerance_ppm` or
+`suggested_fragment_search_tolerance_da`. This experimental recommendation requires
+at least 1,000 matched fragment differences from at least 50 paired spectra and uses
+a six-sigma envelope. A clearly high-resolution precision regime (<=10 ppm and
+<=0.01 Da single-measurement sigma) emits ppm; a clearly low-resolution regime
+(>=20 ppm and >=0.01 Da sigma) emits Da; intermediate or discordant regimes abstain.
+The unused unit remains explicitly unavailable. This is a recommended starting
+envelope, not reconstructed search provenance. `--estimate-peak-type` can also be
+requested independently.
 
 Supplying `--sdrf` validates the input and refined output through
 `sdrf_pipelines.sdrf.sdrf.read_sdrf(...).validate_sdrf(...)`. The default template
