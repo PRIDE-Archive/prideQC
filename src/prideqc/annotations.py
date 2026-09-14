@@ -99,7 +99,7 @@ class TechnicalAnnotator:
             "narrow runs abstain because PRM and narrow-window DIA are ambiguous. Width unit is Th (m/z)."
         )
 
-        if widths.size >= 100 and total and widths.size / total >= 0.9:
+        if summary is not None and widths.size >= 100 and total and widths.size / total >= 0.9:
             narrow = int(np.count_nonzero(widths <= 3))
             wide = int(np.count_nonzero(widths >= 15))
             narrow_fraction = narrow / widths.size
