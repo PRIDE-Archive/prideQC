@@ -236,6 +236,107 @@ class AnnotationTests(unittest.TestCase):
         )
         self.assertIn(suggestion.value["confidence"], {"moderate", "high"})
 
+    def test_fragment_search_tolerance_suggestion_uses_ppm_for_high_resolution(self):
+        collector = RepeatSpectrumMassErrorCollector(
+            min_fragment_pairs=10,
+            min_fragment_tolerance_pairs=20,
+            min_fragment_tolerance_spectra=5,
+        )
+        collector.fragment_errors_da = [
+            math.sin(i * 0.47) * 0.001
+            for i in range(200)
+        ]
+        collector.fragment_errors_ppm = [
+            math.sin(i * 0.47) * 2.0
+            for i in range(200)
+        ]
+        collector.fragment_paired_spectra = 25
+        collector.fragment_eligible_ms2 = 200
+        annotations = collector.annotations()
+        ppm = next(
+            a for a in annotations
+            if a.field == "suggested_fragment_search_tolerance_ppm"
+        )
+        da = next(
+            a for a in annotations
+            if a.field == "suggested_fragment_search_tolerance_da"
+        )
+        precision = next(
+            a for a in annotations
+            if a.field == "estimated_fragment_mass_error_ppm"
+        )
+        self.assertEqual(ppm.kind, EvidenceKind.INFERRED)
+        self.assertEqual(ppm.value["resolution_regime"], "high-resolution")
+        self.assertAlmostEqual(
+            ppm.value["suggested_tolerance"],
+            6.0 * precision.value["single_measurement_sigma"],
+        )
+        self.assertEqual(da.kind, EvidenceKind.UNAVAILABLE)
+        self.assertIsNone(da.value)
+
+    def test_fragment_search_tolerance_suggestion_uses_da_for_low_resolution(self):
+        collector = RepeatSpectrumMassErrorCollector(
+            min_fragment_pairs=10,
+            min_fragment_tolerance_pairs=20,
+            min_fragment_tolerance_spectra=5,
+        )
+        collector.fragment_errors_da = [
+            math.sin(i * 0.47) * 0.08
+            for i in range(200)
+        ]
+        collector.fragment_errors_ppm = [
+            math.sin(i * 0.47) * 120.0
+            for i in range(200)
+        ]
+        collector.fragment_paired_spectra = 25
+        collector.fragment_eligible_ms2 = 200
+        annotations = collector.annotations()
+        ppm = next(
+            a for a in annotations
+            if a.field == "suggested_fragment_search_tolerance_ppm"
+        )
+        da = next(
+            a for a in annotations
+            if a.field == "suggested_fragment_search_tolerance_da"
+        )
+        precision = next(
+            a for a in annotations
+            if a.field == "estimated_fragment_mass_error_da"
+        )
+        self.assertEqual(da.kind, EvidenceKind.INFERRED)
+        self.assertEqual(da.value["resolution_regime"], "low-resolution")
+        self.assertAlmostEqual(
+            da.value["suggested_tolerance"],
+            6.0 * precision.value["single_measurement_sigma"],
+        )
+        self.assertEqual(ppm.kind, EvidenceKind.UNAVAILABLE)
+        self.assertIsNone(ppm.value)
+
+    def test_fragment_search_tolerance_suggestion_abstains_on_ambiguous_regime(self):
+        collector = RepeatSpectrumMassErrorCollector(
+            min_fragment_pairs=10,
+            min_fragment_tolerance_pairs=20,
+            min_fragment_tolerance_spectra=5,
+        )
+        collector.fragment_errors_da = [
+            math.sin(i * 0.47) * 0.02
+            for i in range(200)
+        ]
+        collector.fragment_errors_ppm = [
+            math.sin(i * 0.47) * 12.0
+            for i in range(200)
+        ]
+        collector.fragment_paired_spectra = 25
+        collector.fragment_eligible_ms2 = 200
+        annotations = collector.annotations()
+        for field_name in (
+            "suggested_fragment_search_tolerance_ppm",
+            "suggested_fragment_search_tolerance_da",
+        ):
+            suggestion = next(a for a in annotations if a.field == field_name)
+            self.assertEqual(suggestion.kind, EvidenceKind.UNAVAILABLE)
+            self.assertIsNone(suggestion.value)
+
     def test_precursor_search_tolerance_suggestion_abstains_on_small_target_grid(self):
         collector = RepeatSpectrumMassErrorCollector(
             min_spectrum_pairs=10,

@@ -234,6 +234,13 @@ class RepeatSpectrumMassErrorCollector:
     min_tolerance_pairs: int = 200
     min_tolerance_clusters: int = 100
     tolerance_sigma_multiplier: float = 6.0
+    min_fragment_tolerance_pairs: int = 1000
+    min_fragment_tolerance_spectra: int = 50
+    fragment_tolerance_sigma_multiplier: float = 6.0
+    fragment_high_res_max_sigma_da: float = 0.01
+    fragment_high_res_max_sigma_ppm: float = 10.0
+    fragment_low_res_min_sigma_da: float = 0.01
+    fragment_low_res_min_sigma_ppm: float = 20.0
     _precursor_bins: defaultdict[tuple[int, int], list[_PrecursorCluster]] = field(
         default_factory=lambda: defaultdict(list),
     )
@@ -279,6 +286,23 @@ class RepeatSpectrumMassErrorCollector:
             raise ValueError("min_tolerance_clusters must be >= min_precursor_clusters")
         if not math.isfinite(self.tolerance_sigma_multiplier) or self.tolerance_sigma_multiplier <= 0:
             raise ValueError("tolerance_sigma_multiplier must be finite and positive")
+        if self.min_fragment_tolerance_pairs < self.min_fragment_pairs:
+            raise ValueError("min_fragment_tolerance_pairs must be >= min_fragment_pairs")
+        if self.min_fragment_tolerance_spectra < 1:
+            raise ValueError("min_fragment_tolerance_spectra must be positive")
+        if (
+            not math.isfinite(self.fragment_tolerance_sigma_multiplier)
+            or self.fragment_tolerance_sigma_multiplier <= 0
+        ):
+            raise ValueError("fragment_tolerance_sigma_multiplier must be finite and positive")
+        for name, value in (
+            ("fragment_high_res_max_sigma_da", self.fragment_high_res_max_sigma_da),
+            ("fragment_high_res_max_sigma_ppm", self.fragment_high_res_max_sigma_ppm),
+            ("fragment_low_res_min_sigma_da", self.fragment_low_res_min_sigma_da),
+            ("fragment_low_res_min_sigma_ppm", self.fragment_low_res_min_sigma_ppm),
+        ):
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and positive")
 
     def _candidate_precursor_clusters(
         self,
@@ -554,6 +578,85 @@ class RepeatSpectrumMassErrorCollector:
             support=self.precursor_paired_spectra,
             total=self.precursor_eligible_ms2,
         ))
+        fragment_tolerance_ppm: dict[str, Any] | None = None
+        fragment_tolerance_da: dict[str, Any] | None = None
+        enough_fragment_tolerance_support = (
+            enough_fragment
+            and len(self.fragment_errors_da) >= self.min_fragment_tolerance_pairs
+            and self.fragment_paired_spectra >= self.min_fragment_tolerance_spectra
+        )
+        if (
+            enough_fragment_tolerance_support
+            and fragment_da is not None
+            and fragment_ppm is not None
+            and fragment_da["single_measurement_sigma"] > 0
+            and fragment_ppm["single_measurement_sigma"] > 0
+        ):
+            sigma_da = float(fragment_da["single_measurement_sigma"])
+            sigma_ppm = float(fragment_ppm["single_measurement_sigma"])
+            confidence = (
+                "high"
+                if len(self.fragment_errors_da) >= 10_000
+                and self.fragment_paired_spectra >= 500
+                else "moderate"
+            )
+            common_payload = {
+                "sigma_multiplier": self.fragment_tolerance_sigma_multiplier,
+                "confidence": confidence,
+                "fragment_pairs": len(self.fragment_errors_da),
+                "paired_spectra": self.fragment_paired_spectra,
+            }
+            if (
+                sigma_da <= self.fragment_high_res_max_sigma_da
+                and sigma_ppm <= self.fragment_high_res_max_sigma_ppm
+            ):
+                fragment_tolerance_ppm = {
+                    "unit": "ppm",
+                    "suggested_tolerance": self.fragment_tolerance_sigma_multiplier * sigma_ppm,
+                    "single_measurement_sigma": sigma_ppm,
+                    "resolution_regime": "high-resolution",
+                    **common_payload,
+                }
+            elif (
+                sigma_da >= self.fragment_low_res_min_sigma_da
+                and sigma_ppm >= self.fragment_low_res_min_sigma_ppm
+            ):
+                fragment_tolerance_da = {
+                    "unit": "Da",
+                    "suggested_tolerance": self.fragment_tolerance_sigma_multiplier * sigma_da,
+                    "single_measurement_sigma": sigma_da,
+                    "resolution_regime": "low-resolution",
+                    **common_payload,
+                }
+
+        fragment_tolerance_method = (
+            "precision-derived fragment search-tolerance heuristic v1; "
+            f"{self.fragment_tolerance_sigma_multiplier:g} x robust single-measurement sigma; "
+            f">={self.min_fragment_tolerance_pairs} matched fragment differences; "
+            f">={self.min_fragment_tolerance_spectra} paired spectra; unit selected only for "
+            "clearly separated high- or low-resolution precision regimes"
+        )
+        fragment_tolerance_detail = (
+            "Suggested starting fragment tolerance from repeated-spectrum measurement precision. "
+            "High-resolution evidence emits ppm only; low-resolution evidence emits Da only; "
+            "intermediate or discordant regimes abstain. Profile-mode evidence uses ephemeral local "
+            "peak-center estimates and never modifies the input spectra. The suggestion cannot "
+            "recover historical search settings or guarantee search-optimal parameters and is never "
+            "written into SDRF automatically."
+        )
+        for field_name, payload in (
+            ("suggested_fragment_search_tolerance_ppm", fragment_tolerance_ppm),
+            ("suggested_fragment_search_tolerance_da", fragment_tolerance_da),
+        ):
+            result.append(Annotation(
+                field_name,
+                payload,
+                EvidenceKind.INFERRED if payload is not None else EvidenceKind.UNAVAILABLE,
+                fragment_tolerance_method,
+                fragment_tolerance_detail,
+                support=len(self.fragment_errors_da),
+                total=self.fragment_eligible_ms2,
+            ))
         result.append(Annotation(
             "mass_error_estimator_diagnostics",
             {
