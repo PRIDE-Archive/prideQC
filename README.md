@@ -179,12 +179,14 @@ not confirmed PTMs or plex/channel assignments, and never auto-fills SDRF.
 `--estimate-mass-error` adds an experimental one-pass estimator for precursor and
 fragment *measurement precision*. Precursor precision uses repeated precursor m/z
 observations with compatible charge and retention time, so it can remain available
-when MS2 fragment arrays are profile-mode. Fragment precision is stricter and uses
-only centroid MS2 peak arrays with strong top-peak overlap; explicit profile spectra
-are never centroided or peak-picked. When mass-error estimation is enabled, OpenMS
-PeakTypeEstimator is also used to resolve native `unknown` peak representation, but
-only `unknown` scans independently estimated as centroid can become fragment-eligible.
-The estimator emits separate inferred annotations such as
+when MS2 fragment arrays are profile-mode. Fragment precision uses strong peak
+centers from likely repeated MS2 spectra. Native centroid scans use their existing
+peak lists; native profile scans use an ephemeral three-point log-parabolic
+(Gaussian-apex) center estimate around strong local maxima. This derived peak list is
+used only inside the QC estimator: the input spectrum is never modified, centroided
+in-place, or written back. Native `unknown` scans use OpenMS PeakTypeEstimator to
+select the centroid/profile evidence path and otherwise abstain. The estimator emits
+separate inferred annotations such as
 `estimated_precursor_mass_error_ppm` and `estimated_fragment_mass_error_da`. When
 precursor evidence is strong and distributed across at least 100 repeat clusters, it
 also emits `suggested_precursor_search_tolerance_ppm`, an experimental six-sigma
@@ -194,8 +196,9 @@ does not observe fixed calibration bias or isotope-error handling, is not a reco
 historical setting, and is never treated as search-provenance ground truth. Historical
 SDRF `comment[precursor mass tolerance]` and `comment[fragment mass tolerance]` remain
 separate and are never filled or overwritten from RAW-derived estimates. Fragment
-search-tolerance suggestion remains intentionally unimplemented until more centroid
-benchmark evidence is available. `--estimate-peak-type` can also be requested
+search-tolerance suggestion remains intentionally unimplemented until the derived
+profile-fragment precision is validated against the existing centroid controls and
+additional datasets. `--estimate-peak-type` can also be requested
 independently.
 
 Supplying `--sdrf` validates the input and refined output through

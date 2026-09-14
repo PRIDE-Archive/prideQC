@@ -1,8 +1,8 @@
 """Streaming mass-error evidence with bounded memory.
 
 This module estimates *measurement precision* from repeated precursor
-observations and, when centroid fragment peaks are available, likely repeated
-MS2 spectra. It deliberately does not claim to recover the historical
+observations and likely repeated MS2 spectra. Centroid fragments use their native
+peak lists; profile fragments use ephemeral local peak-center estimates. It deliberately does not claim to recover the historical
 database-search settings. Search tolerances remain separate SDRF/search
 provenance.
 """
@@ -57,6 +57,95 @@ def _top_peaks(spectrum: Spectrum, limit: int) -> tuple[np.ndarray, np.ndarray]:
         intensity = intensity / norm
     return mz, intensity
 
+
+
+def _profile_peak_centers(
+    spectrum: Spectrum,
+    limit: int,
+    *,
+    min_neighbor_fraction: float = 0.01,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Estimate strong peak centers from a profile spectrum without mutating it.
+
+    Candidate local maxima are ranked by apex intensity. For each candidate,
+    the center is estimated from the apex and its immediate neighbours by a
+    three-point quadratic fit to log(intensity), the local form of a Gaussian
+    profile. Ill-conditioned, non-concave, or out-of-bracket fits are rejected
+    rather than falling back to the sampled apex position.
+
+    The calculation is vectorized because profile MS2 scans can contain many
+    samples. Returned peak centers are ephemeral evidence only; the input
+    spectrum is never centroided in-place or written back to disk.
+    """
+
+    mz = np.asarray(spectrum.mz, dtype=float)
+    intensity = np.asarray(spectrum.intensity, dtype=float)
+    valid = np.isfinite(mz) & (mz > 0) & np.isfinite(intensity) & (intensity >= 0)
+    mz, intensity = mz[valid], intensity[valid]
+    if mz.size < 3:
+        return np.array([], dtype=float), np.array([], dtype=float)
+
+    if np.any(np.diff(mz) < 0):
+        order = np.argsort(mz, kind="stable")
+        mz, intensity = mz[order], intensity[order]
+    maxima = np.flatnonzero(
+        (intensity[1:-1] > intensity[:-2])
+        & (intensity[1:-1] >= intensity[2:])
+        & (intensity[1:-1] > 0)
+    ) + 1
+    if not maxima.size:
+        return np.array([], dtype=float), np.array([], dtype=float)
+
+    if maxima.size > limit:
+        strongest = np.argpartition(intensity[maxima], -limit)[-limit:]
+        maxima = maxima[strongest]
+
+    apex = intensity[maxima]
+    left_i = intensity[maxima - 1]
+    right_i = intensity[maxima + 1]
+    usable = (
+        (left_i > 0)
+        & (right_i > 0)
+        & (left_i >= apex * min_neighbor_fraction)
+        & (right_i >= apex * min_neighbor_fraction)
+    )
+    maxima = maxima[usable]
+    apex = apex[usable]
+    left_i = left_i[usable]
+    right_i = right_i[usable]
+    if not maxima.size:
+        return np.array([], dtype=float), np.array([], dtype=float)
+
+    center_sample = mz[maxima]
+    x_left = mz[maxima - 1] - center_sample
+    x_right = mz[maxima + 1] - center_sample
+    y_left = np.log(left_i) - np.log(apex)
+    y_right = np.log(right_i) - np.log(apex)
+    determinant = x_left * x_right * (x_left - x_right)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        a = (y_left * x_right - y_right * x_left) / determinant
+        b = (x_left * x_left * y_right - x_right * x_right * y_left) / determinant
+        offset = -b / (2.0 * a)
+    centers = center_sample + offset
+    usable = (
+        np.isfinite(a)
+        & np.isfinite(b)
+        & np.isfinite(centers)
+        & (a < 0)
+        & (centers >= mz[maxima - 1])
+        & (centers <= mz[maxima + 1])
+    )
+    centers = centers[usable]
+    heights = apex[usable]
+    if not centers.size:
+        return np.array([], dtype=float), np.array([], dtype=float)
+
+    order = np.argsort(centers, kind="stable")
+    centers, heights = centers[order], heights[order]
+    norm = float(np.linalg.norm(heights))
+    if norm > 0:
+        heights = heights / norm
+    return centers.astype(float, copy=False), heights.astype(float, copy=False)
 
 def _matched_deltas(
     left_mz: np.ndarray,
@@ -123,11 +212,12 @@ class RepeatSpectrumMassErrorCollector:
     depend on fragment peak representation and therefore remains usable for
     profile MS2 data.
 
-    Fragment precision is stricter: candidate spectra must additionally have
-    centroid fragment peaks and strong overlap among their most intense peaks.
-    Explicit native profile spectra are never treated as centroid. Native
-    ``unknown`` spectra may use OpenMS peak-type evidence when it independently
-    classifies the peak array as centroid.
+    Fragment precision uses strong peak centers from likely repeated MS2 spectra.
+    Native centroid spectra use their existing peak lists. Native profile spectra
+    use an ephemeral local Gaussian-apex estimate derived from the original profile
+    samples; the spectrum is never modified or written back. Native ``unknown``
+    spectra use OpenMS peak-type evidence to select the centroid/profile path and
+    otherwise abstain.
     """
 
     rt_window_seconds: float = 120.0
@@ -159,7 +249,12 @@ class RepeatSpectrumMassErrorCollector:
     precursor_paired_spectra: int = 0
     precursor_clusters_used: int = 0
     fragment_paired_spectra: int = 0
+    fragment_centroid_spectra: int = 0
+    fragment_profile_spectra: int = 0
+    fragment_profile_centroids: int = 0
     excluded_fragment_profile_or_unknown: int = 0
+    excluded_fragment_unknown: int = 0
+    excluded_profile_peak_pick_failure: int = 0
     excluded_missing_precursor: int = 0
     excluded_low_fragment_peaks: int = 0
 
@@ -258,19 +353,29 @@ class RepeatSpectrumMassErrorCollector:
         cluster.last_rt = spectrum.rt
         self._commit_precursor_cluster(cluster)
 
-    def _fragment_is_centroid(self, spectrum: Spectrum) -> bool:
-        if spectrum.representation == "centroid":
-            return True
-        return (
-            spectrum.representation == "unknown"
-            and spectrum.estimated_representation == "centroid"
-        )
+    def _fragment_peaks(self, spectrum: Spectrum) -> tuple[np.ndarray, np.ndarray]:
+        representation = spectrum.representation
+        if representation == "unknown":
+            representation = spectrum.estimated_representation or "unknown"
+
+        if representation == "centroid":
+            self.fragment_centroid_spectra += 1
+            return _top_peaks(spectrum, self.top_peaks)
+
+        if representation == "profile":
+            self.fragment_profile_spectra += 1
+            mz, intensity = _profile_peak_centers(spectrum, self.top_peaks)
+            self.fragment_profile_centroids += int(mz.size)
+            if mz.size < self.min_matched_peaks:
+                self.excluded_profile_peak_pick_failure += 1
+            return mz, intensity
+
+        self.excluded_fragment_unknown += 1
+        self.excluded_fragment_profile_or_unknown += 1
+        return np.array([], dtype=float), np.array([], dtype=float)
 
     def _consume_fragments(self, spectrum: Spectrum, precursor_mz: float, charge: int) -> None:
-        if not self._fragment_is_centroid(spectrum):
-            self.excluded_fragment_profile_or_unknown += 1
-            return
-        mz, intensity = _top_peaks(spectrum, self.top_peaks)
+        mz, intensity = self._fragment_peaks(spectrum)
         if mz.size < self.min_matched_peaks:
             self.excluded_low_fragment_peaks += 1
             return
@@ -342,16 +447,17 @@ class RepeatSpectrumMassErrorCollector:
         )
         enough_fragment = len(self.fragment_errors_da) >= self.min_fragment_pairs
         method = (
-            "repeat-observation mass-error estimator v2; precursor: same positive charge, <=120 s, "
-            "<=20 ppm repeat clusters with >=3 observations; fragment: centroid MS2, top-50 peak "
-            "overlap, <=0.2 Da matching"
+            "repeat-observation mass-error estimator v3; precursor: same positive charge, <=120 s, "
+            "<=20 ppm repeat clusters with >=3 observations; fragment: top-50 peak centers, "
+            "centroid directly or profile local Gaussian-apex estimate, <=0.2 Da matching"
         )
         detail = (
             "Measurement-precision evidence from repeated precursor observations and, where centroid "
-            "fragment peaks are available, likely repeated spectra. Pairwise robust scale is converted "
-            "to an approximate single-measurement sigma by dividing by sqrt(2). Explicit profile "
-            "fragment spectra are never centroided or peak-picked. This is not the historical "
-            "database-search tolerance and is never written into SDRF automatically."
+            "fragment peak centers are available, likely repeated spectra. Pairwise robust scale is "
+            "converted to an approximate single-measurement sigma by dividing by sqrt(2). Profile "
+            "fragment centers are ephemeral local estimates from the original profile samples; input "
+            "spectra are never modified or written back. This is not the historical database-search "
+            "tolerance and is never written into SDRF automatically."
         )
         result: list[Annotation] = []
         for field_name, value, enough, support, total, unit in (
@@ -457,7 +563,12 @@ class RepeatSpectrumMassErrorCollector:
                 "fragment_eligible_ms2": self.fragment_eligible_ms2,
                 "fragment_paired_spectra": self.fragment_paired_spectra,
                 "fragment_pairs": len(self.fragment_errors_da),
+                "fragment_centroid_spectra": self.fragment_centroid_spectra,
+                "fragment_profile_spectra": self.fragment_profile_spectra,
+                "fragment_profile_centroids": self.fragment_profile_centroids,
                 "excluded_fragment_profile_or_unknown": self.excluded_fragment_profile_or_unknown,
+                "excluded_fragment_unknown": self.excluded_fragment_unknown,
+                "excluded_profile_peak_pick_failure": self.excluded_profile_peak_pick_failure,
                 "excluded_low_fragment_peaks": self.excluded_low_fragment_peaks,
                 "excluded_missing_precursor": self.excluded_missing_precursor,
             },

@@ -113,7 +113,53 @@ class AnnotationTests(unittest.TestCase):
         self.assertEqual(fragment.kind, EvidenceKind.INFERRED)
         self.assertGreater(fragment.value["single_measurement_sigma"], 0)
 
-    def test_repeat_spectrum_mass_error_estimator_profile_supports_precursor_only(self):
+    def test_profile_fragment_precision_uses_ephemeral_peak_centers(self):
+        collector = RepeatSpectrumMassErrorCollector(
+            min_spectrum_pairs=10,
+            min_precursor_clusters=1,
+            min_fragment_pairs=80,
+        )
+        spectra = []
+        base_fragments = np.arange(100.0, 110.0)
+        offsets = np.linspace(-0.03, 0.03, 7)
+        for i in range(30):
+            shift_da = math.sin(i * 0.73) * 0.002
+            precursor = 500.0 + math.sin(i * 0.61) * 0.001
+            mz = []
+            intensities = []
+            for peak_index, center in enumerate(base_fragments):
+                mz.extend(center + shift_da + offsets)
+                intensities.extend(
+                    (100.0 - peak_index) * np.exp(-0.5 * (offsets / 0.012) ** 2)
+                )
+            spectra.append(spectrum(
+                i * 2.0,
+                list(intensities),
+                2,
+                charge=2,
+                precursor_mz=precursor,
+                mz=list(mz),
+                representation="profile",
+            ))
+        result = Analyzer(MemoryReader(spectra)).analyze(
+            "profile-peaks.mzML",
+            collectors=[collector],
+        )
+        fragment = next(
+            a for a in result.annotations if a.field == "estimated_fragment_mass_error_da"
+        )
+        diagnostic = next(
+            a for a in result.annotations if a.field == "mass_error_estimator_diagnostics"
+        )
+        self.assertEqual(fragment.kind, EvidenceKind.INFERRED)
+        self.assertGreater(fragment.value["single_measurement_sigma"], 0)
+        self.assertGreaterEqual(fragment.support, 80)
+        self.assertEqual(diagnostic.value["fragment_profile_spectra"], 30)
+        self.assertEqual(diagnostic.value["fragment_centroid_spectra"], 0)
+        self.assertGreaterEqual(diagnostic.value["fragment_profile_centroids"], 300)
+        self.assertEqual(diagnostic.value["excluded_profile_peak_pick_failure"], 0)
+
+    def test_profile_fragment_precision_abstains_without_resolvable_peaks(self):
         collector = RepeatSpectrumMassErrorCollector(
             min_spectrum_pairs=10,
             min_fragment_pairs=10,
@@ -132,7 +178,7 @@ class AnnotationTests(unittest.TestCase):
                     mz=[100.0 + j for j in range(10)],
                     representation="profile",
                 ))
-        result = Analyzer(MemoryReader(spectra)).analyze("profile.mzML", collectors=[collector])
+        result = Analyzer(MemoryReader(spectra)).analyze("profile-flat.mzML", collectors=[collector])
         precursor = next(
             a for a in result.annotations if a.field == "estimated_precursor_mass_error_ppm"
         )
@@ -149,7 +195,8 @@ class AnnotationTests(unittest.TestCase):
         self.assertEqual(diagnostic.value["precursor_eligible_ms2"], 80)
         self.assertGreaterEqual(diagnostic.value["precursor_paired_spectra"], 10)
         self.assertEqual(diagnostic.value["fragment_eligible_ms2"], 0)
-        self.assertEqual(diagnostic.value["excluded_fragment_profile_or_unknown"], 80)
+        self.assertEqual(diagnostic.value["fragment_profile_spectra"], 80)
+        self.assertEqual(diagnostic.value["excluded_profile_peak_pick_failure"], 80)
 
     def test_precursor_search_tolerance_suggestion_requires_strong_diverse_support(self):
         collector = RepeatSpectrumMassErrorCollector(
