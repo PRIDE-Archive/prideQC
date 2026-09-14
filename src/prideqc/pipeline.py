@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Any
 
 from prideqc import __version__
 from prideqc.annotations import DiagnosticIonCollector, TechnicalAnnotator
-from prideqc.mass_error import RepeatSpectrumMassErrorCollector
 from prideqc.conversion import ExternalConverter
 from prideqc.io import atomic_text, json_safe, write_json
+from prideqc.mass_error import RepeatSpectrumMassErrorCollector
 from prideqc.metrics import QCMetricCalculator, RunSummary
 from prideqc.models import AnalysisResult, EvidenceCollector, FloatArray, Spectrum, SpectrumReader
 from prideqc.mzqc import MzQCWriter

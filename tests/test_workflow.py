@@ -15,10 +15,10 @@ from unittest.mock import patch
 import numpy as np
 
 from prideqc.annotations import DiagnosticIonCollector
-from prideqc.mass_error import RepeatSpectrumMassErrorCollector
 from prideqc.cli import main
 from prideqc.conversion import ExternalConverter
 from prideqc.io import atomic_text, json_safe
+from prideqc.mass_error import RepeatSpectrumMassErrorCollector
 from prideqc.models import Annotation, EvidenceKind, Metric, RunMetadata
 from prideqc.mzqc import MzQCWriter, definition
 from prideqc.pipeline import Analyzer, FileOutcome, Workflow, WorkflowOptions
