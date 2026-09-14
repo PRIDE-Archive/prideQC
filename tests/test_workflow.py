@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -48,6 +49,7 @@ class AnnotationTests(unittest.TestCase):
     def test_repeat_spectrum_mass_error_estimator_reports_precision(self):
         collector = RepeatSpectrumMassErrorCollector(
             min_spectrum_pairs=10,
+            min_precursor_clusters=1,
             min_fragment_pairs=80,
         )
         spectra = []
@@ -81,33 +83,73 @@ class AnnotationTests(unittest.TestCase):
         self.assertGreaterEqual(precursor.support, 10)
         self.assertGreaterEqual(fragment.support, 80)
 
-    def test_repeat_spectrum_mass_error_estimator_abstains_without_centroid_support(self):
+    def test_unknown_peak_type_estimated_centroid_supports_fragment_precision(self):
         collector = RepeatSpectrumMassErrorCollector(
-            min_spectrum_pairs=2,
-            min_fragment_pairs=10,
+            min_spectrum_pairs=10,
+            min_precursor_clusters=1,
+            min_fragment_pairs=80,
         )
-        spectra = [
-            spectrum(
-                i,
-                [10.0] * 10,
+        spectra = []
+        base_fragments = np.arange(100.0, 110.0)
+        intensities = [100.0 - i for i in range(10)]
+        for i in range(30):
+            item = spectrum(
+                i * 2.0,
+                intensities,
                 2,
                 charge=2,
-                precursor_mz=500.0,
-                mz=[100.0 + j for j in range(10)],
-                representation="profile",
+                precursor_mz=500.0 + math.sin(i * 0.61) * 0.001,
+                mz=(base_fragments + math.sin(i * 0.73) * 0.002).tolist(),
+                representation="unknown",
             )
-            for i in range(5)
-        ]
+            spectra.append(replace(item, estimated_representation="centroid"))
+        result = Analyzer(MemoryReader(spectra)).analyze(
+            "estimated-centroid.mzML",
+            collectors=[collector],
+        )
+        fragment = next(
+            a for a in result.annotations if a.field == "estimated_fragment_mass_error_da"
+        )
+        self.assertEqual(fragment.kind, EvidenceKind.INFERRED)
+        self.assertGreater(fragment.value["single_measurement_sigma"], 0)
+
+    def test_repeat_spectrum_mass_error_estimator_profile_supports_precursor_only(self):
+        collector = RepeatSpectrumMassErrorCollector(
+            min_spectrum_pairs=10,
+            min_fragment_pairs=10,
+        )
+        spectra = []
+        for cycle in range(4):
+            for target_index in range(20):
+                base = 500.0 + target_index * 2.0
+                precursor = base + math.sin(cycle * 0.71 + target_index * 0.13) * 0.001
+                spectra.append(spectrum(
+                    cycle * 30 + target_index,
+                    [10.0] * 10,
+                    2,
+                    charge=2,
+                    precursor_mz=precursor,
+                    mz=[100.0 + j for j in range(10)],
+                    representation="profile",
+                ))
         result = Analyzer(MemoryReader(spectra)).analyze("profile.mzML", collectors=[collector])
-        evidence = next(
+        precursor = next(
             a for a in result.annotations if a.field == "estimated_precursor_mass_error_ppm"
+        )
+        fragment = next(
+            a for a in result.annotations if a.field == "estimated_fragment_mass_error_da"
         )
         diagnostic = next(
             a for a in result.annotations if a.field == "mass_error_estimator_diagnostics"
         )
-        self.assertEqual(evidence.kind, EvidenceKind.UNAVAILABLE)
-        self.assertIsNone(evidence.value)
-        self.assertEqual(diagnostic.value["excluded_profile_or_unknown"], 5)
+        self.assertEqual(precursor.kind, EvidenceKind.INFERRED)
+        self.assertGreater(precursor.value["single_measurement_sigma"], 0)
+        self.assertEqual(fragment.kind, EvidenceKind.UNAVAILABLE)
+        self.assertIsNone(fragment.value)
+        self.assertEqual(diagnostic.value["precursor_eligible_ms2"], 80)
+        self.assertGreaterEqual(diagnostic.value["precursor_paired_spectra"], 10)
+        self.assertEqual(diagnostic.value["fragment_eligible_ms2"], 0)
+        self.assertEqual(diagnostic.value["excluded_fragment_profile_or_unknown"], 80)
 
     def test_profile_and_unknown_spectra_do_not_become_reporter_evidence(self):
         collector = DiagnosticIonCollector()

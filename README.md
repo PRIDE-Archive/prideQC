@@ -176,14 +176,19 @@ settings. No enzyme, sample label, fixed modification or enrichment is invented.
 `--diagnostics` adds a centroid MS2/MS3 reporter/oxonium screen for TMT-family,
 iTRAQ-family and glycan signatures. This returns counts and thresholds,
 not confirmed PTMs or plex/channel assignments, and never auto-fills SDRF.
-`--estimate-mass-error` adds an experimental one-pass repeat-spectrum estimator for
-precursor and fragment *measurement precision*. It retains only compact top-peak
-fingerprints in a bounded retention-time window and emits inferred annotations such
-as `estimated_precursor_mass_error_ppm` and `estimated_fragment_mass_error_da`. These
-values are not the historical database-search tolerances and never fill or overwrite
+`--estimate-mass-error` adds an experimental one-pass estimator for precursor and
+fragment *measurement precision*. Precursor precision uses repeated precursor m/z
+observations with compatible charge and retention time, so it can remain available
+when MS2 fragment arrays are profile-mode. Fragment precision is stricter and uses
+only centroid MS2 peak arrays with strong top-peak overlap; explicit profile spectra
+are never centroided or peak-picked. When mass-error estimation is enabled, OpenMS
+PeakTypeEstimator is also used to resolve native `unknown` peak representation, but
+only `unknown` scans independently estimated as centroid can become fragment-eligible.
+The estimator emits separate inferred annotations such as
+`estimated_precursor_mass_error_ppm` and `estimated_fragment_mass_error_da`. These
+values are not historical database-search tolerances and never fill or overwrite
 SDRF `comment[precursor mass tolerance]` or `comment[fragment mass tolerance]`.
-`--estimate-peak-type` additionally runs OpenMS PeakTypeEstimator for scans with
-more than ten peaks, on the same data pass.
+`--estimate-peak-type` can also be requested independently.
 
 Supplying `--sdrf` validates the input and refined output through
 `sdrf_pipelines.sdrf.sdrf.read_sdrf(...).validate_sdrf(...)`. The default template
