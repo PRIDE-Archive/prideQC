@@ -105,6 +105,32 @@ The helper writes TSV files with `lineterminator="\\n"`. This avoids hidden CR
 characters in the final `task_id` column, which otherwise make a visually valid
 Slurm array specification fail with `Invalid job array specification`.
 
+### End-to-end targeted experiment rule
+
+For targeted scientific validation, run the experiment from a fresh shell block
+instead of reusing variables or report names from a previous version. A complete
+experiment should always define, in order: `PERSIST_ROOT`, immutable Git SHA/SIF,
+`GT`, `MANIFEST`, task subset/output path, `RESULT_ROOT`, `RUN_NAME`, estimator
+flags, Slurm submission, and the version-specific report. Do not rely on an older
+`RUN_NAME`, `SIF`, `GT_TASKS`, or report script remaining correct in the shell.
+
+Before submitting, print the immutable container provenance and the resolved array:
+
+```bash
+singularity exec "$SIF" cat /opt/prideqc/build-info.txt |
+  grep -E '^(vcs_ref|source_state|source_fingerprint_sha256)='
+
+printf 'RUN_NAME=%s\nTASK_COUNT=%s\nTASKS=<%s>\n' \
+  "$RUN_NAME" "$TASK_COUNT" "$TASKS"
+
+test "$TASK_COUNT" -eq 10
+printf '%s\n' "$TASKS" | grep -Eq '^[0-9]+(,[0-9]+)*$'
+```
+
+Use a new run name for every estimator revision even when the same RAW files are
+reused. This makes provenance visible in the result path and prevents a correct new
+SIF from being mistaken for an older experiment because stale shell names were reused.
+
 ## Monitor
 
 ```bash
