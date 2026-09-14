@@ -181,25 +181,49 @@ def _matched_deltas(
     return np.asarray(deltas, dtype=float), np.asarray(means, dtype=float)
 
 
-def _robust_error(values: list[float]) -> dict[str, float] | None:
-    """Robust symmetric error summary for pairwise repeated measurements."""
+def _robust_error(values: list[float]) -> dict[str, float | int] | None:
+    """Robust symmetric error summary for pairwise repeated measurements.
+
+    The central scale is MAD-based. A diagnostic ``robust_inlier_fraction``
+    reports the fraction of pairwise deltas within three robust pairwise sigmas
+    of the median. This intentionally does not remove observations from the
+    stored distribution; it quantifies the broad-match outlier component so
+    downstream confidence rules can be validated without a mixture-model
+    dependency.
+    """
 
     array = np.asarray(values, dtype=float)
     array = array[np.isfinite(array)]
     if array.size < 2:
         return None
     center = float(np.median(array))
-    absolute = np.abs(array - center)
-    mad = float(np.median(absolute))
+    centered_absolute = np.abs(array - center)
+    mad = float(np.median(centered_absolute))
     pair_sigma = 1.4826 * mad
     if pair_sigma == 0.0 and array.size >= 4:
         q25, q75 = np.quantile(array, [0.25, 0.75])
         pair_sigma = float((q75 - q25) / 1.349)
     single_sigma = pair_sigma / math.sqrt(2.0)
+    inlier_threshold = 3.0 * pair_sigma
+    if pair_sigma > 0:
+        inlier_mask = centered_absolute <= inlier_threshold
+        inlier_count = int(np.count_nonzero(inlier_mask))
+        inlier_fraction = float(inlier_count / array.size)
+        inlier_p95 = float(np.quantile(centered_absolute[inlier_mask], 0.95))
+    else:
+        inlier_count = int(np.count_nonzero(centered_absolute == 0))
+        inlier_fraction = float(inlier_count / array.size)
+        inlier_p95 = 0.0 if inlier_count else float("nan")
     return {
         "pairwise_median": center,
+        "pairwise_sigma": pair_sigma,
         "single_measurement_sigma": single_sigma,
         "pairwise_p95_abs": float(np.quantile(np.abs(array), 0.95)),
+        "robust_inlier_threshold_3sigma": inlier_threshold,
+        "robust_inlier_count": inlier_count,
+        "robust_outlier_count": int(array.size - inlier_count),
+        "robust_inlier_fraction": inlier_fraction,
+        "robust_inlier_p95_abs_centered": inlier_p95,
     }
 
 
@@ -471,7 +495,7 @@ class RepeatSpectrumMassErrorCollector:
         )
         enough_fragment = len(self.fragment_errors_da) >= self.min_fragment_pairs
         method = (
-            "repeat-observation mass-error estimator v3; precursor: same positive charge, <=120 s, "
+            "repeat-observation mass-error estimator v4; precursor: same positive charge, <=120 s, "
             "<=20 ppm repeat clusters with >=3 observations; fragment: top-50 peak centers, "
             "centroid directly or profile local Gaussian-apex estimate, <=0.2 Da matching"
         )
@@ -615,6 +639,9 @@ class RepeatSpectrumMassErrorCollector:
                     "suggested_tolerance": self.fragment_tolerance_sigma_multiplier * sigma_ppm,
                     "single_measurement_sigma": sigma_ppm,
                     "resolution_regime": "high-resolution",
+                    "robust_inlier_fraction": fragment_ppm["robust_inlier_fraction"],
+                    "robust_inlier_count": fragment_ppm["robust_inlier_count"],
+                    "robust_outlier_count": fragment_ppm["robust_outlier_count"],
                     **common_payload,
                 }
             elif (
@@ -626,11 +653,14 @@ class RepeatSpectrumMassErrorCollector:
                     "suggested_tolerance": self.fragment_tolerance_sigma_multiplier * sigma_da,
                     "single_measurement_sigma": sigma_da,
                     "resolution_regime": "low-resolution",
+                    "robust_inlier_fraction": fragment_da["robust_inlier_fraction"],
+                    "robust_inlier_count": fragment_da["robust_inlier_count"],
+                    "robust_outlier_count": fragment_da["robust_outlier_count"],
                     **common_payload,
                 }
 
         fragment_tolerance_method = (
-            "precision-derived fragment search-tolerance heuristic v1; "
+            "precision-derived fragment search-tolerance heuristic v2; "
             f"{self.fragment_tolerance_sigma_multiplier:g} x robust single-measurement sigma; "
             f">={self.min_fragment_tolerance_pairs} matched fragment differences; "
             f">={self.min_fragment_tolerance_spectra} paired spectra; unit selected only for "
@@ -639,7 +669,7 @@ class RepeatSpectrumMassErrorCollector:
         fragment_tolerance_detail = (
             "Suggested starting fragment tolerance from repeated-spectrum measurement precision. "
             "High-resolution evidence emits ppm only; low-resolution evidence emits Da only; "
-            "intermediate or discordant regimes abstain. Profile-mode evidence uses ephemeral local "
+            "intermediate or discordant regimes abstain. The payload also reports the fraction of broad-match fragment deltas within three robust pairwise sigmas of the median as a diagnostic only; v2 does not gate on that fraction yet. Profile-mode evidence uses ephemeral local "
             "peak-center estimates and never modifies the input spectra. The suggestion cannot "
             "recover historical search settings or guarantee search-optimal parameters and is never "
             "written into SDRF automatically."

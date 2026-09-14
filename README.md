@@ -203,7 +203,12 @@ at least 1,000 matched fragment differences from at least 50 paired spectra and 
 a six-sigma envelope. A clearly high-resolution precision regime (<=10 ppm and
 <=0.01 Da single-measurement sigma) emits ppm; a clearly low-resolution regime
 (>=20 ppm and >=0.01 Da sigma) emits Da; intermediate or discordant regimes abstain.
-The unused unit remains explicitly unavailable. This is a recommended starting
+The unused unit remains explicitly unavailable. Fragment precision payloads also
+report a mixture-model-free robust core diagnostic: the fraction/count of matched
+fragment deltas within three robust pairwise sigmas of the median. This quantifies
+the outlier component admitted by the deliberately broad fragment matching window;
+v17 reports it for validation and confidence analysis but does not yet use it to
+change or suppress the tolerance recommendation. This is a recommended starting
 envelope, not reconstructed search provenance. `--estimate-peak-type` can also be
 requested independently.
 
