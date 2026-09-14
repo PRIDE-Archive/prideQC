@@ -7,6 +7,7 @@ scalar values, not O(total peaks) data. RT calculations use stable time order.
 from __future__ import annotations
 
 import math
+import struct
 from array import array
 from collections import Counter
 from dataclasses import dataclass, field
@@ -116,6 +117,21 @@ def _repeated_fraction(values: Any, decimal_places: int = 1) -> float | None:
     return float(repeated / quantized.size)
 
 
+def _mode_and_fraction(values: list[int]) -> tuple[int | None, float | None]:
+    if not values:
+        return None, None
+    counts = Counter(values)
+    # Deterministic tie rule: lower count value wins.
+    mode, frequency = max(counts.items(), key=lambda item: (item[1], -item[0]))
+    return mode, frequency / len(values)
+
+
+def _integer_signature(values: list[int]) -> bytes:
+    if not values:
+        return b""
+    return struct.pack(f"<{len(values)}i", *values)
+
+
 def _log_ratios(values: FloatArray) -> list[float | None] | None:
     if not values.size:
         return None
@@ -212,11 +228,114 @@ class LevelSummary:
         self.missing_collision_energy += int(not energies)
 
 
+@dataclass(slots=True)
+class AcquisitionCycleTracker:
+    """Compact MS1-delimited MS2-cycle evidence; no peak arrays are retained.
+
+    A cycle starts at an MS1 spectrum and includes subsequent MS2 spectra up to
+    the next MS1. MS2 spectra before the first MS1 are ignored. The final
+    trailing cycle is included at calculation time when it contains MS2 scans.
+    Target-set/order evidence is restricted to cycles where every MS2 scan has
+    a finite positive first-precursor m/z paired with a positive isolation width.
+    Targets are quantized to 0.1 Th, matching the run-level repetition metrics.
+    """
+
+    ms2_counts: list[int] = field(default_factory=list)
+    unique_target_counts: list[int] = field(default_factory=list)
+    target_set_signatures: Counter[bytes] = field(default_factory=Counter)
+    target_order_signatures: Counter[bytes] = field(default_factory=Counter)
+    target_observations: int = 0
+    started: bool = False
+    current_ms2_count: int = 0
+    current_targets: list[int] = field(default_factory=list)
+
+    def consume(self, spectrum: Spectrum) -> None:
+        if spectrum.ms_level == 1:
+            if self.started:
+                self._finalize_current()
+            self.started = True
+            self.current_ms2_count = 0
+            self.current_targets.clear()
+            return
+        if spectrum.ms_level != 2 or not self.started:
+            return
+        self.current_ms2_count += 1
+        first = spectrum.precursors[0] if spectrum.precursors else None
+        if (
+            first
+            and first.isolation_width is not None
+            and math.isfinite(first.isolation_width)
+            and first.isolation_width > 0
+            and math.isfinite(first.mz)
+            and first.mz > 0
+        ):
+            self.current_targets.append(int(np.rint(first.mz * 10.0)))
+
+    def _finalize_current(self) -> None:
+        if self.current_ms2_count <= 0:
+            return
+        self.ms2_counts.append(self.current_ms2_count)
+        self.target_observations += len(self.current_targets)
+        if len(self.current_targets) != self.current_ms2_count:
+            return
+        unique_targets = sorted(set(self.current_targets))
+        self.unique_target_counts.append(len(unique_targets))
+        self.target_set_signatures[_integer_signature(unique_targets)] += 1
+        self.target_order_signatures[_integer_signature(self.current_targets)] += 1
+
+    def metrics(self) -> dict[str, Any]:
+        ms2_counts = list(self.ms2_counts)
+        unique_counts = list(self.unique_target_counts)
+        set_signatures = Counter(self.target_set_signatures)
+        order_signatures = Counter(self.target_order_signatures)
+        target_observations = self.target_observations
+
+        if self.started and self.current_ms2_count > 0:
+            ms2_counts.append(self.current_ms2_count)
+            target_observations += len(self.current_targets)
+            if len(self.current_targets) == self.current_ms2_count:
+                unique_targets = sorted(set(self.current_targets))
+                unique_counts.append(len(unique_targets))
+                set_signatures[_integer_signature(unique_targets)] += 1
+                order_signatures[_integer_signature(self.current_targets)] += 1
+
+        cycle_count = len(ms2_counts)
+        eligible_count = len(unique_counts)
+        total_ms2 = sum(ms2_counts)
+        mode, modal_fraction = _mode_and_fraction(ms2_counts)
+        ms2_array = np.asarray(ms2_counts, dtype=float)
+        unique_array = np.asarray(unique_counts, dtype=float)
+
+        return {
+            "AcquisitionCycle_Count": cycle_count,
+            "AcquisitionCycle_MS2Count_Quantiles": _quantiles(ms2_array),
+            "AcquisitionCycle_MS2Count_Mode": mode,
+            "AcquisitionCycle_MS2Count_ModalFraction": modal_fraction,
+            "AcquisitionCycle_TargetCoverageFraction": (
+                target_observations / total_ms2 if total_ms2 else None
+            ),
+            "AcquisitionCycle_TargetEligibleCount": eligible_count,
+            "AcquisitionCycle_TargetEligibleFraction": (
+                eligible_count / cycle_count if cycle_count else None
+            ),
+            "AcquisitionCycle_UniqueTargetCount_Quantiles": _quantiles(unique_array),
+            "AcquisitionCycle_TargetSetDistinctCount": len(set_signatures),
+            "AcquisitionCycle_TargetSetModalFraction": (
+                max(set_signatures.values()) / eligible_count if eligible_count else None
+            ),
+            "AcquisitionCycle_TargetOrderDistinctCount": len(order_signatures),
+            "AcquisitionCycle_TargetOrderModalFraction": (
+                max(order_signatures.values()) / eligible_count if eligible_count else None
+            ),
+        }
+
+
 class RunSummary:
-    """Accumulate scalars only; neither spectra nor chromatograms are retained."""
+    """Accumulate compact scan summaries; spectra and peak arrays are not retained."""
 
     def __init__(self) -> None:
         self.levels: dict[int, LevelSummary] = {}
+        self.acquisition_cycles = AcquisitionCycleTracker()
         self.chromatograms: Counter[int] = Counter()
         self.chromatogram_points = 0
         self.chromatogram_low = math.inf
@@ -226,6 +345,7 @@ class RunSummary:
     def consume_spectrum(self, spectrum: Spectrum) -> None:
         if spectrum.ms_level < 1:
             raise ValueError(f"Invalid MS level: {spectrum.ms_level}")
+        self.acquisition_cycles.consume(spectrum)
         if spectrum.ms_level not in self.levels:
             self.levels[spectrum.ms_level] = LevelSummary()
         self.levels[spectrum.ms_level].consume(spectrum)
@@ -296,6 +416,7 @@ class QCMetricCalculator:
             values.update(self._level(level, run.levels.get(level, LevelSummary())))
         n1, n2 = values["NumberOfSpectra_MS1"], values["NumberOfSpectra_MS2"]
         values["MS1_to_MS2_Ratio"] = n1 / n2 if n2 else None
+        values.update(run.acquisition_cycles.metrics())
         values.update(self._charge_metrics(run.levels.get(2, LevelSummary())))
         return [Metric(key, value) for key, value in values.items()]
 
