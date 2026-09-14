@@ -86,24 +86,66 @@ class TechnicalAnnotator:
         summary = run.levels.get(2)
         widths = np.asarray(summary.isolation_widths) if summary else np.array([])
         total = summary.count if summary else 0
-        label, accession, support = None, None, 0
-        # These thresholds retain TechSDRF's basic heuristic, but require coverage
-        # and report ambiguity rather than treating isolation width as ground truth.
+        label, accession, support, support_total = None, None, 0, total
+        method = (
+            "acquisition heuristic v2: >=100 MS2, >=90% width coverage; fixed-cycle DIA "
+            "requires >=20 cycles, >=8 MS2/cycle, >=90% cycle/set/order consensus, target-grid "
+            "agreement, and median width >=5 Th; narrow DDA requires >=500 unique targets"
+        )
+        detail = (
+            "High-specificity inference only. Wide-window consensus supports DIA. Stable repeated "
+            "MS1-delimited cycles with non-narrow isolation also support DIA. Narrow isolation is "
+            "called DDA only when many distinct precursor targets are observed; small fixed-target "
+            "narrow runs abstain because PRM and narrow-window DIA are ambiguous. Width unit is Th (m/z)."
+        )
+
         if widths.size >= 100 and total and widths.size / total >= 0.9:
             narrow = int(np.count_nonzero(widths <= 3))
             wide = int(np.count_nonzero(widths >= 15))
-            if narrow / widths.size >= 0.9:
-                label, accession, support = "Data-dependent acquisition", "PRIDE:0000627", narrow
-            elif wide / widths.size >= 0.9:
+            narrow_fraction = narrow / widths.size
+            wide_fraction = wide / widths.size
+            median_width = float(np.median(widths))
+
+            cycle = run.acquisition_cycles.metrics()
+            cycle_count = int(cycle["AcquisitionCycle_Count"] or 0)
+            cycle_mode = int(cycle["AcquisitionCycle_MS2Count_Mode"] or 0)
+            cycle_modal_fraction = cycle["AcquisitionCycle_MS2Count_ModalFraction"]
+            target_coverage = cycle["AcquisitionCycle_TargetCoverageFraction"]
+            target_eligible_fraction = cycle["AcquisitionCycle_TargetEligibleFraction"]
+            set_modal_fraction = cycle["AcquisitionCycle_TargetSetModalFraction"]
+            order_modal_fraction = cycle["AcquisitionCycle_TargetOrderModalFraction"]
+
+            rounded_targets = np.round(np.asarray(summary.isolation_precursor_mz), 1)
+            unique_targets = int(np.unique(rounded_targets).size) if rounded_targets.size else 0
+            target_grid_tolerance = max(1, int(round(cycle_mode * 0.1)))
+
+            stable_cycle = (
+                cycle_count >= 20
+                and cycle_mode >= 8
+                and 8 <= unique_targets <= 200
+                and abs(unique_targets - cycle_mode) <= target_grid_tolerance
+                and cycle_modal_fraction is not None and cycle_modal_fraction >= 0.9
+                and target_coverage is not None and target_coverage >= 0.9
+                and target_eligible_fraction is not None and target_eligible_fraction >= 0.9
+                and set_modal_fraction is not None and set_modal_fraction >= 0.9
+                and order_modal_fraction is not None and order_modal_fraction >= 0.9
+            )
+
+            if wide_fraction >= 0.9:
                 label, accession, support = "Data-independent acquisition", "PRIDE:0000450", wide
+            elif stable_cycle and median_width >= 5:
+                label, accession = "Data-independent acquisition", "PRIDE:0000450"
+                modal_cycles = int(round(order_modal_fraction * cycle_count))
+                support_total = total
+                support = min(total, modal_cycles * cycle_mode)
+            elif narrow_fraction >= 0.9 and unique_targets >= 500:
+                label, accession, support = "Data-dependent acquisition", "PRIDE:0000627", narrow
+
         return [Annotation(
             "acquisition_method", label, INFERRED if label else UNAVAILABLE,
-            "isolation-width heuristic v1: >=100 MS2, >=90% coverage and consensus",
-            (
-                "Narrow windows can also be PRM or narrow-window DIA. Mixed/intermediate "
-                "windows and sparse runs abstain. Width unit is Th (m/z)."
-            ),
-            support=support, total=total,
+            method,
+            detail,
+            support=support, total=support_total,
             sdrf_column="comment[proteomics data acquisition method]",
             sdrf_value=CVTerm(accession, label).sdrf_value() if accession and label else None,
         )]
