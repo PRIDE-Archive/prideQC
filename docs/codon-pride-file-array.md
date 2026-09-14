@@ -32,6 +32,7 @@ export PERSIST_ROOT=/nfs/research/juan/DIA/singj/prideQC
 
 rsync -avP \
   scripts/slurm/prepare_prideqc_file_manifest.py \
+  scripts/slurm/prepare_ground_truth_task_subset.py \
   scripts/slurm/submit_prideqc_files.sh \
   scripts/slurm/prideqc_file_array.sbatch \
   scripts/slurm/inspect_prideqc_array.sh \
@@ -70,6 +71,37 @@ column -ts $'\t' "$PERSIST_ROOT/benchmarks/manifests/ground-truth-files-v1.tsv" 
 cat "$PERSIST_ROOT/benchmarks/manifests/ground-truth-files-v1.meta.txt"
 ```
 
+
+## Reusable ground-truth task subsets
+
+For targeted benchmark experiments, do not rebuild Slurm task lists with ad hoc
+CSV snippets. Use the repository helper so task IDs are resolved against the
+active manifest and the generated TSV always uses Unix LF line endings:
+
+```bash
+python scripts/slurm/prepare_ground_truth_task_subset.py \
+  --gt "$PERSIST_ROOT/benchmarks/data/prideqc_ground_truth.tsv" \
+  --manifest "$PERSIST_ROOT/benchmarks/manifests/ground-truth-files-v6.tsv" \
+  --output "$PERSIST_ROOT/benchmarks/manifests/ground-truth-v6-tasks.tsv"
+```
+
+The helper prints a validated `task_array=...` value that can be passed directly
+to Slurm, for example:
+
+```bash
+TASKS=$(python scripts/slurm/prepare_ground_truth_task_subset.py \
+  --gt "$PERSIST_ROOT/benchmarks/data/prideqc_ground_truth.tsv" \
+  --manifest "$PERSIST_ROOT/benchmarks/manifests/ground-truth-files-v6.tsv" \
+  --output "$PERSIST_ROOT/benchmarks/manifests/ground-truth-v6-tasks.tsv" \
+  | awk -F= '$1 == "task_array" {print $2}')
+
+printf 'TASKS=<%s>\n' "$TASKS"
+```
+
+The helper writes TSV files with `lineterminator="\\n"`. This avoids hidden CR
+characters in the final `task_id` column, which otherwise make a visually valid
+Slurm array specification fail with `Invalid job array specification`.
+
 ## Monitor
 
 ```bash
@@ -105,25 +137,3 @@ Downloaded spectra are not copied back to NFS.
 Start with `MEMORY=32G`, `MAX_PARALLEL=4`, and one prideQC worker per file. If an individual task still reaches 32 GiB, that is a genuine single-file memory requirement rather than worker multiplication. Re-submit that file/task with 48 or 64 GiB as appropriate. Do not increase `--workers` for file-level jobs.
 
 The old accession-level launcher can still be useful for small mzML projects, but it should not be used with 16 workers under a 32 GiB memory cap for heterogeneous vendor RAW files.
-
-## Pull an immutable PRIDE QC SIF on Codon
-
-Codon uses Singularity. Pull the immutable Git-SHA-tagged SIF through the
-repository helper rather than calling `singularity pull` directly. The helper
-uses the ORAS transport and the installer automatically writes and verifies the
-SIF SHA-256 sidecar and records provenance.
-
-```bash
-cd /nfs/research/juan/DIA/singj/prideQC
-export PERSIST_ROOT=/nfs/research/juan/DIA/singj/prideQC
-
-scripts/slurm/pull_prideqc_sif.sh 489757a400161146f77234a02a8fac137e03cc5a
-```
-
-The resulting files are written under `$PERSIST_ROOT/containers/`:
-
-- `prideqc_sha-<git-sha>.sif`
-- `prideqc_sha-<git-sha>.sif.sha256`
-- `prideqc_sha-<git-sha>.sif.meta.txt`
-
-Do not manually create the checksum when using this helper.
