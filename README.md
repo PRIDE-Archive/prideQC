@@ -185,10 +185,18 @@ are never centroided or peak-picked. When mass-error estimation is enabled, Open
 PeakTypeEstimator is also used to resolve native `unknown` peak representation, but
 only `unknown` scans independently estimated as centroid can become fragment-eligible.
 The estimator emits separate inferred annotations such as
-`estimated_precursor_mass_error_ppm` and `estimated_fragment_mass_error_da`. These
-values are not historical database-search tolerances and never fill or overwrite
-SDRF `comment[precursor mass tolerance]` or `comment[fragment mass tolerance]`.
-`--estimate-peak-type` can also be requested independently.
+`estimated_precursor_mass_error_ppm` and `estimated_fragment_mass_error_da`. When
+precursor evidence is strong and distributed across at least 100 repeat clusters, it
+also emits `suggested_precursor_search_tolerance_ppm`, an experimental six-sigma
+starting envelope derived from the robust precursor precision estimate. The suggestion
+requires at least 200 repeat differences and abstains on small fixed-target grids. It
+does not observe fixed calibration bias or isotope-error handling, is not a recovered
+historical setting, and is never treated as search-provenance ground truth. Historical
+SDRF `comment[precursor mass tolerance]` and `comment[fragment mass tolerance]` remain
+separate and are never filled or overwritten from RAW-derived estimates. Fragment
+search-tolerance suggestion remains intentionally unimplemented until more centroid
+benchmark evidence is available. `--estimate-peak-type` can also be requested
+independently.
 
 Supplying `--sdrf` validates the input and refined output through
 `sdrf_pipelines.sdrf.sdrf.read_sdrf(...).validate_sdrf(...)`. The default template

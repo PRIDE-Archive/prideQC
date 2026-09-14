@@ -141,6 +141,9 @@ class RepeatSpectrumMassErrorCollector:
     min_precursor_clusters: int = 10
     min_precursor_cluster_size: int = 3
     min_fragment_pairs: int = 200
+    min_tolerance_pairs: int = 200
+    min_tolerance_clusters: int = 100
+    tolerance_sigma_multiplier: float = 6.0
     _precursor_bins: defaultdict[tuple[int, int], list[_PrecursorCluster]] = field(
         default_factory=lambda: defaultdict(list),
     )
@@ -175,6 +178,12 @@ class RepeatSpectrumMassErrorCollector:
             raise ValueError("max_candidates_per_bin must be positive")
         if self.min_precursor_clusters < 1 or self.min_precursor_cluster_size < 3:
             raise ValueError("precursor cluster support thresholds are too small")
+        if self.min_tolerance_pairs < self.min_spectrum_pairs:
+            raise ValueError("min_tolerance_pairs must be >= min_spectrum_pairs")
+        if self.min_tolerance_clusters < self.min_precursor_clusters:
+            raise ValueError("min_tolerance_clusters must be >= min_precursor_clusters")
+        if not math.isfinite(self.tolerance_sigma_multiplier) or self.tolerance_sigma_multiplier <= 0:
+            raise ValueError("tolerance_sigma_multiplier must be finite and positive")
 
     def _candidate_precursor_clusters(
         self,
@@ -391,6 +400,54 @@ class RepeatSpectrumMassErrorCollector:
                 support=support,
                 total=total,
             ))
+        tolerance_payload: dict[str, Any] | None = None
+        enough_tolerance_support = (
+            enough_precursor
+            and self.precursor_paired_spectra >= self.min_tolerance_pairs
+            and self.precursor_clusters_used >= self.min_tolerance_clusters
+        )
+        if (
+            enough_tolerance_support
+            and precursor_ppm is not None
+            and precursor_ppm["single_measurement_sigma"] > 0
+        ):
+            sigma = float(precursor_ppm["single_measurement_sigma"])
+            suggested = self.tolerance_sigma_multiplier * sigma
+            confidence = (
+                "high"
+                if self.precursor_paired_spectra >= 1000
+                and self.precursor_clusters_used >= 250
+                else "moderate"
+            )
+            tolerance_payload = {
+                "unit": "ppm",
+                "suggested_tolerance": suggested,
+                "single_measurement_sigma": sigma,
+                "sigma_multiplier": self.tolerance_sigma_multiplier,
+                "confidence": confidence,
+                "precursor_clusters": self.precursor_clusters_used,
+            }
+        result.append(Annotation(
+            "suggested_precursor_search_tolerance_ppm",
+            tolerance_payload,
+            EvidenceKind.INFERRED if tolerance_payload is not None else EvidenceKind.UNAVAILABLE,
+            (
+                "precision-derived precursor search-tolerance heuristic v1; "
+                f"{self.tolerance_sigma_multiplier:g} x robust single-measurement sigma; "
+                f">={self.min_tolerance_pairs} repeat differences; "
+                f">={self.min_tolerance_clusters} precursor clusters"
+            ),
+            (
+                "Suggested starting tolerance for diverse repeated precursor observations. "
+                "The repeat-observation method measures random precision but cannot observe a fixed "
+                "calibration offset or choose isotope-error handling. The suggestion is therefore "
+                "not a recovered historical search setting, is not guaranteed search-optimal, and "
+                "is never written into SDRF automatically. Small fixed-target runs abstain via the "
+                "precursor-cluster support requirement."
+            ),
+            support=self.precursor_paired_spectra,
+            total=self.precursor_eligible_ms2,
+        ))
         result.append(Annotation(
             "mass_error_estimator_diagnostics",
             {

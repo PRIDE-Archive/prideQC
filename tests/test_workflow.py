@@ -151,6 +151,77 @@ class AnnotationTests(unittest.TestCase):
         self.assertEqual(diagnostic.value["fragment_eligible_ms2"], 0)
         self.assertEqual(diagnostic.value["excluded_fragment_profile_or_unknown"], 80)
 
+    def test_precursor_search_tolerance_suggestion_requires_strong_diverse_support(self):
+        collector = RepeatSpectrumMassErrorCollector(
+            min_spectrum_pairs=10,
+            min_precursor_clusters=2,
+            min_tolerance_pairs=20,
+            min_tolerance_clusters=5,
+            tolerance_sigma_multiplier=6.0,
+        )
+        spectra = []
+        for cycle in range(8):
+            for target_index in range(12):
+                base = 450.0 + target_index * 5.0
+                precursor = base + math.sin(cycle * 0.83 + target_index * 0.19) * 0.001
+                spectra.append(spectrum(
+                    cycle * 30 + target_index,
+                    [10.0] * 10,
+                    2,
+                    charge=2,
+                    precursor_mz=precursor,
+                    mz=[100.0 + j for j in range(10)],
+                    representation="profile",
+                ))
+        result = Analyzer(MemoryReader(spectra)).analyze("tolerance.mzML", collectors=[collector])
+        suggestion = next(
+            a for a in result.annotations
+            if a.field == "suggested_precursor_search_tolerance_ppm"
+        )
+        precision = next(
+            a for a in result.annotations if a.field == "estimated_precursor_mass_error_ppm"
+        )
+        self.assertEqual(suggestion.kind, EvidenceKind.INFERRED)
+        self.assertIsNone(suggestion.sdrf_value)
+        self.assertAlmostEqual(
+            suggestion.value["suggested_tolerance"],
+            6.0 * precision.value["single_measurement_sigma"],
+        )
+        self.assertIn(suggestion.value["confidence"], {"moderate", "high"})
+
+    def test_precursor_search_tolerance_suggestion_abstains_on_small_target_grid(self):
+        collector = RepeatSpectrumMassErrorCollector(
+            min_spectrum_pairs=10,
+            min_precursor_clusters=2,
+            min_tolerance_pairs=20,
+            min_tolerance_clusters=10,
+        )
+        spectra = []
+        for cycle in range(20):
+            for target_index in range(4):
+                base = 500.0 + target_index * 10.0
+                precursor = base + math.sin(cycle * 0.67 + target_index) * 0.001
+                spectra.append(spectrum(
+                    cycle * 10 + target_index,
+                    [10.0] * 10,
+                    2,
+                    charge=2,
+                    precursor_mz=precursor,
+                    mz=[100.0 + j for j in range(10)],
+                    representation="profile",
+                ))
+        result = Analyzer(MemoryReader(spectra)).analyze("fixed-grid.mzML", collectors=[collector])
+        precision = next(
+            a for a in result.annotations if a.field == "estimated_precursor_mass_error_ppm"
+        )
+        suggestion = next(
+            a for a in result.annotations
+            if a.field == "suggested_precursor_search_tolerance_ppm"
+        )
+        self.assertEqual(precision.kind, EvidenceKind.INFERRED)
+        self.assertEqual(suggestion.kind, EvidenceKind.UNAVAILABLE)
+        self.assertIsNone(suggestion.value)
+
     def test_profile_and_unknown_spectra_do_not_become_reporter_evidence(self):
         collector = DiagnosticIonCollector()
         collector.consume_spectrum(
