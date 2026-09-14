@@ -63,15 +63,67 @@ class AnnotationTests(unittest.TestCase):
         self.assertEqual(evidence.kind, EvidenceKind.INFERRED)
         self.assertIn("PRIDE:0000450", evidence.sdrf_value)
 
-    def test_narrow_repeated_target_metrics_do_not_change_acquisition_yet(self):
-        widths = [2.0] * 100
-        targets = [400.0, 500.0, 600.0, 700.0] * 25
-        result = analyze([
-            spectrum(i, [1], 2, charge=2, width=w, precursor_mz=targets[i])
-            for i, w in enumerate(widths)
-        ])
+    def test_small_fixed_target_narrow_run_abstains_for_prm_or_narrow_dia_ambiguity(self):
+        targets = [400.0, 500.0, 600.0, 700.0]
+        spectra = []
+        rt = 0
+        for _ in range(25):
+            spectra.append(spectrum(rt, [1], 1))
+            rt += 1
+            for target in targets:
+                spectra.append(spectrum(rt, [1], 2, charge=2, width=2.0, precursor_mz=target))
+                rt += 1
+        result = analyze(spectra)
+        evidence = next(a for a in result.annotations if a.field == "acquisition_method")
+        self.assertIsNone(evidence.value)
+
+    def test_narrow_dynamic_many_target_run_is_inferred_dda(self):
+        spectra = []
+        rt = 0
+        precursor = 400.0
+        for _ in range(60):
+            spectra.append(spectrum(rt, [1], 1))
+            rt += 1
+            for _ in range(10):
+                spectra.append(spectrum(rt, [1], 2, charge=2, width=2.0, precursor_mz=precursor))
+                precursor += 0.2
+                rt += 1
+        result = analyze(spectra)
         evidence = next(a for a in result.annotations if a.field == "acquisition_method")
         self.assertEqual(evidence.value, "Data-dependent acquisition")
+        self.assertIn("PRIDE:0000627", evidence.sdrf_value)
+
+    def test_stable_intermediate_width_cycles_are_inferred_dia(self):
+        targets = [400.0 + 10 * i for i in range(8)]
+        spectra = []
+        rt = 0
+        for _ in range(25):
+            spectra.append(spectrum(rt, [1], 1))
+            rt += 1
+            for target in targets:
+                spectra.append(spectrum(rt, [1], 2, charge=2, width=10.0, precursor_mz=target))
+                rt += 1
+        result = analyze(spectra)
+        evidence = next(a for a in result.annotations if a.field == "acquisition_method")
+        self.assertEqual(evidence.value, "Data-independent acquisition")
+        self.assertEqual(evidence.support, 200)
+        self.assertEqual(evidence.total, 200)
+        self.assertIn("PRIDE:0000450", evidence.sdrf_value)
+
+    def test_changing_intermediate_target_grid_abstains(self):
+        spectra = []
+        rt = 0
+        target = 400.0
+        for _ in range(25):
+            spectra.append(spectrum(rt, [1], 1))
+            rt += 1
+            for _ in range(8):
+                spectra.append(spectrum(rt, [1], 2, charge=2, width=10.0, precursor_mz=target))
+                target += 1.0
+                rt += 1
+        result = analyze(spectra)
+        evidence = next(a for a in result.annotations if a.field == "acquisition_method")
+        self.assertIsNone(evidence.value)
 
     def test_sparse_or_mixed_widths_abstain(self):
         for widths in ([20] * 10, [2] * 50 + [20] * 50):

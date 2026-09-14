@@ -158,10 +158,13 @@ Save that as `file-map.json` and add `--file-map file-map.json`. Ambiguous input
 basenames/aliases are rejected. Multiple instrument values remain in the report
 without being collapsed into an invented single instrument.
 
-DDA/DIA isolation-width heuristics are labeled **inferred**, require substantial
-coverage, and abstain for mixed/intermediate/sparse data. They cannot reliably
-separate DDA from PRM or narrow-window DIA. Only `--include-inferred` allows these
-suggestions into the SDRF. The PRIDE accessions follow the current
+DDA/DIA acquisition heuristics are labeled **inferred** and deliberately favor
+high specificity over recall. Wide-window consensus supports DIA; stable repeated
+MS1-delimited target cycles can support DIA when isolation is not narrow. Narrow
+isolation is called DDA only when many distinct precursor targets are observed;
+small fixed-target narrow runs abstain because PRM and narrow-window DIA remain
+ambiguous. Only `--include-inferred` allows these suggestions into the SDRF. The
+PRIDE accessions follow the current
 [SDRF acquisition guidance](https://github.com/bigbio/proteomics-sample-metadata/blob/master/sdrf-proteomics/README.adoc).
 
 Search tolerances are **unavailable** unless a future calibrated estimator is
