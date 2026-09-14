@@ -172,7 +172,9 @@ def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
             collectors.append(RepeatSpectrumMassErrorCollector())
         from prideqc.readers import PyOpenMSReader, vendor_format
 
-        reader = PyOpenMSReader(estimate_peak_type=options.estimate_peak_type)
+        reader = PyOpenMSReader(
+            estimate_peak_type=options.estimate_peak_type or options.estimate_mass_error,
+        )
         is_mzml = source.name.casefold().endswith((".mzml", ".mzml.gz"))
         detected_vendor = vendor_format(source)
         if not is_mzml and (detected_vendor is None or not reader.supports_direct(source)):
