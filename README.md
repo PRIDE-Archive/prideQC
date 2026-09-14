@@ -167,13 +167,21 @@ ambiguous. Only `--include-inferred` allows these suggestions into the SDRF. The
 PRIDE accessions follow the current
 [SDRF acquisition guidance](https://github.com/bigbio/proteomics-sample-metadata/blob/master/sdrf-proteomics/README.adoc).
 
-Search tolerances are **unavailable** unless a future calibrated estimator is
-provided; an isolation width or instrument category is not a search tolerance.
-No enzyme, sample label, fixed modification or enrichment is invented.
+Historical search tolerances remain **unavailable from RAW alone** unless they are
+provided by SDRF/search provenance; an isolation width or instrument category is not a
+search tolerance. The optional repeat-spectrum mass-error estimator reports separate
+measurement-precision evidence and does not claim to recover the historical search
+settings. No enzyme, sample label, fixed modification or enrichment is invented.
 
 `--diagnostics` adds a centroid MS2/MS3 reporter/oxonium screen for TMT-family,
 iTRAQ-family and glycan signatures. This returns counts and thresholds,
 not confirmed PTMs or plex/channel assignments, and never auto-fills SDRF.
+`--estimate-mass-error` adds an experimental one-pass repeat-spectrum estimator for
+precursor and fragment *measurement precision*. It retains only compact top-peak
+fingerprints in a bounded retention-time window and emits inferred annotations such
+as `estimated_precursor_mass_error_ppm` and `estimated_fragment_mass_error_da`. These
+values are not the historical database-search tolerances and never fill or overwrite
+SDRF `comment[precursor mass tolerance]` or `comment[fragment mass tolerance]`.
 `--estimate-peak-type` additionally runs OpenMS PeakTypeEstimator for scans with
 more than ten peaks, on the same data pass.
 

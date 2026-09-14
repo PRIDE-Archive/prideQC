@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from prideqc import __version__
 from prideqc.annotations import DiagnosticIonCollector, TechnicalAnnotator
+from prideqc.mass_error import RepeatSpectrumMassErrorCollector
 from prideqc.conversion import ExternalConverter
 from prideqc.io import atomic_text, json_safe, write_json
 from prideqc.metrics import QCMetricCalculator, RunSummary
@@ -89,6 +90,7 @@ class Analyzer:
 class WorkflowOptions:
     workers: int = 1
     diagnostics: bool = False
+    estimate_mass_error: bool = False
     estimate_peak_type: bool = False
     converter: str | None = None
     converter_executable: str | None = None
@@ -163,7 +165,11 @@ def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
     source, output, options = task
     try:
         path = source
-        collectors = [DiagnosticIonCollector()] if options.diagnostics else []
+        collectors: list[EvidenceCollector] = []
+        if options.diagnostics:
+            collectors.append(DiagnosticIonCollector())
+        if options.estimate_mass_error:
+            collectors.append(RepeatSpectrumMassErrorCollector())
         from prideqc.readers import PyOpenMSReader, vendor_format
 
         reader = PyOpenMSReader(estimate_peak_type=options.estimate_peak_type)

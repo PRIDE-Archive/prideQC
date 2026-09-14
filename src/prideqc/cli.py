@@ -86,6 +86,11 @@ def parser() -> argparse.ArgumentParser:
         help="Screen centroid MS2/MS3 for candidate reporter/oxonium signatures",
     )
     analyze.add_argument(
+        "--estimate-mass-error",
+        action="store_true",
+        help="Estimate repeat-spectrum precursor/fragment mass-error precision",
+    )
+    analyze.add_argument(
         "--estimate-peak-type",
         action="store_true",
         help="Also estimate centroid/profile type with OpenMS",
@@ -189,7 +194,7 @@ def _analyze(arguments: argparse.Namespace) -> int:
         raise ValueError("--converter-executable requires --converter.")
     workflow = Workflow(WorkflowOptions(
         workers=arguments.workers, diagnostics=arguments.diagnostics,
-        estimate_peak_type=arguments.estimate_peak_type, converter=arguments.converter,
+        estimate_mass_error=arguments.estimate_mass_error, estimate_peak_type=arguments.estimate_peak_type, converter=arguments.converter,
         converter_executable=arguments.converter_executable,
         conversion_timeout=arguments.conversion_timeout, continue_on_error=arguments.continue_on_error,
         include_inferred=arguments.include_inferred, overwrite_sdrf_values=arguments.overwrite_sdrf_values,

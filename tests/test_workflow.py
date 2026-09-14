@@ -15,6 +15,7 @@ from unittest.mock import patch
 import numpy as np
 
 from prideqc.annotations import DiagnosticIonCollector
+from prideqc.mass_error import RepeatSpectrumMassErrorCollector
 from prideqc.cli import main
 from prideqc.conversion import ExternalConverter
 from prideqc.io import atomic_text, json_safe
@@ -42,6 +43,71 @@ class AnnotationTests(unittest.TestCase):
         evidence = next(a for a in result.annotations if a.field == "signature_TMT_family")
         self.assertEqual(evidence.support, 1)
         self.assertIsNone(evidence.sdrf_value)
+
+
+    def test_repeat_spectrum_mass_error_estimator_reports_precision(self):
+        collector = RepeatSpectrumMassErrorCollector(
+            min_spectrum_pairs=10,
+            min_fragment_pairs=80,
+        )
+        spectra = []
+        base_fragments = np.arange(100.0, 110.0)
+        intensities = [100.0 - i for i in range(10)]
+        for i in range(30):
+            shift_da = math.sin(i * 0.73) * 0.002
+            precursor = 500.0 + math.sin(i * 0.61) * 0.001
+            spectra.append(spectrum(
+                i * 2.0,
+                intensities,
+                2,
+                charge=2,
+                precursor_mz=precursor,
+                mz=(base_fragments + shift_da).tolist(),
+                representation="centroid",
+            ))
+        result = Analyzer(MemoryReader(spectra)).analyze("repeat.mzML", collectors=[collector])
+        precursor = next(
+            a for a in result.annotations if a.field == "estimated_precursor_mass_error_ppm"
+        )
+        fragment = next(
+            a for a in result.annotations if a.field == "estimated_fragment_mass_error_da"
+        )
+        self.assertEqual(precursor.kind, EvidenceKind.INFERRED)
+        self.assertEqual(fragment.kind, EvidenceKind.INFERRED)
+        self.assertGreater(precursor.value["single_measurement_sigma"], 0)
+        self.assertGreater(fragment.value["single_measurement_sigma"], 0)
+        self.assertIsNone(precursor.sdrf_value)
+        self.assertIsNone(fragment.sdrf_value)
+        self.assertGreaterEqual(precursor.support, 10)
+        self.assertGreaterEqual(fragment.support, 80)
+
+    def test_repeat_spectrum_mass_error_estimator_abstains_without_centroid_support(self):
+        collector = RepeatSpectrumMassErrorCollector(
+            min_spectrum_pairs=2,
+            min_fragment_pairs=10,
+        )
+        spectra = [
+            spectrum(
+                i,
+                [10.0] * 10,
+                2,
+                charge=2,
+                precursor_mz=500.0,
+                mz=[100.0 + j for j in range(10)],
+                representation="profile",
+            )
+            for i in range(5)
+        ]
+        result = Analyzer(MemoryReader(spectra)).analyze("profile.mzML", collectors=[collector])
+        evidence = next(
+            a for a in result.annotations if a.field == "estimated_precursor_mass_error_ppm"
+        )
+        diagnostic = next(
+            a for a in result.annotations if a.field == "mass_error_estimator_diagnostics"
+        )
+        self.assertEqual(evidence.kind, EvidenceKind.UNAVAILABLE)
+        self.assertIsNone(evidence.value)
+        self.assertEqual(diagnostic.value["excluded_profile_or_unknown"], 5)
 
     def test_profile_and_unknown_spectra_do_not_become_reporter_evidence(self):
         collector = DiagnosticIonCollector()
