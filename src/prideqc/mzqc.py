@@ -116,6 +116,49 @@ DEFINITIONS = {
     "FAIMS_CV_Count": "Number of distinct finite FAIMS compensation voltages.",
     "FAIMS_CV_Range": "Minimum and maximum finite FAIMS compensation voltages, in volts.",
     "MS1_to_MS2_Ratio": "MS1 scan count divided by MS2 scan count; undefined when denominator is zero.",
+    "AcquisitionCycle_Count": (
+        "Count of MS1-delimited cycles containing at least one MS2 scan. MS2 scans before the "
+        "first MS1 are ignored; a trailing cycle is included when it contains MS2 scans."
+    ),
+    "AcquisitionCycle_MS2Count_Quantiles": (
+        "25th, 50th, 75th percentiles of MS2 scans per observed MS1-delimited cycle."
+    ),
+    "AcquisitionCycle_MS2Count_Mode": (
+        "Most frequent MS2 scan count per observed MS1-delimited cycle; lower count wins ties."
+    ),
+    "AcquisitionCycle_MS2Count_ModalFraction": (
+        "Fraction of observed MS1-delimited cycles having the modal MS2 scan count."
+    ),
+    "AcquisitionCycle_TargetCoverageFraction": (
+        "Fraction of MS2 scans inside observed MS1-delimited cycles with a finite positive first-"
+        "precursor m/z paired with a positive isolation width."
+    ),
+    "AcquisitionCycle_TargetEligibleCount": (
+        "Count of observed MS1-delimited cycles where every MS2 scan has target metadata eligible "
+        "for target-set/order comparison."
+    ),
+    "AcquisitionCycle_TargetEligibleFraction": (
+        "Fraction of observed MS1-delimited cycles eligible for target-set/order comparison."
+    ),
+    "AcquisitionCycle_UniqueTargetCount_Quantiles": (
+        "25th, 50th, 75th percentiles of unique first-precursor isolation targets per eligible "
+        "cycle after 0.1 Th quantization."
+    ),
+    "AcquisitionCycle_TargetSetDistinctCount": (
+        "Number of distinct per-cycle isolation-target sets among eligible cycles after 0.1 Th "
+        "quantization."
+    ),
+    "AcquisitionCycle_TargetSetModalFraction": (
+        "Fraction of eligible cycles whose quantized isolation-target set equals the modal set."
+    ),
+    "AcquisitionCycle_TargetOrderDistinctCount": (
+        "Number of distinct ordered per-cycle isolation-target sequences among eligible cycles "
+        "after 0.1 Th quantization."
+    ),
+    "AcquisitionCycle_TargetOrderModalFraction": (
+        "Fraction of eligible cycles whose quantized ordered isolation-target sequence equals the "
+        "modal sequence."
+    ),
     "AvgCycleTime_MS1": "Mean strictly positive adjacent sorted MS1 RT differences, in seconds.",
     "MedianTIC_in_RT_MS1_IQR": (
         "Median TIC in middle two scan-index quartile groups (recycle-and-sort assignment), "

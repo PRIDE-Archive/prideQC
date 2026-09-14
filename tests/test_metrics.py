@@ -167,6 +167,75 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(metrics["IsolationPrecursorMz_MS2_MaxRepeatFraction"], 1.0)
         self.assertEqual(metrics["IsolationPrecursorMz_MS2_RepeatedFraction"], 1.0)
 
+    def test_acquisition_cycle_fixed_target_grid_metrics(self):
+        items = []
+        rt = 0
+        for _ in range(3):
+            items.append(spectrum(rt, [10]))
+            rt += 1
+            for target in [400.0, 425.0, 450.0, 475.0]:
+                items.append(spectrum(rt, [1], 2, charge=2, width=20, precursor_mz=target))
+                rt += 1
+        metrics, _ = calculate(items)
+        self.assertEqual(metrics["AcquisitionCycle_Count"], 3)
+        self.assertEqual(metrics["AcquisitionCycle_MS2Count_Quantiles"], [4.0, 4.0, 4.0])
+        self.assertEqual(metrics["AcquisitionCycle_MS2Count_Mode"], 4)
+        self.assertEqual(metrics["AcquisitionCycle_MS2Count_ModalFraction"], 1.0)
+        self.assertEqual(metrics["AcquisitionCycle_TargetCoverageFraction"], 1.0)
+        self.assertEqual(metrics["AcquisitionCycle_TargetEligibleCount"], 3)
+        self.assertEqual(metrics["AcquisitionCycle_TargetEligibleFraction"], 1.0)
+        self.assertEqual(metrics["AcquisitionCycle_UniqueTargetCount_Quantiles"], [4.0, 4.0, 4.0])
+        self.assertEqual(metrics["AcquisitionCycle_TargetSetDistinctCount"], 1)
+        self.assertEqual(metrics["AcquisitionCycle_TargetSetModalFraction"], 1.0)
+        self.assertEqual(metrics["AcquisitionCycle_TargetOrderDistinctCount"], 1)
+        self.assertEqual(metrics["AcquisitionCycle_TargetOrderModalFraction"], 1.0)
+
+    def test_acquisition_cycle_dynamic_targets_do_not_look_like_fixed_grid(self):
+        items = []
+        rt = 0
+        for targets in ([400.0, 425.0], [500.0, 525.0], [600.0, 625.0]):
+            items.append(spectrum(rt, [10]))
+            rt += 1
+            for target in targets:
+                items.append(spectrum(rt, [1], 2, charge=2, width=2, precursor_mz=target))
+                rt += 1
+        metrics, _ = calculate(items)
+        self.assertEqual(metrics["AcquisitionCycle_Count"], 3)
+        self.assertEqual(metrics["AcquisitionCycle_MS2Count_Mode"], 2)
+        self.assertEqual(metrics["AcquisitionCycle_MS2Count_ModalFraction"], 1.0)
+        self.assertEqual(metrics["AcquisitionCycle_TargetSetDistinctCount"], 3)
+        self.assertAlmostEqual(metrics["AcquisitionCycle_TargetSetModalFraction"], 1 / 3)
+        self.assertEqual(metrics["AcquisitionCycle_TargetOrderDistinctCount"], 3)
+        self.assertAlmostEqual(metrics["AcquisitionCycle_TargetOrderModalFraction"], 1 / 3)
+
+    def test_acquisition_cycle_target_metrics_require_complete_metadata(self):
+        items = [
+            spectrum(0, [10]),
+            spectrum(1, [1], 2, charge=2, width=20, precursor_mz=400.0),
+            Spectrum(2, 2, np.array([100.0]), np.array([1.0]), ()),
+        ]
+        metrics, _ = calculate(items)
+        self.assertEqual(metrics["AcquisitionCycle_Count"], 1)
+        self.assertEqual(metrics["AcquisitionCycle_TargetCoverageFraction"], 0.5)
+        self.assertEqual(metrics["AcquisitionCycle_TargetEligibleCount"], 0)
+        self.assertEqual(metrics["AcquisitionCycle_TargetEligibleFraction"], 0.0)
+        self.assertIsNone(metrics["AcquisitionCycle_UniqueTargetCount_Quantiles"])
+        self.assertEqual(metrics["AcquisitionCycle_TargetSetDistinctCount"], 0)
+        self.assertIsNone(metrics["AcquisitionCycle_TargetSetModalFraction"])
+        self.assertEqual(metrics["AcquisitionCycle_TargetOrderDistinctCount"], 0)
+        self.assertIsNone(metrics["AcquisitionCycle_TargetOrderModalFraction"])
+
+    def test_acquisition_cycle_metrics_ignore_ms2_before_first_ms1(self):
+        items = [
+            spectrum(0, [1], 2, charge=2, width=20, precursor_mz=300.0),
+            spectrum(1, [10]),
+            spectrum(2, [1], 2, charge=2, width=20, precursor_mz=400.0),
+        ]
+        metrics, _ = calculate(items)
+        self.assertEqual(metrics["AcquisitionCycle_Count"], 1)
+        self.assertEqual(metrics["AcquisitionCycle_MS2Count_Mode"], 1)
+        self.assertEqual(metrics["AcquisitionCycle_TargetCoverageFraction"], 1.0)
+
     def test_isolation_width_metrics_ignore_missing_widths(self):
         summary = RunSummary()
         summary.consume_spectrum(Spectrum(2, 0, np.array([100.]), np.array([1.]),

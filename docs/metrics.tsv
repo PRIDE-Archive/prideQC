@@ -84,6 +84,18 @@ IsolationPrecursorMz_MS2_RepeatedFraction	QCPRIDE:8D2E4B9C7A1F6E5B3C0D	scalar	Fr
 MultiplePrecursors_MS2_Count	QCPRIDE:82C9F41E70F7A9F93FCC	scalar	Scans with multiple precursors; first precursor supplies precursor-distribution metrics, MS2.
 ExtentPrecursorIntensity_95over5_MS2	QCPRIDE:BD6FAF3B9FAECC3FF579	scalar	95th/5th percentile ratio of positive recorded first-precursor MS2 intensities; ID-free proxy, no fragment-TIC fallback.
 MS1_to_MS2_Ratio	QCPRIDE:3E6B36C0810EEDA24D7A	scalar	MS1 scan count divided by MS2 scan count; undefined when denominator is zero.
+AcquisitionCycle_Count	QCPRIDE:E5D44EF02DD0C112FCCD	scalar	Count of MS1-delimited cycles containing at least one MS2 scan. MS2 scans before the first MS1 are ignored; a trailing cycle is included when it contains MS2 scans.
+AcquisitionCycle_MS2Count_Quantiles	QCPRIDE:CB0E144250E9279F1725	tuple	25th, 50th, 75th percentiles of MS2 scans per observed MS1-delimited cycle.
+AcquisitionCycle_MS2Count_Mode	QCPRIDE:38064FE0BC760341F5CE	scalar	Most frequent MS2 scan count per observed MS1-delimited cycle; lower count wins ties.
+AcquisitionCycle_MS2Count_ModalFraction	QCPRIDE:F6EA9ED8D480A916D62F	scalar	Fraction of observed MS1-delimited cycles having the modal MS2 scan count.
+AcquisitionCycle_TargetCoverageFraction	QCPRIDE:1E7E0C9468F1B503778C	scalar	Fraction of MS2 scans inside observed MS1-delimited cycles with a finite positive first-precursor m/z paired with a positive isolation width.
+AcquisitionCycle_TargetEligibleCount	QCPRIDE:172D73B0C593B7E3F376	scalar	Count of observed MS1-delimited cycles where every MS2 scan has target metadata eligible for target-set/order comparison.
+AcquisitionCycle_TargetEligibleFraction	QCPRIDE:0EA9DB6C9708D5F09586	scalar	Fraction of observed MS1-delimited cycles eligible for target-set/order comparison.
+AcquisitionCycle_UniqueTargetCount_Quantiles	QCPRIDE:EAE7AB20278D155810C1	tuple	25th, 50th, 75th percentiles of unique first-precursor isolation targets per eligible cycle after 0.1 Th quantization.
+AcquisitionCycle_TargetSetDistinctCount	QCPRIDE:3DAD05F0A9B6418D738F	scalar	Number of distinct per-cycle isolation-target sets among eligible cycles after 0.1 Th quantization.
+AcquisitionCycle_TargetSetModalFraction	QCPRIDE:C1EE0988D7C3648932F1	scalar	Fraction of eligible cycles whose quantized isolation-target set equals the modal set.
+AcquisitionCycle_TargetOrderDistinctCount	QCPRIDE:971C73C2545A365A4D7E	scalar	Number of distinct ordered per-cycle isolation-target sequences among eligible cycles after 0.1 Th quantization.
+AcquisitionCycle_TargetOrderModalFraction	QCPRIDE:4A5FB670C1ACFB1FBDB2	scalar	Fraction of eligible cycles whose quantized ordered isolation-target sequence equals the modal sequence.
 MS2_PrecursorCharge_Fractions	QCPRIDE:EF3BCB4B9E83C77AAC5B	table	Counts and fractions of first-precursor charges, denominator all MS2 scans; missing or nonpositive charge is unknown.
 ChargeMean	QCPRIDE:E303A6C9571AC1DD9AD6	scalar	Mean positive first-precursor MS2 charge; unknown charges excluded.
 ChargeMedian	QCPRIDE:3E06B5777AC79EC2AAC6	scalar	Median positive first-precursor MS2 charge; unknown charges excluded.
