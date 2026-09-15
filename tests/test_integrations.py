@@ -245,6 +245,95 @@ class PrideTests(unittest.TestCase):
                 self.assertEqual(receipt["unprocessed"], ["b.mzML"])
                 self.assertEqual(len(list(Path(folder).iterdir())), 1)
 
+    def test_expected_api_size_rejects_nonempty_partial_download(self):
+        client = MagicMock()
+        client.get_file_from_api.return_value = [
+            {"fileName": "run.raw", "fileSizeBytes": 10}
+        ]
+
+        def partial(**arguments):
+            (Path(arguments["output_folder"]) / arguments["file_name"]).write_bytes(
+                b"partial"
+            )
+
+        client.download_file_by_name.side_effect = partial
+        with tempfile.TemporaryDirectory() as folder:
+            destination = Path(folder) / "downloads"
+            with self.assertRaisesRegex(RuntimeError, "PRIDE download failed"):
+                PrideRepository(client).download_files(
+                    "PXD008644", ["run.raw"], destination,
+                    options=DownloadOptions(checksum_check=False),
+                )
+            self.assertFalse((destination / "run.raw").exists())
+            receipt = json.loads(
+                (destination / "download-manifest.json").read_text()
+            )
+            file_record = receipt["files"][0]
+            self.assertFalse(receipt["success"])
+            self.assertEqual(file_record["expected_size_bytes"], 10)
+            self.assertEqual(file_record["size_bytes"], 7)
+            self.assertFalse(file_record["size_match"])
+            self.assertEqual(file_record["error_type"], "RuntimeError")
+
+    def test_expected_api_size_ignores_missing_size_metadata(self):
+        client = MagicMock()
+        client.get_file_from_api.return_value = [
+            {"fileName": "run.raw", "fileSizeBytes": None}
+        ]
+
+        payload = b"complete"
+
+        def complete(**arguments):
+            (Path(arguments["output_folder"]) / arguments["file_name"]).write_bytes(
+                payload
+            )
+
+        client.download_file_by_name.side_effect = complete
+        with tempfile.TemporaryDirectory() as folder:
+            destination = Path(folder) / "downloads"
+            paths = PrideRepository(client).download_files(
+                "PXD008644", ["run.raw"], destination,
+                options=DownloadOptions(checksum_check=False),
+            )
+            self.assertEqual(paths, [destination / "run.raw"])
+            receipt = json.loads(
+                (destination / "download-manifest.json").read_text()
+            )
+            file_record = receipt["files"][0]
+            self.assertTrue(receipt["success"])
+            self.assertNotIn("expected_size_bytes", file_record)
+            self.assertEqual(file_record["size_bytes"], len(payload))
+            self.assertNotIn("size_match", file_record)
+
+    def test_expected_api_size_accepts_complete_download_without_checksum(self):
+        client = MagicMock()
+        payload = b"complete!!"
+        client.get_file_from_api.return_value = [
+            {"fileName": "run.raw", "fileSizeBytes": len(payload)}
+        ]
+
+        def complete(**arguments):
+            (Path(arguments["output_folder"]) / arguments["file_name"]).write_bytes(
+                payload
+            )
+
+        client.download_file_by_name.side_effect = complete
+        with tempfile.TemporaryDirectory() as folder:
+            destination = Path(folder) / "downloads"
+            paths = PrideRepository(client).download_files(
+                "PXD008644", ["run.raw"], destination,
+                options=DownloadOptions(checksum_check=False),
+            )
+            self.assertEqual(paths, [destination / "run.raw"])
+            receipt = json.loads(
+                (destination / "download-manifest.json").read_text()
+            )
+            file_record = receipt["files"][0]
+            self.assertTrue(receipt["success"])
+            self.assertEqual(file_record["expected_size_bytes"], len(payload))
+            self.assertEqual(file_record["size_bytes"], len(payload))
+            self.assertTrue(file_record["size_match"])
+
     def test_existing_files_unsafe_selection_and_collisions_fail_before_download(self):
         client = MagicMock()
         with tempfile.TemporaryDirectory() as folder:
