@@ -86,6 +86,10 @@ class AnnotationTests(unittest.TestCase):
             len(collector.fragment_low_res_errors_da),
             len(collector.fragment_errors_da),
         )
+        self.assertGreaterEqual(
+            len(collector.fragment_very_low_res_errors_da),
+            len(collector.fragment_low_res_errors_da),
+        )
 
     def test_unknown_peak_type_estimated_centroid_supports_fragment_precision(self):
         collector = RepeatSpectrumMassErrorCollector(
@@ -372,7 +376,7 @@ class AnnotationTests(unittest.TestCase):
         self.assertIsNone(ppm.value)
 
 
-    def test_fragment_search_tolerance_abstains_when_wide_window_is_still_censored(self):
+    def test_fragment_search_tolerance_expands_to_one_da_when_half_da_is_censored(self):
         collector = RepeatSpectrumMassErrorCollector(
             min_fragment_pairs=10,
             min_fragment_tolerance_pairs=20,
@@ -394,6 +398,65 @@ class AnnotationTests(unittest.TestCase):
             math.sin(i * 0.47) * 330.0
             for i in range(200)
         ]
+        collector.fragment_very_low_res_errors_da = [
+            math.sin(i * 0.47) * 0.22
+            for i in range(220)
+        ]
+        collector.fragment_very_low_res_errors_ppm = [
+            math.sin(i * 0.47) * 330.0
+            for i in range(220)
+        ]
+        collector.fragment_paired_spectra = 25
+        collector.fragment_eligible_ms2 = 200
+
+        annotations = collector.annotations()
+        da = next(
+            a for a in annotations
+            if a.field == "suggested_fragment_search_tolerance_da"
+        )
+        precision = next(
+            a for a in annotations
+            if a.field == "estimated_fragment_mass_error_da"
+        )
+
+        self.assertEqual(da.kind, EvidenceKind.INFERRED)
+        self.assertEqual(precision.kind, EvidenceKind.INFERRED)
+        self.assertFalse(precision.value["window_censored"])
+        self.assertEqual(precision.value["fragment_match_window_da"], 1.0)
+        self.assertEqual(da.value["fragment_match_window_da"], 1.0)
+        self.assertEqual(precision.support, 220)
+        self.assertEqual(da.support, 220)
+
+    def test_fragment_search_tolerance_abstains_when_one_da_is_still_censored(self):
+        collector = RepeatSpectrumMassErrorCollector(
+            min_fragment_pairs=10,
+            min_fragment_tolerance_pairs=20,
+            min_fragment_tolerance_spectra=5,
+        )
+        collector.fragment_errors_da = [
+            math.sin(i * 0.47) * 0.08
+            for i in range(200)
+        ]
+        collector.fragment_errors_ppm = [
+            math.sin(i * 0.47) * 120.0
+            for i in range(200)
+        ]
+        collector.fragment_low_res_errors_da = [
+            math.sin(i * 0.47) * 0.22
+            for i in range(200)
+        ]
+        collector.fragment_low_res_errors_ppm = [
+            math.sin(i * 0.47) * 330.0
+            for i in range(200)
+        ]
+        collector.fragment_very_low_res_errors_da = [
+            math.sin(i * 0.47) * 0.40
+            for i in range(200)
+        ]
+        collector.fragment_very_low_res_errors_ppm = [
+            math.sin(i * 0.47) * 600.0
+            for i in range(200)
+        ]
         collector.fragment_paired_spectra = 25
         collector.fragment_eligible_ms2 = 200
 
@@ -411,7 +474,7 @@ class AnnotationTests(unittest.TestCase):
         self.assertIsNone(da.value)
         self.assertEqual(precision.kind, EvidenceKind.INFERRED)
         self.assertTrue(precision.value["window_censored"])
-        self.assertEqual(precision.value["fragment_match_window_da"], 0.5)
+        self.assertEqual(precision.value["fragment_match_window_da"], 1.0)
 
     def test_fragment_search_tolerance_suggestion_abstains_on_ambiguous_regime(self):
         collector = RepeatSpectrumMassErrorCollector(
