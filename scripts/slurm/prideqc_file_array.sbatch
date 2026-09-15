@@ -13,6 +13,7 @@ PRIDEQC_DIAGNOSTICS="${PRIDEQC_DIAGNOSTICS:-1}"
 PRIDEQC_INCLUDE_INFERRED="${PRIDEQC_INCLUDE_INFERRED:-0}"
 PRIDEQC_ESTIMATE_PEAK_TYPE="${PRIDEQC_ESTIMATE_PEAK_TYPE:-0}"
 PRIDEQC_ESTIMATE_MASS_ERROR="${PRIDEQC_ESTIMATE_MASS_ERROR:-0}"
+PRIDEQC_CHECKSUM_CHECK="${PRIDEQC_CHECKSUM_CHECK:-1}"
 
 TASK_ID="${SLURM_ARRAY_TASK_ID:-${TASK_ID:-1}}"
 JOB_ID="${SLURM_JOB_ID:-local-$$}"
@@ -61,6 +62,10 @@ test -r "$SDRF_PATH" || {
 }
 [[ "$NEEDS_FILE_MAP" == 0 || "$NEEDS_FILE_MAP" == 1 ]] || {
     echo "Invalid needs_file_map value: $NEEDS_FILE_MAP" >&2
+    exit 2
+}
+[[ "$PRIDEQC_CHECKSUM_CHECK" == 0 || "$PRIDEQC_CHECKSUM_CHECK" == 1 ]] || {
+    echo "PRIDEQC_CHECKSUM_CHECK must be 0 or 1" >&2
     exit 2
 }
 
@@ -135,7 +140,8 @@ printf '%s\n' \
     "slurm_mem_per_node=${SLURM_MEM_PER_NODE:-unknown}" \
     "sif=$SIF" \
     "scratch=$WORK_ROOT" \
-    "result=$FINAL_RESULTS"
+    "result=$FINAL_RESULTS" \
+    "pride_checksum_check=$PRIDEQC_CHECKSUM_CHECK"
 
 echo "==> Verify and stage SIF"
 (
@@ -173,6 +179,8 @@ analysis_flags=()
 [[ "$PRIDEQC_INCLUDE_INFERRED" == 1 ]] && analysis_flags+=(--include-inferred)
 [[ "$PRIDEQC_ESTIMATE_PEAK_TYPE" == 1 ]] && analysis_flags+=(--estimate-peak-type)
 [[ "$PRIDEQC_ESTIMATE_MASS_ERROR" == 1 ]] && analysis_flags+=(--estimate-mass-error)
+download_flags=()
+[[ "$PRIDEQC_CHECKSUM_CHECK" == 0 ]] && download_flags+=(--no-checksum-check)
 
 file_map_flags=()
 if [[ "$NEEDS_FILE_MAP" == 1 ]]; then
@@ -191,6 +199,7 @@ set +e
       --accession "$PXD" \
       --file "$ARCHIVE_FILE" \
       --protocol "$PRIDE_PROTOCOL" \
+      "${download_flags[@]}" \
       --download-dir /work/download \
       --sdrf /work/input.sdrf.tsv \
       --sdrf-template "$SDRF_TEMPLATE" \
@@ -280,6 +289,7 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     echo "cpus=$CPUS"
     echo "workers=1"
     echo "pride_protocol=$PRIDE_PROTOCOL"
+    echo "pride_checksum_check=$PRIDEQC_CHECKSUM_CHECK"
     echo "sif=$SIF"
     echo "sif_sha256=$EXPECTED_SIF_SHA"
     echo "started_epoch=$START_EPOCH"
