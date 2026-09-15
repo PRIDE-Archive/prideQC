@@ -23,6 +23,39 @@ class DownloadClient(Protocol):
     ) -> Any: ...
 
 
+def _expected_size_bytes(client: Any, accession: str, name: str) -> int | None:
+    """Return a unique positive PRIDE API file size when available.
+
+    pridepy validates only existence/non-emptiness when checksum checking is
+    disabled. A timed-out transfer can therefore leave a non-empty partial
+    file that looks valid to pridepy. Use the normal project file listing as
+    an independent size guard without depending on the checksum endpoint.
+    """
+    lookup = getattr(client, "get_file_from_api", None)
+    if not callable(lookup):
+        return None
+    try:
+        records = lookup(accession, name)
+    except Exception:
+        return None
+    sizes: set[int] = set()
+    for record in records or []:
+        if not isinstance(record, dict) or record.get("fileName") != name:
+            continue
+        value = record.get("fileSizeBytes")
+        if value is None:
+            continue
+        try:
+            size = int(value)
+        except (TypeError, ValueError):
+            continue
+        if size > 0:
+            sizes.add(size)
+    if len(sizes) == 1:
+        return sizes.pop()
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class DownloadOptions:
     protocol: str = "ftp"
@@ -65,7 +98,9 @@ class PrideRepository:
 
     A fresh destination prevents reuse of partial or unrelated files. Each file
     is staged on the same filesystem, then published only after pridepy returns
-    and a nonempty regular file exists. Credentials are never serialized.
+    and a nonempty regular file exists. When the PRIDE listing exposes a file
+    size, that size must also match before publication. Credentials are never
+    serialized.
     """
 
     def __init__(self, client: DownloadClient | None = None) -> None:
@@ -104,6 +139,9 @@ class PrideRepository:
             for name in names:
                 record: dict[str, Any] = {"filename": name, "status": "failed"}
                 records.append(record)
+                expected_size = _expected_size_bytes(client, accession, name)
+                if expected_size is not None:
+                    record["expected_size_bytes"] = expected_size
                 try:
                     with TemporaryDirectory(prefix=".prideqc-", dir=target) as staging:
                         transfer_result = client.download_file_by_name(
@@ -118,7 +156,16 @@ class PrideRepository:
                         downloaded = Path(staging) / name
                         if downloaded.is_symlink() or not downloaded.is_file() or downloaded.stat().st_size == 0:
                             raise RuntimeError("pridepy did not produce a nonempty regular file.")
-                        record["size_bytes"] = downloaded.stat().st_size
+                        actual_size = downloaded.stat().st_size
+                        record["size_bytes"] = actual_size
+                        if expected_size is not None and actual_size != expected_size:
+                            record["size_match"] = False
+                            raise RuntimeError(
+                                "pridepy produced an incomplete download: "
+                                f"got {actual_size} bytes, expected {expected_size}."
+                            )
+                        if expected_size is not None:
+                            record["size_match"] = True
                         final = target / name
                         downloaded.replace(final)
                         paths.append(final)
