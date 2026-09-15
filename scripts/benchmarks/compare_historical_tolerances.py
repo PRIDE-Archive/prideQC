@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Compare RAW-derived v19 fragment tolerance candidates with SDRF annotations.
+"""Compare RAW-derived fragment-tolerance candidates with historical SDRF values.
 
-The script does not tune the estimator. It reports whether a candidate and a
-historical SDRF fragment-tolerance annotation are directly comparable. Ratios
-and differences are calculated only for matching units.
+v21 is a validation/stabilization layer. It does not tune the v19 estimator.
+Primary comparisons are same-unit only. For ppm/Da mismatches, an optional
+mass-context conversion is reported using observed MS2 m/z statistics rather
+than being used to redefine the primary comparison.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -30,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gt",
         type=Path,
-        help="Optional curated GT TSV. Used as a fallback historical source when a run SDRF cannot be parsed.",
+        help="Optional curated GT TSV. Used as a fallback historical source.",
     )
     return parser.parse_args()
 
@@ -70,7 +72,7 @@ def candidate_from_annotations(
                 value = float(value)
             except (TypeError, ValueError):
                 value = None
-            if value is not None:
+            if value is not None and math.isfinite(value) and value > 0:
                 return unit, value, payload
     return "", None, None
 
@@ -85,8 +87,7 @@ def detect_data_file_column(fieldnames: list[str]) -> str | None:
         if name in fieldnames:
             return name
     for name in fieldnames:
-        lowered = name.lower()
-        if "data file" in lowered:
+        if "data file" in name.lower():
             return name
     return None
 
@@ -107,19 +108,19 @@ def detect_fragment_tolerance_column(fieldnames: list[str]) -> str | None:
 
 
 def parse_historical_tolerance(value: str) -> tuple[float | None, str]:
-    value = value.strip()
-    match = TOLERANCE_RE.search(value)
+    match = TOLERANCE_RE.search(value.strip())
     if not match:
         return None, ""
-    try:
-        parsed = float(match.group("value"))
-    except ValueError:
-        return None, ""
+    parsed = float(match.group("value"))
     unit = "ppm" if match.group("unit").lower() == "ppm" else "Da"
+    if not math.isfinite(parsed) or parsed <= 0:
+        return None, ""
     return parsed, unit
 
 
-def historical_from_sdrf(sdrf_path: Path, raw_file: str) -> tuple[float | None, str, str, str]:
+def historical_from_sdrf(
+    sdrf_path: Path, raw_file: str
+) -> tuple[float | None, str, str, str]:
     if not sdrf_path.exists():
         return None, "", "", "missing-sdrf"
 
@@ -144,27 +145,110 @@ def load_gt(path: Path | None) -> dict[tuple[str, str], dict[str, str]]:
         return {}
     with path.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle, delimiter="\t"))
+    return {(row["pxd_accession"], row["raw_file"]): row for row in rows}
+
+
+def read_metrics(path: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    with path.open(encoding="utf-8", newline="") as handle:
+        for row in csv.reader(handle, delimiter="\t"):
+            if len(row) >= 3:
+                result[row[1]] = row[2]
+    return result
+
+
+def observed_ms2_mass_context(
+    metrics: dict[str, str],
+) -> tuple[float | None, float | None, float | None]:
+    raw = metrics.get("ObservedMzRange_MS2")
+    if not raw:
+        return None, None, None
+    try:
+        values = json.loads(raw)
+        low, high = float(values[0]), float(values[1])
+    except (TypeError, ValueError, IndexError, json.JSONDecodeError):
+        return None, None, None
+    if not (math.isfinite(low) and math.isfinite(high)) or low <= 0 or high <= 0 or high < low:
+        return None, None, None
+    midpoint = (low + high) / 2.0
+    return low, midpoint, high
+
+
+def da_to_ppm(tolerance_da: float, mz: float) -> float:
+    return tolerance_da / mz * 1_000_000.0
+
+
+def ppm_to_da(tolerance_ppm: float, mz: float) -> float:
+    return tolerance_ppm * mz / 1_000_000.0
+
+
+def mass_context_conversion(
+    historical_value: float | None,
+    historical_unit: str,
+    candidate_value: float | None,
+    candidate_unit: str,
+    mz_range: tuple[float | None, float | None, float | None],
+) -> dict[str, str]:
+    low, mid, high = mz_range
+    if historical_value is None or candidate_value is None or not low or not mid or not high:
+        return {
+            "mass_context_unit": "",
+            "mass_context_median_mz": "",
+            "historical_equivalent_median_unit": "",
+            "historical_equivalent_median": "",
+            "candidate_equivalent_median_unit": "",
+            "candidate_equivalent_median": "",
+            "mass_context_ratio_candidate_over_historical": "",
+        }
+
+    if historical_unit == candidate_unit:
+        return {
+            "mass_context_unit": historical_unit,
+            "mass_context_median_mz": f"{mid:.10g}",
+            "historical_equivalent_median_unit": historical_unit,
+            "historical_equivalent_median": f"{historical_value:.10g}",
+            "candidate_equivalent_median_unit": candidate_unit,
+            "candidate_equivalent_median": f"{candidate_value:.10g}",
+            "mass_context_ratio_candidate_over_historical": (
+                f"{candidate_value / historical_value:.10g}"
+                if historical_value
+                else ""
+            ),
+        }
+
+    if historical_unit == "Da" and candidate_unit == "ppm":
+        historical_eq = da_to_ppm(historical_value, mid)
+        candidate_eq = candidate_value
+        target_unit = "ppm"
+    elif historical_unit == "ppm" and candidate_unit == "Da":
+        historical_eq = historical_value
+        candidate_eq = ppm_to_da(candidate_value, mid)
+        target_unit = "Da"
+    else:
+        return {k: "" for k in (
+            "mass_context_unit", "mass_context_median_mz",
+            "historical_equivalent_median_unit", "historical_equivalent_median",
+            "candidate_equivalent_median_unit", "candidate_equivalent_median",
+            "mass_context_ratio_candidate_over_historical")}
+
     return {
-        (row["pxd_accession"], row["raw_file"]): row
-        for row in rows
+        "mass_context_unit": target_unit,
+        "mass_context_median_mz": f"{mid:.10g}",
+        "historical_equivalent_median_unit": target_unit,
+        "historical_equivalent_median": f"{historical_eq:.10g}",
+        "candidate_equivalent_median_unit": target_unit,
+        "candidate_equivalent_median": f"{candidate_eq:.10g}",
+        "mass_context_ratio_candidate_over_historical": (
+            f"{candidate_eq / historical_eq:.10g}"
+            if historical_eq
+            else ""
+        ),
     }
 
 
-def fmt(value: float | None) -> str:
-    return "" if value is None else f"{value:.10g}"
-
-
-def median_or_blank(values: list[float]) -> float | None:
-    return median(values) if values else None
-
-
-def build_row(
-    result_dir: Path,
-    gt: dict[tuple[str, str], dict[str, str]],
-) -> dict[str, str]:
+def build_row(result_dir: Path, gt: dict[tuple[str, str], dict[str, str]]) -> dict[str, str]:
     info = {}
-    info_path = result_dir / "hpc-run-info.txt"
-    for line in info_path.read_text(encoding="utf-8").splitlines():
+    for line in (result_dir / "hpc-run-info.txt").read_text(encoding="utf-8").splitlines():
         if "=" in line:
             key, value = line.split("=", 1)
             info[key] = value
@@ -172,28 +256,23 @@ def build_row(
     raw_file = info.get("archive_file", "")
     pxd = info.get("pxd", "")
     annotations = read_annotations(result_dir / "annotations.tsv")
+    metrics = read_metrics(result_dir / "metrics.tsv")
     candidate_unit, candidate_value, candidate_payload = candidate_from_annotations(annotations)
 
-    historical_value = None
-    historical_unit = ""
-    historical_raw = ""
-    historical_source = ""
-
-    sdrf_path = result_dir / "input.sdrf.tsv"
     historical_value, historical_unit, historical_raw, historical_source = historical_from_sdrf(
-        sdrf_path,
-        raw_file,
+        result_dir / "input.sdrf.tsv", raw_file
     )
-
     if historical_value is None:
         gt_row = gt.get((pxd, raw_file))
         if gt_row:
-            historical_raw = gt_row.get("fragment_tolerance_value", "")
-            gt_unit = gt_row.get("fragment_tolerance_unit", "")
-            historical_value = (
-                float(historical_raw) if historical_raw else None
-            )
-            historical_unit = gt_unit if gt_unit in {"ppm", "Da"} else ""
+            raw_value = gt_row.get("fragment_tolerance_value", "")
+            unit = gt_row.get("fragment_tolerance_unit", "")
+            try:
+                historical_value = float(raw_value) if raw_value else None
+            except ValueError:
+                historical_value = None
+            historical_unit = unit if unit in {"ppm", "Da"} else ""
+            historical_raw = gt_row.get("fragment_tolerance_raw", raw_value)
             historical_source = "ground-truth"
 
     if not candidate_unit:
@@ -205,20 +284,31 @@ def build_row(
     else:
         comparison = "same-unit"
 
-    ratio = None
-    difference = None
-    percent = None
+    ratio = difference = percent = None
     if comparison == "same-unit" and historical_value:
         ratio = candidate_value / historical_value
         difference = candidate_value - historical_value
-        percent = difference / historical_value * 100
+        percent = difference / historical_value * 100.0
 
-    precision = parse_json_value(
-        annotations.get(
-            "estimated_fragment_mass_error_ppm"
-            if candidate_unit == "ppm"
-            else "estimated_fragment_mass_error_da"
-        )
+    context = mass_context_conversion(
+        historical_value,
+        historical_unit,
+        candidate_value,
+        candidate_unit,
+        observed_ms2_mass_context(metrics),
+    )
+
+    precision_field = (
+        "estimated_fragment_mass_error_ppm"
+        if candidate_unit == "ppm"
+        else "estimated_fragment_mass_error_da"
+    )
+    precision = parse_json_value(annotations.get(precision_field))
+    inlier_fraction = (
+        float(precision["robust_inlier_fraction"])
+        if isinstance(precision, dict)
+        and precision.get("robust_inlier_fraction") is not None
+        else None
     )
 
     return {
@@ -236,32 +326,49 @@ def build_row(
         "ratio_candidate_over_historical": fmt(ratio),
         "absolute_difference": fmt(difference),
         "percent_difference": fmt(percent),
-        "candidate_confidence": str(candidate_payload.get("confidence", "")) if candidate_payload else "",
-        "resolution_regime": str(candidate_payload.get("resolution_regime", "")) if candidate_payload else "",
+        "candidate_confidence": (
+            str(candidate_payload.get("confidence", ""))
+            if candidate_payload
+            else ""
+        ),
+        "resolution_regime": (
+            str(candidate_payload.get("resolution_regime", ""))
+            if candidate_payload
+            else ""
+        ),
         "fragment_match_window_da": fmt(
             float(candidate_payload["fragment_match_window_da"])
-            if candidate_payload and candidate_payload.get("fragment_match_window_da") is not None
+            if candidate_payload
+            and candidate_payload.get("fragment_match_window_da") is not None
             else None
         ),
-        "window_censored": str(candidate_payload.get("window_censored", "")) if candidate_payload else "",
-        "robust_inlier_fraction": fmt(
-            float(precision["robust_inlier_fraction"])
-            if isinstance(precision, dict) and precision.get("robust_inlier_fraction") is not None
-            else None
+        "window_censored": (
+            str(candidate_payload.get("window_censored", ""))
+            if candidate_payload
+            else ""
         ),
+        "robust_inlier_fraction": fmt(inlier_fraction),
+        **context,
     }
+
+
+def fmt(value: float | None) -> str:
+    return "" if value is None else f"{value:.10g}"
 
 
 def main() -> None:
     args = parse_args()
     gt = load_gt(args.gt)
-
     result_dirs = sorted(
-        path.parent for path in args.run_root.rglob("hpc-run-info.txt")
-        if (path.parent / "annotations.tsv").exists()
+        path.parent
+        for path in args.run_root.rglob("hpc-run-info.txt")
+        if (path.parent / "annotations.tsv").exists() and (path.parent / "metrics.tsv").exists()
     )
     if not result_dirs:
-        raise SystemExit(f"No completed annotation result directories found under {args.run_root}")
+        raise SystemExit(
+            "No result directories with annotations and metrics found under "
+            f"{args.run_root}"
+        )
 
     rows = [build_row(path, gt) for path in result_dirs]
     args.files_output.parent.mkdir(parents=True, exist_ok=True)
@@ -280,23 +387,20 @@ def main() -> None:
     summaries = []
     for pxd, group in sorted(by_pxd.items()):
         same = [r for r in group if r["comparison"] == "same-unit"]
-        inferred = [r for r in group if r["candidate_value"]]
-        candidates = [float(r["candidate_value"]) for r in inferred]
-        historical = [
-            float(r["historical_value"])
-            for r in same
-            if r["historical_value"]
-        ]
         ratios = [
             float(r["ratio_candidate_over_historical"])
             for r in same
             if r["ratio_candidate_over_historical"]
         ]
-        pcts = [
-            float(r["percent_difference"])
-            for r in same
-            if r["percent_difference"]
+        pcts = [float(r["percent_difference"]) for r in same if r["percent_difference"]]
+        context_ratios = [
+            float(r["mass_context_ratio_candidate_over_historical"])
+            for r in group
+            if r["mass_context_ratio_candidate_over_historical"]
         ]
+        candidate_values = [float(r["candidate_value"]) for r in group if r["candidate_value"]]
+        historical_values = [float(r["historical_value"]) for r in group if r["historical_value"]]
+        inferred = [r for r in group if r["candidate_value"]]
         summaries.append({
             "pxd": pxd,
             "files": str(len(group)),
@@ -304,46 +408,53 @@ def main() -> None:
             "candidate_unavailable": str(len(group) - len(inferred)),
             "historical_available": str(sum(bool(r["historical_value"]) for r in group)),
             "same_unit_files": str(len(same)),
-            "unit_incompatible_files": str(sum(r["comparison"] == "unit-incompatible" for r in group)),
-            "candidate_unavailable_files": str(sum(r["comparison"] == "candidate-unavailable" for r in group)),
-            "median_historical": fmt(median_or_blank(historical)),
-            "median_candidate": fmt(median_or_blank(candidates)),
-            "median_ratio_candidate_over_historical": fmt(median_or_blank(ratios)),
+            "unit_incompatible_files": str(
+                sum(r["comparison"] == "unit-incompatible" for r in group)
+            ),
+            "candidate_unavailable_files": str(
+                sum(r["comparison"] == "candidate-unavailable" for r in group)
+            ),
+            "historical_unavailable_files": str(
+                sum(r["comparison"] == "historical-unavailable" for r in group)
+            ),
+            "median_historical": fmt(median(historical_values) if historical_values else None),
+            "median_candidate": fmt(median(candidate_values) if candidate_values else None),
+            "median_ratio_candidate_over_historical": fmt(median(ratios) if ratios else None),
             "min_ratio_candidate_over_historical": fmt(min(ratios) if ratios else None),
             "max_ratio_candidate_over_historical": fmt(max(ratios) if ratios else None),
-            "median_percent_difference": fmt(median_or_blank(pcts)),
+            "median_percent_difference": fmt(median(pcts) if pcts else None),
+            "median_mass_context_ratio": fmt(median(context_ratios) if context_ratios else None),
             "candidate_units": ",".join(
-                f"{unit}:{sum(r['candidate_unit'] == unit for r in group)}"
-                for unit in ("ppm", "Da")
-                if any(r["candidate_unit"] == unit for r in group)
+                f"{u}:{sum(r['candidate_unit'] == u for r in group)}"
+                for u in ("ppm", "Da")
+                if any(r["candidate_unit"] == u for r in group)
             ),
             "historical_units": ",".join(
-                f"{unit}:{sum(r['historical_unit'] == unit for r in group)}"
-                for unit in ("ppm", "Da")
-                if any(r["historical_unit"] == unit for r in group)
+                f"{u}:{sum(r['historical_unit'] == u for r in group)}"
+                for u in ("ppm", "Da")
+                if any(r["historical_unit"] == u for r in group)
             ),
             "windows_da": ",".join(
-                f"{window}:{sum(r['fragment_match_window_da'] == window for r in group)}"
-                for window in ("0.2", "0.5", "1")
-                if any(r["fragment_match_window_da"] == window for r in group)
+                f"{w}:{sum(r['fragment_match_window_da'] == w for r in group)}"
+                for w in ("0.2", "0.5", "1")
+                if any(r["fragment_match_window_da"] == w for r in group)
             ),
             "confidence": ",".join(
-                f"{confidence}:{sum(r['candidate_confidence'] == confidence for r in group)}"
-                for confidence in ("high", "moderate", "low")
-                if any(r["candidate_confidence"] == confidence for r in group)
+                f"{c}:{sum(r['candidate_confidence'] == c for r in group)}"
+                for c in ("high", "moderate", "low")
+                if any(r["candidate_confidence"] == c for r in group)
             ),
         })
 
-    summary_fields = list(summaries[0])
     with args.accessions_output.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=summary_fields, delimiter="\t")
+        writer = csv.DictWriter(handle, fieldnames=list(summaries[0]), delimiter="\t")
         writer.writeheader()
         writer.writerows(summaries)
 
     counts = Counter(row["comparison"] for row in rows)
     print(f"files={len(rows)}")
     print(f"accessions={len(summaries)}")
-    print("comparison_counts=" + ",".join(f"{k}:{counts[k]}" for k in sorted(counts)))
+    print("comparison_counts=" + ",".join(f"{key}:{counts[key]}" for key in sorted(counts)))
     print(f"files_output={args.files_output}")
     print(f"accessions_output={args.accessions_output}")
 
