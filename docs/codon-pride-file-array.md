@@ -131,6 +131,13 @@ Use a new run name for every estimator revision even when the same RAW files are
 reused. This makes provenance visible in the result path and prevents a correct new
 SIF from being mistaken for an older experiment because stale shell names were reused.
 
+For mass-error estimator v6/v19, repeated-spectrum identity is still established with
+the 0.2 Da fragment-overlap window. Low-resolution precision is then measured with an
+adaptive ladder of 0.5 Da followed by 1.0 Da. The estimator uses the narrowest window
+whose robust three-sigma pairwise core stays below 90% of the window and abstains if
+1.0 Da remains censored. Do not change the Slurm wrapper or RAW data to pre-centroid
+profile spectra; profile peak centers are derived ephemerally inside prideQC.
+
 ## Monitor
 
 ```bash

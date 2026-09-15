@@ -206,15 +206,18 @@ a six-sigma envelope. A clearly high-resolution precision regime (<=10 ppm and
 The unused unit remains explicitly unavailable. Fragment precision payloads also
 report a mixture-model-free robust core diagnostic: the fraction/count of matched
 fragment deltas within three robust pairwise sigmas of the median. This quantifies
-the outlier component admitted by fragment matching. Starting with v18, repeated
+the outlier component admitted by fragment matching. Starting with v19, repeated
 spectrum pairs are still selected with the conservative 0.2 Da overlap window, but
-runs provisionally classified as low-resolution also collect a 0.5 Da fragment-error
-distribution. High-resolution precision remains based on the 0.2 Da distribution;
-low-resolution precision and tolerance recommendations use the wider distribution
-only when its robust three-sigma pairwise core remains comfortably inside that
-window. If the 0.5 Da distribution is still window-censored, the low-resolution
-tolerance recommendation abstains rather than reporting a truncated estimate. The
-robust inlier fraction remains diagnostic and is not used as a hard quality cutoff.
+runs provisionally classified as low-resolution also collect 0.5 Da and 1.0 Da
+fragment-error distributions. High-resolution precision remains based on the 0.2 Da
+distribution. Low-resolution precision selects the narrowest available measurement
+window whose robust three-sigma pairwise core remains below 90% of that window: 0.5
+Da first, then 1.0 Da if needed. If even the 1.0 Da distribution is still
+window-censored, the low-resolution tolerance recommendation abstains rather than
+reporting a truncated estimate. The broad windows are used only after repeated-spectrum
+pairs have already been selected with 0.2 Da, limiting the risk that a wide window
+creates the pair itself. The robust inlier fraction remains diagnostic and is not used
+as a hard quality cutoff.
 This is a recommended starting envelope, not reconstructed search provenance.
 `--estimate-peak-type` can also be requested independently.
 
