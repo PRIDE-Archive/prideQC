@@ -40,3 +40,10 @@ singularity exec \
 Inspect the accession report first, then the same-unit file-level cases. Treat mass-context ratios as supporting evidence rather than as replacements for same-unit comparisons.
 
 The comparison is a validation report only. Do not feed its results back into v19 thresholds or multipliers without a separate development/validation protocol.
+
+
+## v21 stabilization fix
+
+The primary comparison remains unchanged: same-unit values are compared directly, while Da/ppm mismatches remain `unit-incompatible`.
+
+For unit-incompatible pairs, v21 now reports mass-context equivalents at the observed MS2 m/z minimum, observed-range midpoint, and observed MS2 m/z maximum. The midpoint is explicitly a range midpoint; it is not a statistical m/z median because the compact metrics contract does not retain the full m/z distribution. These contextual equivalents are diagnostic only and do not change the primary comparison category or the estimator.

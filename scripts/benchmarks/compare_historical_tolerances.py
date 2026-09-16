@@ -160,6 +160,12 @@ def read_metrics(path: Path) -> dict[str, str]:
 def observed_ms2_mass_context(
     metrics: dict[str, str],
 ) -> tuple[float | None, float | None, float | None]:
+    """Return observed MS2 m/z range as (min, midpoint, max).
+
+    The current compact metrics contract exposes an observed range rather than
+    the full precursor/fragment m/z distribution. Therefore the midpoint is
+    explicitly a *range midpoint*, not a statistical median.
+    """
     raw = metrics.get("ObservedMzRange_MS2")
     if not raw:
         return None, None, None
@@ -168,10 +174,14 @@ def observed_ms2_mass_context(
         low, high = float(values[0]), float(values[1])
     except (TypeError, ValueError, IndexError, json.JSONDecodeError):
         return None, None, None
-    if not (math.isfinite(low) and math.isfinite(high)) or low <= 0 or high <= 0 or high < low:
+    if (
+        not (math.isfinite(low) and math.isfinite(high))
+        or low <= 0
+        or high <= 0
+        or high < low
+    ):
         return None, None, None
-    midpoint = (low + high) / 2.0
-    return low, midpoint, high
+    return low, (low + high) / 2.0, high
 
 
 def da_to_ppm(tolerance_da: float, mz: float) -> float:
@@ -189,62 +199,85 @@ def mass_context_conversion(
     candidate_unit: str,
     mz_range: tuple[float | None, float | None, float | None],
 ) -> dict[str, str]:
+    """Convert unlike units at observed-range anchors without changing primary comparison.
+
+    For Da/ppm mismatches we report equivalent tolerances at min, midpoint, and
+    max observed MS2 m/z. The midpoint is only the observed-range midpoint; no
+    unobserved statistical mass distribution is implied.
+    """
     low, mid, high = mz_range
-    if historical_value is None or candidate_value is None or not low or not mid or not high:
-        return {
-            "mass_context_unit": "",
-            "mass_context_median_mz": "",
-            "historical_equivalent_median_unit": "",
-            "historical_equivalent_median": "",
-            "candidate_equivalent_median_unit": "",
-            "candidate_equivalent_median": "",
-            "mass_context_ratio_candidate_over_historical": "",
-        }
+    keys = (
+        "mass_context_unit",
+        "mass_context_mz_min",
+        "mass_context_mz_midpoint",
+        "mass_context_mz_max",
+        "historical_equivalent_min",
+        "historical_equivalent_midpoint",
+        "historical_equivalent_max",
+        "candidate_equivalent_min",
+        "candidate_equivalent_midpoint",
+        "candidate_equivalent_max",
+        "mass_context_ratio_min",
+        "mass_context_ratio_midpoint",
+        "mass_context_ratio_max",
+    )
+    if (
+        historical_value is None
+        or candidate_value is None
+        or not low
+        or not mid
+        or not high
+    ):
+        return {key: "" for key in keys}
 
     if historical_unit == candidate_unit:
         return {
             "mass_context_unit": historical_unit,
-            "mass_context_median_mz": f"{mid:.10g}",
-            "historical_equivalent_median_unit": historical_unit,
-            "historical_equivalent_median": f"{historical_value:.10g}",
-            "candidate_equivalent_median_unit": candidate_unit,
-            "candidate_equivalent_median": f"{candidate_value:.10g}",
-            "mass_context_ratio_candidate_over_historical": (
-                f"{candidate_value / historical_value:.10g}"
-                if historical_value
-                else ""
-            ),
+            "mass_context_mz_min": fmt(low),
+            "mass_context_mz_midpoint": fmt(mid),
+            "mass_context_mz_max": fmt(high),
+            "historical_equivalent_min": fmt(historical_value),
+            "historical_equivalent_midpoint": fmt(historical_value),
+            "historical_equivalent_max": fmt(historical_value),
+            "candidate_equivalent_min": fmt(candidate_value),
+            "candidate_equivalent_midpoint": fmt(candidate_value),
+            "candidate_equivalent_max": fmt(candidate_value),
+            "mass_context_ratio_min": fmt(candidate_value / historical_value),
+            "mass_context_ratio_midpoint": fmt(candidate_value / historical_value),
+            "mass_context_ratio_max": fmt(candidate_value / historical_value),
         }
 
     if historical_unit == "Da" and candidate_unit == "ppm":
-        historical_eq = da_to_ppm(historical_value, mid)
-        candidate_eq = candidate_value
+        def convert(mz: float) -> tuple[float, float]:
+            return historical_value / mz * 1_000_000.0, candidate_value
+
         target_unit = "ppm"
     elif historical_unit == "ppm" and candidate_unit == "Da":
-        historical_eq = historical_value
-        candidate_eq = ppm_to_da(candidate_value, mid)
+        def convert(mz: float) -> tuple[float, float]:
+            return historical_value, candidate_value * mz / 1_000_000.0
+
         target_unit = "Da"
     else:
-        return {k: "" for k in (
-            "mass_context_unit", "mass_context_median_mz",
-            "historical_equivalent_median_unit", "historical_equivalent_median",
-            "candidate_equivalent_median_unit", "candidate_equivalent_median",
-            "mass_context_ratio_candidate_over_historical")}
+        return {key: "" for key in keys}
 
+    historical_min, candidate_min = convert(low)
+    historical_mid, candidate_mid = convert(mid)
+    historical_max, candidate_max = convert(high)
     return {
         "mass_context_unit": target_unit,
-        "mass_context_median_mz": f"{mid:.10g}",
-        "historical_equivalent_median_unit": target_unit,
-        "historical_equivalent_median": f"{historical_eq:.10g}",
-        "candidate_equivalent_median_unit": target_unit,
-        "candidate_equivalent_median": f"{candidate_eq:.10g}",
-        "mass_context_ratio_candidate_over_historical": (
-            f"{candidate_eq / historical_eq:.10g}"
-            if historical_eq
-            else ""
-        ),
+        "mass_context_mz_min": fmt(low),
+        "mass_context_mz_midpoint": fmt(mid),
+        "mass_context_mz_max": fmt(high),
+        "historical_equivalent_min": fmt(historical_min),
+        "historical_equivalent_midpoint": fmt(historical_mid),
+        "historical_equivalent_max": fmt(historical_max),
+        "candidate_equivalent_min": fmt(candidate_min),
+        "candidate_equivalent_midpoint": fmt(candidate_mid),
+        "candidate_equivalent_max": fmt(candidate_max),
+        "mass_context_ratio_min": fmt(candidate_min / historical_min),
+        "mass_context_ratio_midpoint": fmt(candidate_mid / historical_mid),
+        "mass_context_ratio_max": fmt(candidate_max / historical_max),
     }
-
 
 def build_row(result_dir: Path, gt: dict[tuple[str, str], dict[str, str]]) -> dict[str, str]:
     info = {}
@@ -394,9 +427,9 @@ def main() -> None:
         ]
         pcts = [float(r["percent_difference"]) for r in same if r["percent_difference"]]
         context_ratios = [
-            float(r["mass_context_ratio_candidate_over_historical"])
+            float(r["mass_context_ratio_midpoint"])
             for r in group
-            if r["mass_context_ratio_candidate_over_historical"]
+            if r["mass_context_ratio_midpoint"]
         ]
         candidate_values = [float(r["candidate_value"]) for r in group if r["candidate_value"]]
         historical_values = [float(r["historical_value"]) for r in group if r["historical_value"]]
@@ -423,7 +456,9 @@ def main() -> None:
             "min_ratio_candidate_over_historical": fmt(min(ratios) if ratios else None),
             "max_ratio_candidate_over_historical": fmt(max(ratios) if ratios else None),
             "median_percent_difference": fmt(median(pcts) if pcts else None),
-            "median_mass_context_ratio": fmt(median(context_ratios) if context_ratios else None),
+            "median_mass_context_ratio_midpoint": fmt(
+                median(context_ratios) if context_ratios else None
+            ),
             "candidate_units": ",".join(
                 f"{u}:{sum(r['candidate_unit'] == u for r in group)}"
                 for u in ("ppm", "Da")

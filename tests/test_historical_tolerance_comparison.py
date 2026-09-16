@@ -46,11 +46,15 @@ class HistoricalToleranceComparisonTests(unittest.TestCase):
             (400.0, 500.0, 600.0),
         )
         self.assertEqual(result["mass_context_unit"], "ppm")
-        self.assertEqual(float(result["mass_context_median_mz"]), 500.0)
-        self.assertEqual(float(result["historical_equivalent_median"]), 100.0)
-        self.assertEqual(float(result["candidate_equivalent_median"]), 10.0)
+        self.assertEqual(float(result["mass_context_mz_min"]), 400.0)
+        self.assertEqual(float(result["mass_context_mz_midpoint"]), 500.0)
+        self.assertEqual(float(result["mass_context_mz_max"]), 600.0)
+        self.assertEqual(float(result["historical_equivalent_min"]), 125.0)
+        self.assertEqual(float(result["historical_equivalent_midpoint"]), 100.0)
+        self.assertAlmostEqual(float(result["historical_equivalent_max"]), 83.3333333333, places=6)
+        self.assertEqual(float(result["candidate_equivalent_midpoint"]), 10.0)
         self.assertEqual(
-            float(result["mass_context_ratio_candidate_over_historical"]),
+            float(result["mass_context_ratio_midpoint"]),
             0.1,
         )
 
@@ -109,7 +113,9 @@ class HistoricalToleranceComparisonTests(unittest.TestCase):
             row = MODULE.build_row(result_dir, {})
             self.assertEqual(row["comparison"], "same-unit")
             self.assertAlmostEqual(float(row["ratio_candidate_over_historical"]), 0.6)
-            self.assertEqual(row["mass_context_ratio_candidate_over_historical"], "0.6")
+            self.assertEqual(row["mass_context_ratio_midpoint"], "0.6")
+            self.assertEqual(row["mass_context_ratio_min"], "0.6")
+            self.assertEqual(row["mass_context_ratio_max"], "0.6")
 
 
 if __name__ == "__main__":
