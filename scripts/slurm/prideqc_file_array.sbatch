@@ -13,6 +13,7 @@ PRIDEQC_DIAGNOSTICS="${PRIDEQC_DIAGNOSTICS:-1}"
 PRIDEQC_INCLUDE_INFERRED="${PRIDEQC_INCLUDE_INFERRED:-0}"
 PRIDEQC_ESTIMATE_PEAK_TYPE="${PRIDEQC_ESTIMATE_PEAK_TYPE:-0}"
 PRIDEQC_ESTIMATE_MASS_ERROR="${PRIDEQC_ESTIMATE_MASS_ERROR:-0}"
+PRIDEQC_ESTIMATE_MASS_SHIFTS="${PRIDEQC_ESTIMATE_MASS_SHIFTS:-0}"
 PRIDEQC_CHECKSUM_CHECK="${PRIDEQC_CHECKSUM_CHECK:-1}"
 
 TASK_ID="${SLURM_ARRAY_TASK_ID:-${TASK_ID:-1}}"
@@ -179,6 +180,7 @@ analysis_flags=()
 [[ "$PRIDEQC_INCLUDE_INFERRED" == 1 ]] && analysis_flags+=(--include-inferred)
 [[ "$PRIDEQC_ESTIMATE_PEAK_TYPE" == 1 ]] && analysis_flags+=(--estimate-peak-type)
 [[ "$PRIDEQC_ESTIMATE_MASS_ERROR" == 1 ]] && analysis_flags+=(--estimate-mass-error)
+[[ "$PRIDEQC_ESTIMATE_MASS_SHIFTS" == 1 ]] && analysis_flags+=(--estimate-mass-shifts)
 download_flags=()
 [[ "$PRIDEQC_CHECKSUM_CHECK" == 0 ]] && download_flags+=(--no-checksum-check)
 
@@ -290,6 +292,8 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     echo "workers=1"
     echo "pride_protocol=$PRIDE_PROTOCOL"
     echo "pride_checksum_check=$PRIDEQC_CHECKSUM_CHECK"
+    echo "prideqc_estimate_mass_error=$PRIDEQC_ESTIMATE_MASS_ERROR"
+    echo "prideqc_estimate_mass_shifts=$PRIDEQC_ESTIMATE_MASS_SHIFTS"
     echo "sif=$SIF"
     echo "sif_sha256=$EXPECTED_SIF_SHA"
     echo "started_epoch=$START_EPOCH"
