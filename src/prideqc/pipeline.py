@@ -560,6 +560,9 @@ class Workflow:
             "classification",
             "confidence",
             "match_tolerance_da",
+            "support_fraction_of_accepted_pairs",
+            "diagnostic_unimod_candidate_count",
+            "diagnostic_suppressed_unimod_candidates",
             "artifact_name",
             "artifact_theoretical_delta_mass_da",
             "artifact_residual_da",
@@ -571,6 +574,7 @@ class Workflow:
             "unimod_origins",
             "unimod_term_specificities",
             "unimod_source_classification",
+            "unimod_candidate_category",
             "orientation",
         ]
         with atomic_text(path) as handle:
@@ -611,6 +615,15 @@ class Workflow:
                             "classification": cluster.get("classification"),
                             "confidence": cluster.get("confidence"),
                             "match_tolerance_da": cluster.get("match_tolerance_da"),
+                            "support_fraction_of_accepted_pairs": cluster.get(
+                                "support_fraction_of_accepted_pairs"
+                            ),
+                            "diagnostic_unimod_candidate_count": cluster.get(
+                                "diagnostic_unimod_candidate_count"
+                            ),
+                            "diagnostic_suppressed_unimod_candidates": cluster.get(
+                                "diagnostic_suppressed_unimod_candidates"
+                            ),
                             "artifact_name": artifact.get("name"),
                             "artifact_theoretical_delta_mass_da": artifact.get(
                                 "theoretical_delta_mass_da"
@@ -629,6 +642,9 @@ class Workflow:
                             ),
                             "unimod_source_classification": candidate.get(
                                 "source_classification"
+                            ),
+                            "unimod_candidate_category": candidate.get(
+                                "candidate_category"
                             ),
                             "orientation": cluster.get("orientation"),
                         })

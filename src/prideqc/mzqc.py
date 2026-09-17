@@ -275,9 +275,10 @@ ANNOTATION_DESCRIPTIONS = {
         "putative modification mass shifts",
         (
             "Identification-free recurrent absolute neutral precursor-mass differences from "
-            "fragment-related centroid MS2 spectra, with artifact classification and "
-            "mass-compatible OpenMS/UniMod candidates. These are hypotheses, not localized PTM "
-            "identifications."
+            "fragment-related MS2 spectra after centroid normalization (including ephemeral "
+            "OpenMS PeakPickerHiRes processing for profile MS2), with artifact-family "
+            "classification and QC-filtered mass-compatible OpenMS/UniMod candidates. These are "
+            "hypotheses, not localized PTM identifications."
         ),
     ),
 }

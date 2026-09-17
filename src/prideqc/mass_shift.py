@@ -189,18 +189,21 @@ def load_openms_modifications(oms: Any | None = None) -> tuple[ModificationRecor
     )
 
 
-def _top_peaks(
-    spectrum: Spectrum,
+def _top_peak_arrays(
+    mz_values: Any,
+    intensity_values: Any,
     limit: int,
     *,
+    precursor_mz: float | None,
     precursor_exclusion_da: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    mz = np.asarray(spectrum.mz, dtype=float)
-    intensity = np.asarray(spectrum.intensity, dtype=float)
+    """Return a normalized, m/z-sorted top-peak fingerprint."""
+
+    mz = np.asarray(mz_values, dtype=float)
+    intensity = np.asarray(intensity_values, dtype=float)
     valid = np.isfinite(mz) & (mz > 0) & np.isfinite(intensity) & (intensity > 0)
-    first = spectrum.precursors[0] if spectrum.precursors else None
-    if first is not None and math.isfinite(first.mz) and first.mz > 0:
-        valid &= np.abs(mz - first.mz) > precursor_exclusion_da
+    if precursor_mz is not None and math.isfinite(precursor_mz) and precursor_mz > 0:
+        valid &= np.abs(mz - precursor_mz) > precursor_exclusion_da
     mz, intensity = mz[valid], intensity[valid]
     if not mz.size:
         return np.array([], dtype=float), np.array([], dtype=float)
@@ -213,6 +216,59 @@ def _top_peaks(
     if norm > 0:
         intensity = intensity / norm
     return mz, intensity
+
+
+def _top_peaks(
+    spectrum: Spectrum,
+    limit: int,
+    *,
+    precursor_exclusion_da: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    first = spectrum.precursors[0] if spectrum.precursors else None
+    precursor_mz = float(first.mz) if first is not None else None
+    return _top_peak_arrays(
+        spectrum.mz,
+        spectrum.intensity,
+        limit,
+        precursor_mz=precursor_mz,
+        precursor_exclusion_da=precursor_exclusion_da,
+    )
+
+
+def _profile_top_peaks_openms(
+    spectrum: Spectrum,
+    limit: int,
+    *,
+    precursor_exclusion_da: float,
+    oms: Any,
+    peak_picker: Any,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Centroid one profile MS2 ephemerally with OpenMS PeakPickerHiRes."""
+
+    mz = np.asarray(spectrum.mz, dtype=float)
+    intensity = np.asarray(spectrum.intensity, dtype=float)
+    valid = np.isfinite(mz) & (mz > 0) & np.isfinite(intensity) & (intensity >= 0)
+    mz, intensity = mz[valid], intensity[valid]
+    if mz.size < 3:
+        return np.array([], dtype=float), np.array([], dtype=float)
+    if np.any(np.diff(mz) < 0):
+        order = np.argsort(mz, kind="stable")
+        mz, intensity = mz[order], intensity[order]
+
+    source = oms.MSSpectrum()
+    source.set_peaks((mz, intensity))
+    picked = oms.MSSpectrum()
+    peak_picker.pick(source, picked)
+    picked_mz, picked_intensity = picked.get_peaks()
+    first = spectrum.precursors[0] if spectrum.precursors else None
+    precursor_mz = float(first.mz) if first is not None else None
+    return _top_peak_arrays(
+        picked_mz,
+        picked_intensity,
+        limit,
+        precursor_mz=precursor_mz,
+        precursor_exclusion_da=precursor_exclusion_da,
+    )
 
 
 def _matched_intensity_dot(
@@ -371,6 +427,25 @@ def _artifact_classification(
     return None
 
 
+def _candidate_category(record: ModificationRecord) -> str:
+    """Map OpenMS/UniMod metadata to a QC-facing candidate category."""
+
+    name = record.name.casefold()
+    source = record.source_classification.casefold()
+    if "decoy" in name or "decoy" in source:
+        return "decoy"
+    if "substitution" in name or "substitution" in source or "->" in record.name:
+        return "amino-acid-substitution"
+    if any(
+        token in source
+        for token in ("post", "co-translational", "pre-translational", "glycosyl")
+    ):
+        return "biological-ptm"
+    if any(token in source for token in ("chemical", "artefact", "artifact")):
+        return "sample-prep-or-artifact"
+    return "other-modification"
+
+
 def _matching_modifications(
     mass_da: float,
     tolerance_da: float,
@@ -394,9 +469,61 @@ def _matching_modifications(
             "origins": list(record.origins),
             "term_specificities": list(record.term_specificities),
             "source_classification": record.source_classification or None,
+            "candidate_category": _candidate_category(record),
         }
         for residual, record in matches[:maximum_candidates]
     ]
+
+
+def _display_modification_candidates(
+    candidates: Iterable[dict[str, Any]],
+    *,
+    maximum_candidates: int,
+) -> list[dict[str, Any]]:
+    """Return QC-relevant candidates while retaining broad matches diagnostically."""
+
+    rank = {
+        "biological-ptm": 0,
+        "sample-prep-or-artifact": 1,
+        "other-modification": 2,
+    }
+    visible = [
+        item
+        for item in candidates
+        if item.get("candidate_category")
+        not in {"decoy", "amino-acid-substitution"}
+    ]
+    visible.sort(
+        key=lambda item: (
+            rank.get(str(item.get("candidate_category")), 9),
+            abs(float(item.get("residual_da", math.inf))),
+            str(item.get("unimod_accession", "")),
+            str(item.get("name", "")),
+        )
+    )
+    return visible[:maximum_candidates]
+
+
+def _isotope_adjacent_family(
+    mass_da: float,
+    *,
+    exact_tolerance_da: float,
+    family_radius_da: float,
+    isotope_mass_da: float,
+) -> dict[str, Any] | None:
+    """Classify broad satellite structure around C13 isotope harmonics."""
+
+    for isotope_count in range(1, 5):
+        theoretical = isotope_count * isotope_mass_da
+        residual = mass_da - theoretical
+        if exact_tolerance_da < abs(residual) <= family_radius_da:
+            return {
+                "classification": "isotope-adjacent",
+                "name": f"C13 isotope-adjacent family x{isotope_count}",
+                "theoretical_delta_mass_da": theoretical,
+                "residual_da": residual,
+            }
+    return None
 
 
 @dataclass(slots=True)
@@ -408,9 +535,13 @@ class MassShiftCollector:
     scorer combines unchanged fragment matches with matches shifted by the
     precursor delta or half-delta. Accepted deltas are clustered after the run.
 
+    Native centroid MS2 are consumed directly. Profile MS2 are centroided
+    ephemerally with OpenMS PeakPickerHiRes, while unknown representation is
+    resolved from the reader's OpenMS peak-type estimate when available.
+
     When a frozen v19 mass-error collector is supplied, its precursor precision
-    is used read-only to widen the delta clustering/UniMod window as needed. The
-    mass-error estimator itself is never changed by this collector.
+    is used read-only to widen delta clustering. The UniMod lookup window stays
+    independent and tight; the mass-error estimator itself is never changed.
     """
 
     precision_source: RepeatSpectrumMassErrorCollector | None = None
@@ -438,7 +569,11 @@ class MassShiftCollector:
     base_cluster_tolerance_da: float = 0.01
     base_unimod_tolerance_da: float = 0.02
     precision_sigma_multiplier: float = 6.0
-    maximum_modification_candidates: int = 12
+    artifact_family_radius_da: float = 0.15
+    maximum_modification_candidates: int = 24
+    maximum_display_candidates: int = 8
+    maximum_reported_candidate_clusters: int = 100
+    maximum_reported_unknown_clusters: int = 10
     _spectra: dict[int, _IndexedSpectrum] = field(default_factory=dict)
     _active: deque[int] = field(default_factory=deque)
     _postings: defaultdict[int, deque[int]] = field(
@@ -448,6 +583,14 @@ class MassShiftCollector:
     _next_identifier: int = 0
     total_ms2: int = 0
     eligible_ms2: int = 0
+    native_centroid_ms2: int = 0
+    explicit_profile_ms2: int = 0
+    unknown_ms2: int = 0
+    profile_ms2_centroided: int = 0
+    unknown_ms2_inferred_centroid: int = 0
+    unknown_ms2_inferred_profile: int = 0
+    unresolved_spectrum_type: int = 0
+    profile_peak_pick_failures: int = 0
     scored_pairs: int = 0
     accepted_pairs: int = 0
     index_evictions: int = 0
@@ -457,6 +600,8 @@ class MassShiftCollector:
     excluded_low_fragment_peaks: int = 0
     accepted_pair_cap_hits: int = 0
     _catalog_error: str | None = None
+    _peak_picker: Any | None = None
+    _peak_picker_error: str | None = None
     proton_mass_u: float = field(init=False)
     isotope_mass_u: float = field(init=False)
 
@@ -471,6 +616,7 @@ class MassShiftCollector:
             ("base_cluster_tolerance_da", self.base_cluster_tolerance_da),
             ("base_unimod_tolerance_da", self.base_unimod_tolerance_da),
             ("precision_sigma_multiplier", self.precision_sigma_multiplier),
+            ("artifact_family_radius_da", self.artifact_family_radius_da),
         ):
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
@@ -490,6 +636,9 @@ class MassShiftCollector:
             ("minimum_cluster_pairs", self.minimum_cluster_pairs),
             ("minimum_cluster_unique_spectra", self.minimum_cluster_unique_spectra),
             ("maximum_modification_candidates", self.maximum_modification_candidates),
+            ("maximum_display_candidates", self.maximum_display_candidates),
+            ("maximum_reported_candidate_clusters", self.maximum_reported_candidate_clusters),
+            ("maximum_reported_unknown_clusters", self.maximum_reported_unknown_clusters),
         ):
             if value < 1:
                 raise ValueError(f"{name} must be positive")
@@ -534,16 +683,102 @@ class MassShiftCollector:
             while len(posting) > self.maximum_postings_per_bin:
                 posting.popleft()
 
+    def _openms_peak_picker(self) -> tuple[Any, Any] | None:
+        if self._peak_picker_error is not None:
+            return None
+        active_oms: Any
+        if self.oms is None:
+            try:
+                import pyopenms
+            except ImportError as exc:
+                self._peak_picker_error = f"{type(exc).__name__}: {exc}"
+                return None
+            active_oms = pyopenms
+        else:
+            active_oms = self.oms
+        try:
+            if self._peak_picker is None:
+                self._peak_picker = active_oms.PeakPickerHiRes()
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            self._peak_picker_error = f"{type(exc).__name__}: {exc}"
+            return None
+        return active_oms, self._peak_picker
+
+    def _normalized_fragment_peaks(
+        self,
+        spectrum: Spectrum,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        representation = spectrum.representation
+        if representation == "centroid":
+            self.native_centroid_ms2 += 1
+            return _top_peaks(
+                spectrum,
+                self.top_peaks,
+                precursor_exclusion_da=self.precursor_exclusion_da,
+            )
+
+        use_profile_picker = False
+        if representation == "profile":
+            self.explicit_profile_ms2 += 1
+            use_profile_picker = True
+        elif representation == "unknown":
+            self.unknown_ms2 += 1
+            estimated = spectrum.estimated_representation or "unknown"
+            if estimated == "centroid":
+                self.unknown_ms2_inferred_centroid += 1
+                return _top_peaks(
+                    spectrum,
+                    self.top_peaks,
+                    precursor_exclusion_da=self.precursor_exclusion_da,
+                )
+            if estimated == "profile":
+                self.unknown_ms2_inferred_profile += 1
+                use_profile_picker = True
+            else:
+                self.unresolved_spectrum_type += 1
+                self.excluded_profile_or_unknown += 1
+                return np.array([], dtype=float), np.array([], dtype=float)
+        else:
+            self.unresolved_spectrum_type += 1
+            self.excluded_profile_or_unknown += 1
+            return np.array([], dtype=float), np.array([], dtype=float)
+
+        if use_profile_picker:
+            openms = self._openms_peak_picker()
+            if openms is None:
+                self.profile_peak_pick_failures += 1
+                self.excluded_profile_or_unknown += 1
+                return np.array([], dtype=float), np.array([], dtype=float)
+            active_oms, peak_picker = openms
+            try:
+                mz, intensity = _profile_top_peaks_openms(
+                    spectrum,
+                    self.top_peaks,
+                    precursor_exclusion_da=self.precursor_exclusion_da,
+                    oms=active_oms,
+                    peak_picker=peak_picker,
+                )
+            except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+                self.profile_peak_pick_failures += 1
+                self.excluded_profile_or_unknown += 1
+                if self._peak_picker_error is None:
+                    self._peak_picker_error = f"{type(exc).__name__}: {exc}"
+                return np.array([], dtype=float), np.array([], dtype=float)
+            if not mz.size:
+                self.profile_peak_pick_failures += 1
+                self.excluded_profile_or_unknown += 1
+                return mz, intensity
+            self.profile_ms2_centroided += 1
+            return mz, intensity
+
+        self.unresolved_spectrum_type += 1
+        self.excluded_profile_or_unknown += 1
+        return np.array([], dtype=float), np.array([], dtype=float)
+
     def consume_spectrum(self, spectrum: Spectrum) -> None:
         if spectrum.ms_level != 2:
             return
         self.total_ms2 += 1
-        representation = spectrum.representation
-        if representation == "unknown":
-            representation = spectrum.estimated_representation or "unknown"
-        if representation != "centroid":
-            self.excluded_profile_or_unknown += 1
-            return
         if spectrum.polarity == "negative":
             self.excluded_negative_polarity += 1
             return
@@ -556,11 +791,7 @@ class MassShiftCollector:
         ):
             self.excluded_missing_precursor += 1
             return
-        mz, intensity = _top_peaks(
-            spectrum,
-            self.top_peaks,
-            precursor_exclusion_da=self.precursor_exclusion_da,
-        )
+        mz, intensity = self._normalized_fragment_peaks(spectrum)
         if mz.size < self.minimum_fragment_peaks:
             self.excluded_low_fragment_peaks += 1
             return
@@ -625,12 +856,15 @@ class MassShiftCollector:
         self._index(current)
 
     def _effective_tolerances(self) -> tuple[float, float, dict[str, Any]]:
+        cluster_tolerance = self.base_cluster_tolerance_da
+        unimod_tolerance = self.base_unimod_tolerance_da
         calibration: dict[str, Any] = {
             "source": "fixed-fallback",
-            "cluster_tolerance_da": self.base_cluster_tolerance_da,
-            "unimod_tolerance_da": self.base_unimod_tolerance_da,
+            "cluster_tolerance_da": cluster_tolerance,
+            "unimod_tolerance_da": unimod_tolerance,
+            "unimod_tolerance_policy": "independent-fixed-window",
+            "artifact_family_radius_da": self.artifact_family_radius_da,
         }
-        cluster_tolerance = self.base_cluster_tolerance_da
         if self.precision_source is not None:
             precision = self.precision_source.precursor_precision_ppm()
             if (
@@ -657,15 +891,11 @@ class MassShiftCollector:
                     "pair_sigma_da": pair_sigma_da,
                     "sigma_multiplier": self.precision_sigma_multiplier,
                     "cluster_tolerance_da": cluster_tolerance,
-                    "unimod_tolerance_da": max(
-                        self.base_unimod_tolerance_da, cluster_tolerance
-                    ),
+                    "unimod_tolerance_da": unimod_tolerance,
+                    "unimod_tolerance_policy": "independent-fixed-window",
+                    "artifact_family_radius_da": self.artifact_family_radius_da,
                 }
-        return (
-            cluster_tolerance,
-            max(self.base_unimod_tolerance_da, cluster_tolerance),
-            calibration,
-        )
+        return cluster_tolerance, unimod_tolerance, calibration
 
     def _modification_records(self) -> tuple[ModificationRecord, ...]:
         if self.modifications is not None:
@@ -686,40 +916,58 @@ class MassShiftCollector:
             minimum_unique_spectra=self.minimum_cluster_unique_spectra,
         )
         records = self._modification_records()
-        payload: list[dict[str, Any]] = []
+        raw_payload: list[dict[str, Any]] = []
         for cluster in clusters:
             artifact = _artifact_classification(
                 cluster.center_da,
                 unimod_tolerance,
                 self.isotope_mass_u,
             )
-            candidates = [] if artifact else _matching_modifications(
+            if artifact is None:
+                artifact = _isotope_adjacent_family(
+                    cluster.center_da,
+                    exact_tolerance_da=unimod_tolerance,
+                    family_radius_da=self.artifact_family_radius_da,
+                    isotope_mass_da=self.isotope_mass_u,
+                )
+
+            diagnostic_candidates = [] if artifact else _matching_modifications(
                 cluster.center_da,
                 unimod_tolerance,
                 records,
                 maximum_candidates=self.maximum_modification_candidates,
             )
+            candidates = _display_modification_candidates(
+                diagnostic_candidates,
+                maximum_candidates=self.maximum_display_candidates,
+            )
+
             if artifact:
-                classification = artifact["classification"]
+                classification = str(artifact["classification"])
             elif candidates:
-                classifications = {
-                    str(item.get("source_classification") or "").casefold()
+                categories = {
+                    str(item.get("candidate_category") or "")
                     for item in candidates
                 }
-                classification = (
-                    "putative-ptm"
-                    if any("post" in item for item in classifications)
-                    else "putative-modification"
-                )
+                if "biological-ptm" in categories:
+                    classification = "putative-ptm"
+                elif "sample-prep-or-artifact" in categories:
+                    classification = "sample-prep-modification"
+                else:
+                    classification = "putative-modification"
+            elif diagnostic_candidates:
+                classification = "mass-compatible-other"
             else:
                 classification = "unknown"
+
             if cluster.pair_support >= 50 and cluster.unique_spectrum_support >= 20:
                 confidence = "high-support"
             elif cluster.pair_support >= 15 and cluster.unique_spectrum_support >= 10:
                 confidence = "moderate-support"
             else:
                 confidence = "preliminary-support"
-            payload.append(
+
+            raw_payload.append(
                 {
                     "delta_mass_da": cluster.center_da,
                     "cluster_sigma_da": cluster.sigma_da,
@@ -733,38 +981,113 @@ class MassShiftCollector:
                     "match_tolerance_da": unimod_tolerance,
                     "artifact_candidate": artifact,
                     "unimod_candidates": candidates,
+                    "diagnostic_unimod_candidates": diagnostic_candidates,
+                    "diagnostic_unimod_candidate_count": len(diagnostic_candidates),
+                    "diagnostic_suppressed_unimod_candidates": max(
+                        0, len(diagnostic_candidates) - len(candidates)
+                    ),
+                    "support_fraction_of_accepted_pairs": (
+                        cluster.pair_support / self.accepted_pairs
+                        if self.accepted_pairs
+                        else 0.0
+                    ),
                     "orientation": (
                         "absolute neutral-mass difference; heavier/lighter modification "
                         "direction unresolved"
                     ),
                 }
             )
+
+        raw_payload.sort(
+            key=lambda item: (-int(item["pair_support"]), float(item["delta_mass_da"]))
+        )
+
+        exact_artifacts = [
+            item
+            for item in raw_payload
+            if item["classification"] in {"isotope-like", "adduct-like"}
+        ]
+        candidate_clusters = [
+            item
+            for item in raw_payload
+            if item["classification"]
+            in {"putative-ptm", "sample-prep-modification", "putative-modification"}
+        ][: self.maximum_reported_candidate_clusters]
+        unknown_clusters = [
+            item
+            for item in raw_payload
+            if item["classification"] in {"unknown", "mass-compatible-other"}
+        ][: self.maximum_reported_unknown_clusters]
+        payload = exact_artifacts + candidate_clusters + unknown_clusters
         payload.sort(
             key=lambda item: (-int(item["pair_support"]), float(item["delta_mass_da"]))
         )
+
+        suppressed_isotope_adjacent = sum(
+            item["classification"] == "isotope-adjacent" for item in raw_payload
+        )
+        suppressed_candidate_clusters = max(
+            0,
+            sum(
+                item["classification"]
+                in {"putative-ptm", "sample-prep-modification", "putative-modification"}
+                for item in raw_payload
+            )
+            - len(candidate_clusters),
+        )
+        suppressed_unknown_clusters = max(
+            0,
+            sum(
+                item["classification"] in {"unknown", "mass-compatible-other"}
+                for item in raw_payload
+            )
+            - len(unknown_clusters),
+        )
+        reported_ids = {id(item) for item in payload}
+
         method = (
-            "identification-free recurrent mass-shift scout v22.0; centroid MS2; bounded "
+            "identification-free recurrent mass-shift scout v22.1; native/estimated centroid "
+            "MS2 plus ephemeral OpenMS PeakPickerHiRes centroiding for profile MS2; bounded "
             f"top-{self.top_peaks} fragment index; >= {self.minimum_shared_bins} shared coarse "
             "fragment bins; unchanged plus precursor-delta/half-delta fragment matching; "
-            "absolute charge-aware neutral precursor deltas; OpenMS/UniMod annotation"
+            "absolute charge-aware neutral precursor deltas; tight independent OpenMS/UniMod "
+            "annotation window"
         )
         detail = (
             "Candidate chemistry only. No peptide database search or sequence/site localization is "
-            "performed. Isotope/adduct-like shifts are classified before UniMod annotation; all "
-            "mass-compatible UniMod candidates are preserved up to the configured cap, and "
-            "unmatched recurrent shifts remain visible. The pair-based scout preferentially detects "
-            "variable/co-occurring modified and reference-like forms; a modification present on every "
-            "corresponding peptide without a related reference form may be invisible."
+            "performed. Exact isotope/adduct-like shifts are classified before UniMod annotation; "
+            "broad isotope-adjacent satellite families are retained diagnostically but suppressed "
+            "from the QC-facing list. UniMod decoys and amino-acid substitutions are suppressed "
+            "from the default candidate display while broad mass-compatible matches remain "
+            "available diagnostically. Unknown recurrent shifts are preserved in a bounded "
+            "high-support list. The pair-based scout preferentially detects variable/co-occurring "
+            "modified and reference-like forms; fixed chemistry without a related reference form "
+            "may be invisible."
         )
         diagnostics = {
             "total_ms2": self.total_ms2,
+            "eligible_ms2": self.eligible_ms2,
             "eligible_centroid_ms2": self.eligible_ms2,
+            "native_centroid_ms2": self.native_centroid_ms2,
+            "explicit_profile_ms2": self.explicit_profile_ms2,
+            "unknown_ms2": self.unknown_ms2,
+            "profile_ms2_centroided": self.profile_ms2_centroided,
+            "unknown_ms2_inferred_centroid": self.unknown_ms2_inferred_centroid,
+            "unknown_ms2_inferred_profile": self.unknown_ms2_inferred_profile,
+            "unresolved_spectrum_type": self.unresolved_spectrum_type,
+            "profile_peak_pick_failures": self.profile_peak_pick_failures,
+            "peak_picker_error": self._peak_picker_error,
             "indexed_spectra_current": len(self._spectra),
             "index_evictions": self.index_evictions,
             "scored_candidate_pairs": self.scored_pairs,
             "accepted_related_pairs": self.accepted_pairs,
             "accepted_pair_cap_hits": self.accepted_pair_cap_hits,
+            "raw_recurrent_clusters": len(raw_payload),
             "recurrent_clusters": len(payload),
+            "reported_clusters": len(payload),
+            "suppressed_isotope_adjacent_clusters": suppressed_isotope_adjacent,
+            "suppressed_candidate_clusters": suppressed_candidate_clusters,
+            "suppressed_unknown_clusters": suppressed_unknown_clusters,
             "excluded_profile_or_unknown": self.excluded_profile_or_unknown,
             "excluded_negative_polarity": self.excluded_negative_polarity,
             "excluded_missing_precursor": self.excluded_missing_precursor,
@@ -774,6 +1097,24 @@ class MassShiftCollector:
             "openms_unimod_error": self._catalog_error,
             "proton_mass_u": self.proton_mass_u,
             "c13_c12_mass_difference_u": self.isotope_mass_u,
+            "reporting_caps": {
+                "maximum_display_candidates_per_cluster": self.maximum_display_candidates,
+                "maximum_reported_candidate_clusters": self.maximum_reported_candidate_clusters,
+                "maximum_reported_unknown_clusters": self.maximum_reported_unknown_clusters,
+            },
+            "suppressed_cluster_examples": [
+                {
+                    "delta_mass_da": item["delta_mass_da"],
+                    "pair_support": item["pair_support"],
+                    "unique_spectrum_support": item["unique_spectrum_support"],
+                    "classification": item["classification"],
+                    "diagnostic_unimod_candidate_count": item[
+                        "diagnostic_unimod_candidate_count"
+                    ],
+                }
+                for item in raw_payload
+                if id(item) not in reported_ids
+            ][:20],
         }
         return [
             Annotation(

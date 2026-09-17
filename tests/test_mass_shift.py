@@ -216,15 +216,49 @@ class MassShiftCollectorTests(unittest.TestCase):
         self.assertEqual(diagnostics["eligible_centroid_ms2"], 0)
         self.assertEqual(diagnostics["excluded_missing_precursor"], 2)
 
-    def test_profile_ms2_is_not_used_in_v22_initial_lane(self):
-        collector = MassShiftCollector(modifications=())
+    def test_profile_ms2_uses_ephemeral_openms_peak_picker(self):
+        collector = MassShiftCollector(
+            modifications=(PHOSPHO,),
+            oms=FakeOpenMS,
+            minimum_cluster_pairs=1,
+            minimum_cluster_unique_spectra=2,
+        )
         left, right = related_pair(0, 79.966331, representation="profile")
         collector.consume_spectrum(left)
         collector.consume_spectrum(right)
         shifts, diagnostics = collector.annotations()
+        self.assertEqual(shifts.kind, EvidenceKind.INFERRED)
+        self.assertEqual(shifts.value[0]["classification"], "putative-ptm")
+        self.assertEqual(diagnostics.value["explicit_profile_ms2"], 2)
+        self.assertEqual(diagnostics.value["profile_ms2_centroided"], 2)
+        self.assertEqual(diagnostics.value["profile_peak_pick_failures"], 0)
+        self.assertEqual(diagnostics.value["excluded_profile_or_unknown"], 0)
+
+    def test_unknown_estimated_profile_uses_peak_picker(self):
+        collector = MassShiftCollector(
+            modifications=(PHOSPHO,),
+            oms=FakeOpenMS,
+            minimum_cluster_pairs=1,
+            minimum_cluster_unique_spectra=2,
+        )
+        left, right = related_pair(0, 79.966331, representation="unknown")
+        collector.consume_spectrum(replace(left, estimated_representation="profile"))
+        collector.consume_spectrum(replace(right, estimated_representation="profile"))
+        shifts, diagnostics = collector.annotations()
+        self.assertEqual(shifts.kind, EvidenceKind.INFERRED)
+        self.assertEqual(diagnostics.value["unknown_ms2"], 2)
+        self.assertEqual(diagnostics.value["unknown_ms2_inferred_profile"], 2)
+        self.assertEqual(diagnostics.value["profile_ms2_centroided"], 2)
+
+    def test_unresolved_unknown_representation_abstains(self):
+        collector = MassShiftCollector(modifications=())
+        left, right = related_pair(0, 79.966331, representation="unknown")
+        collector.consume_spectrum(left)
+        collector.consume_spectrum(right)
+        shifts, diagnostics = collector.annotations()
         self.assertIsNone(shifts.value)
-        self.assertEqual(shifts.kind, EvidenceKind.UNAVAILABLE)
-        self.assertEqual(diagnostics.value["eligible_centroid_ms2"], 0)
+        self.assertEqual(diagnostics.value["unknown_ms2"], 2)
+        self.assertEqual(diagnostics.value["unresolved_spectrum_type"], 2)
         self.assertEqual(diagnostics.value["excluded_profile_or_unknown"], 2)
 
     def test_estimated_centroid_representation_is_eligible(self):
@@ -285,6 +319,103 @@ class MassShiftCollectorTests(unittest.TestCase):
         self.assertEqual(precision.precursor_errors_ppm, before)
 
 
+    def test_unimod_window_does_not_inherit_widened_cluster_tolerance(self):
+        precision = RepeatSpectrumMassErrorCollector()
+        precision.precursor_errors_ppm.extend(
+            [80.0 * math.sin(index * 0.31) for index in range(240)]
+        )
+        precision.precursor_paired_spectra = precision.min_tolerance_pairs
+        precision.precursor_clusters_used = precision.min_tolerance_clusters
+        near_but_outside = ModificationRecord(
+            "UNIMOD:90001",
+            "Near but outside annotation window",
+            79.996331,
+            (),
+            (),
+            "Post-translational",
+        )
+        collector = MassShiftCollector(
+            precision_source=precision,
+            modifications=(near_but_outside,),
+            minimum_cluster_pairs=1,
+            minimum_cluster_unique_spectra=2,
+        )
+        for item in related_pair(0, 79.966331):
+            collector.consume_spectrum(item)
+        shifts, diagnostics = collector.annotations()
+        calibration = diagnostics.value["calibration"]
+        self.assertGreater(calibration["cluster_tolerance_da"], 0.02)
+        self.assertEqual(calibration["unimod_tolerance_da"], 0.02)
+        self.assertEqual(calibration["unimod_tolerance_policy"], "independent-fixed-window")
+        self.assertEqual(shifts.value[0]["unimod_candidates"], [])
+
+    def test_decoys_and_amino_acid_substitutions_are_hidden_from_default_candidates(self):
+        modifications = (
+            PHOSPHO,
+            ModificationRecord(
+                "UNIMOD:99913",
+                "Phosphorylation Decoy",
+                79.966331,
+                (),
+                (),
+                "Post-translational",
+            ),
+            ModificationRecord(
+                "UNIMOD:99914",
+                "Ser->Tyr substitution",
+                79.966331,
+                (),
+                (),
+                "AA substitution",
+            ),
+        )
+        collector = MassShiftCollector(
+            modifications=modifications,
+            minimum_cluster_pairs=1,
+            minimum_cluster_unique_spectra=2,
+        )
+        for item in related_pair(0, 79.966331):
+            collector.consume_spectrum(item)
+        cluster = collector.annotations()[0].value[0]
+        self.assertEqual(
+            [item["unimod_accession"] for item in cluster["unimod_candidates"]],
+            ["UNIMOD:21"],
+        )
+        self.assertEqual(cluster["diagnostic_unimod_candidate_count"], 3)
+        self.assertEqual(cluster["diagnostic_suppressed_unimod_candidates"], 2)
+
+    def test_isotope_adjacent_satellite_is_suppressed_but_counted(self):
+        collector = MassShiftCollector(
+            modifications=(),
+            minimum_cluster_pairs=1,
+            minimum_cluster_unique_spectra=2,
+        )
+        for item in related_pair(0, 0.92):
+            collector.consume_spectrum(item)
+        shifts, diagnostics = collector.annotations()
+        self.assertIsNone(shifts.value)
+        self.assertEqual(diagnostics.value["raw_recurrent_clusters"], 1)
+        self.assertEqual(diagnostics.value["suppressed_isotope_adjacent_clusters"], 1)
+        self.assertEqual(diagnostics.value["reported_clusters"], 0)
+
+    def test_unknown_reporting_is_bounded_without_discarding_raw_cluster_count(self):
+        collector = MassShiftCollector(
+            modifications=(),
+            minimum_cluster_pairs=1,
+            minimum_cluster_unique_spectra=2,
+            maximum_reported_unknown_clusters=3,
+        )
+        for family in range(8):
+            for item in related_pair(family, 20.0 + family * 7.0):
+                collector.consume_spectrum(item)
+        shifts, diagnostics = collector.annotations()
+        self.assertEqual(len(shifts.value), 3)
+        self.assertEqual(diagnostics.value["raw_recurrent_clusters"], 8)
+        self.assertEqual(diagnostics.value["reported_clusters"], 3)
+        self.assertEqual(diagnostics.value["suppressed_unknown_clusters"], 5)
+
+
+
 class FakeModification:
     def __init__(self, accession, name, delta, origin, term, classification):
         self.accession = accession
@@ -337,10 +468,29 @@ class FakeModificationDB:
         return self.items[index]
 
 
+class FakeMSSpectrum:
+    def __init__(self):
+        self._peaks = (np.array([], dtype=float), np.array([], dtype=float))
+
+    def set_peaks(self, peaks):
+        self._peaks = tuple(np.asarray(item, dtype=float).copy() for item in peaks)
+
+    def get_peaks(self):
+        return self._peaks
+
+
+class FakePeakPickerHiRes:
+    def pick(self, source, target):
+        target.set_peaks(source.get_peaks())
+
+
 class FakeOpenMS:
     class Constants:
         PROTON_MASS_U = 1.007276466621
         C13C12_MASSDIFF_U = 1.00335483507
+
+    MSSpectrum = FakeMSSpectrum
+    PeakPickerHiRes = FakePeakPickerHiRes
 
     @staticmethod
     def ModificationsDB():
