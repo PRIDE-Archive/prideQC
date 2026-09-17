@@ -40,6 +40,10 @@ echo "==> Smoke-test pulled SIF"
 "$CONTAINER_BIN" exec "$TMP_SIF" python -c \
   "import importlib.metadata as m, pyopenms as oms; print('pyOpenMS=' + m.version('pyopenms')); assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"
 "$CONTAINER_BIN" exec "$TMP_SIF" dotnet --list-runtimes
+"$CONTAINER_BIN" exec "$TMP_SIF" multiqc --version
+"$CONTAINER_BIN" exec "$TMP_SIF" /opt/pmultiqc/.venv/bin/python -c \
+  "from pmultiqc.modules.mzqc import MzQCModule, parse_mzqc_document; print('pmultiqc mzQC module: OK')"
+"$CONTAINER_BIN" exec "$TMP_SIF" grep -q '^pmultiqc_resolved_sha=' /opt/prideqc/build-info.txt
 
 mv -f "$TMP_SIF" "$SIF"
 trap - EXIT

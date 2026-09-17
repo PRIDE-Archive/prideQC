@@ -139,6 +139,10 @@ jobs:
           apptainer exec "$SIF_BASE" prideqc --version
           apptainer exec "$SIF_BASE" python -c \
             "import importlib.metadata as m, pyopenms as oms; print(m.version('pyopenms')); assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"
+          apptainer exec "$SIF_BASE" multiqc --version
+          apptainer exec "$SIF_BASE" /opt/pmultiqc/.venv/bin/python -c \
+            "from pmultiqc.modules.mzqc import MzQCModule, parse_mzqc_document; print('pmultiqc mzQC module: OK')"
+          apptainer exec "$SIF_BASE" grep -q '^pmultiqc_resolved_sha=' /opt/prideqc/build-info.txt
 
       - name: Upload SIF files as GitHub Actions artifact
         uses: actions/upload-artifact@v4

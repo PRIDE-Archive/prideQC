@@ -4,6 +4,8 @@ ARG PYTHON_IMAGE=python:3.12.14-slim-bookworm
 ARG RUST_IMAGE=rust:1.98.1-slim-bookworm
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.11
 ARG DOTNET_IMAGE=mcr.microsoft.com/dotnet/runtime:8.0.29-bookworm-slim
+ARG PMULTIQC_GIT_URL=https://github.com/singjc/pmultiqc.git
+ARG PMULTIQC_GIT_REF=mzqc-multiqc-reporting
 
 FROM ${UV_IMAGE} AS uv-bin
 
@@ -55,6 +57,40 @@ RUN --mount=type=cache,target=/root/.cache/uv \
       "import importlib.metadata as m, pyopenms as oms; v=m.version('pyopenms'); print('pyOpenMS', v); assert v == '3.6.0.dev20260910'; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')" && \
     /opt/prideqc/.venv/bin/prideqc --version
 
+# Keep reporting isolated from the scientific runtime. The current pmultiqc
+# development branch constrains pyOpenMS independently of prideQC, so installing
+# both into one environment could downgrade the vendor-reader build used above.
+FROM ${PYTHON_IMAGE} AS reporting-builder
+ARG PMULTIQC_GIT_URL
+ARG PMULTIQC_GIT_REF
+ENV UV_PYTHON_DOWNLOADS=0 \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+COPY --from=uv-bin /uv /usr/local/bin/uv
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates git && \
+    rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    resolved_ref="$(git ls-remote "$PMULTIQC_GIT_URL" "$PMULTIQC_GIT_REF" "refs/heads/$PMULTIQC_GIT_REF" "refs/tags/$PMULTIQC_GIT_REF" | awk 'NR==1 {print $1}')"; \
+    if [ -z "$resolved_ref" ] && printf '%s' "$PMULTIQC_GIT_REF" | grep -Eq '^[0-9a-fA-F]{40}$'; then resolved_ref="$PMULTIQC_GIT_REF"; fi; \
+    test -n "$resolved_ref"; \
+    uv venv --python /usr/local/bin/python /opt/pmultiqc/.venv; \
+    uv pip install --python /opt/pmultiqc/.venv/bin/python "git+${PMULTIQC_GIT_URL}@${resolved_ref}"; \
+    pmultiqc_version="$(/opt/pmultiqc/.venv/bin/python -c 'import importlib.metadata as m; print(m.version("pmultiqc"))')"; \
+    multiqc_version="$(/opt/pmultiqc/.venv/bin/python -c 'import importlib.metadata as m; print(m.version("multiqc"))')"; \
+    reporting_pyopenms_version="$(/opt/pmultiqc/.venv/bin/python -c 'import importlib.metadata as m; print(m.version("pyopenms"))')"; \
+    mkdir -p /out; \
+    { \
+      echo "pmultiqc_git_url=${PMULTIQC_GIT_URL}"; \
+      echo "pmultiqc_requested_ref=${PMULTIQC_GIT_REF}"; \
+      echo "pmultiqc_resolved_sha=${resolved_ref}"; \
+      echo "pmultiqc_version=${pmultiqc_version}"; \
+      echo "multiqc_version=${multiqc_version}"; \
+      echo "reporting_pyopenms_version=${reporting_pyopenms_version}"; \
+    } > /out/pmultiqc-build-info.txt; \
+    /opt/pmultiqc/.venv/bin/multiqc --version; \
+    /opt/pmultiqc/.venv/bin/python -c 'from pmultiqc.modules.mzqc import MzQCModule, parse_mzqc_document; print("pmultiqc mzQC module: OK")'
+
 # Optional quality target. build_docker.sh can build this before runtime.
 FROM python-builder AS quality
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -79,6 +115,8 @@ ARG PYTHON_IMAGE=python:3.12.14-slim-bookworm
 ARG RUST_IMAGE=rust:1.98.1-slim-bookworm
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.11
 ARG DOTNET_IMAGE=mcr.microsoft.com/dotnet/runtime:8.0.29-bookworm-slim
+ARG PMULTIQC_GIT_URL=https://github.com/singjc/pmultiqc.git
+ARG PMULTIQC_GIT_REF=mzqc-multiqc-reporting
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates libgcc-s1 libgomp1 libgssapi-krb5-2 libicu72 libssl3 libstdc++6 tzdata zlib1g && \
@@ -88,13 +126,15 @@ RUN apt-get update && \
 
 COPY --from=python-builder /opt/prideqc/.venv /opt/prideqc/.venv
 COPY --from=python-builder /tmp/pyopenms.requirements.txt /opt/prideqc/pyopenms.requirements.txt
+COPY --from=reporting-builder /opt/pmultiqc/.venv /opt/pmultiqc/.venv
+COPY --from=reporting-builder /out/pmultiqc-build-info.txt /opt/prideqc/pmultiqc-build-info.txt
 COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
 COPY --from=rust-builder /out/bin/ /opt/prideqc/bin/
 COPY --from=rust-builder /out/rust-bin-manifest.txt /opt/prideqc/rust-bin-manifest.txt
 COPY --from=rust-builder /out/rustc-version.txt /tmp/rustc-version.txt
 COPY --from=rust-builder /out/cargo-version.txt /tmp/cargo-version.txt
 
-ENV PATH=/opt/prideqc/.venv/bin:/opt/prideqc/bin:/usr/share/dotnet:/usr/local/bin:/usr/bin:/bin \
+ENV PATH=/opt/prideqc/.venv/bin:/opt/pmultiqc/.venv/bin:/opt/prideqc/bin:/usr/share/dotnet:/usr/local/bin:/usr/bin:/bin \
     DOTNET_ROOT=/usr/share/dotnet \
     DOTNET_RUNNING_IN_CONTAINER=true \
     PYTHONUNBUFFERED=1 \
@@ -134,14 +174,24 @@ RUN set -eux; \
       echo "dotnet_base_image=${DOTNET_IMAGE}"; \
       echo "dotnet_runtime_version=${DOTNET_RUNTIME_VERSION}"; \
       echo "build_id=${BUILD_ID}"; \
+      echo; \
+      echo "[optional-reporting]"; \
+      cat /opt/prideqc/pmultiqc-build-info.txt; \
     } > /opt/prideqc/build-info.txt; \
     rm -f /tmp/rustc-version.txt /tmp/cargo-version.txt; \
     dotnet --info >/dev/null; \
     prideqc --version; \
-    python -c "import pyopenms as oms; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"
+    python -c "import pyopenms as oms; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"; \
+    /opt/pmultiqc/.venv/bin/multiqc --version; \
+    /opt/pmultiqc/.venv/bin/python -c "from pmultiqc.modules.mzqc import MzQCModule, parse_mzqc_document; print('pmultiqc mzQC module: OK')"; \
+    mkdir -p /tmp/mzqc-smoke /tmp/multiqc-smoke; \
+    printf '%s\n' '{"mzQC":{"version":"1.0.0","runQualities":[{"metadata":{"label":"container-smoke","inputFiles":[{"name":"smoke.raw","location":"file:///smoke.raw"}]},"qualityMetrics":[{"accession":"MS:4000059","name":"number of MS1 spectra","value":1}]}],"controlledVocabularies":[]}}' > /tmp/mzqc-smoke/smoke.mzQC; \
+    /opt/pmultiqc/.venv/bin/multiqc --module mzqc --force --outdir /tmp/multiqc-smoke /tmp/mzqc-smoke; \
+    test -s /tmp/multiqc-smoke/multiqc_report.html; \
+    rm -rf /tmp/mzqc-smoke /tmp/multiqc-smoke
 
 LABEL org.opencontainers.image.title="prideQC" \
-      org.opencontainers.image.description="prideQC scientific runtime with pinned pyOpenMS vendor readers"
+      org.opencontainers.image.description="prideQC scientific runtime with isolated optional pmultiqc/MultiQC reporting"
 
 WORKDIR /work
 CMD ["prideqc", "--help"]

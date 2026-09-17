@@ -12,6 +12,7 @@ RESULT_ROOT="${RESULT_ROOT:-$PERSIST_ROOT/results}"
 SCRATCH_ROOT="${SCRATCH_ROOT:-/tmp}"
 SDRF_ROOT="${SDRF_ROOT:-$PERSIST_ROOT/benchmarks/sdrf}"
 MANIFEST_ROOT="${MANIFEST_ROOT:-$PERSIST_ROOT/benchmarks/manifests}"
+REPORT_SUBMITTER="${REPORT_SUBMITTER:-$PERSIST_ROOT/scripts/submit_prideqc_accession_reports.sh}"
 
 # Safe defaults for one OpenMS/vendor file per array task.
 PARTITION="${PARTITION:-}"
@@ -24,6 +25,8 @@ RUN_NAME="${RUN_NAME:-ground-truth-files}"
 PRIDEQC_DIAGNOSTICS="${PRIDEQC_DIAGNOSTICS:-1}"
 PRIDEQC_INCLUDE_INFERRED="${PRIDEQC_INCLUDE_INFERRED:-0}"
 PRIDEQC_ESTIMATE_PEAK_TYPE="${PRIDEQC_ESTIMATE_PEAK_TYPE:-0}"
+PRIDEQC_REPORTS="${PRIDEQC_REPORTS:-0}"
+PRIDEQC_REPORT_REQUIRE_COMPLETE="${PRIDEQC_REPORT_REQUIRE_COMPLETE:-1}"
 SDRF_GITHUB_REPO="${SDRF_GITHUB_REPO:-bigbio/sdrf-annotated-datasets}"
 SDRF_GITHUB_REF="${SDRF_GITHUB_REF:-main}"
 
@@ -41,8 +44,13 @@ test -r "$SIF" || { echo "SIF not readable: $SIF" >&2; exit 2; }
 test -r "${SIF}.sha256" || { echo "SIF checksum not readable: ${SIF}.sha256" >&2; exit 2; }
 test -r "$PREPARE_SCRIPT" || { echo "Manifest helper not readable: $PREPARE_SCRIPT" >&2; exit 2; }
 test -r "$LAUNCHER" || { echo "Launcher not readable: $LAUNCHER" >&2; exit 2; }
+if [[ "$PRIDEQC_REPORTS" == 1 ]]; then
+    test -r "$REPORT_SUBMITTER" || { echo "Report submitter not readable: $REPORT_SUBMITTER" >&2; exit 2; }
+fi
 [[ "$CPUS" =~ ^[1-9][0-9]*$ ]] || { echo "CPUS must be a positive integer" >&2; exit 2; }
 [[ "$MAX_PARALLEL" =~ ^[1-9][0-9]*$ ]] || { echo "MAX_PARALLEL must be a positive integer" >&2; exit 2; }
+[[ "$PRIDEQC_REPORTS" == 0 || "$PRIDEQC_REPORTS" == 1 ]] || { echo "PRIDEQC_REPORTS must be 0 or 1" >&2; exit 2; }
+[[ "$PRIDEQC_REPORT_REQUIRE_COMPLETE" == 0 || "$PRIDEQC_REPORT_REQUIRE_COMPLETE" == 1 ]] || { echo "PRIDEQC_REPORT_REQUIRE_COMPLETE must be 0 or 1" >&2; exit 2; }
 
 mkdir -p "$LOG_ROOT" "$RESULT_ROOT" "$SDRF_ROOT" "$MANIFEST_ROOT"
 MANIFEST="$MANIFEST_ROOT/${RUN_NAME}.tsv"
@@ -78,7 +86,9 @@ printf '%s\n' \
     "pride_protocol=$PRIDE_PROTOCOL" \
     "run_name=$RUN_NAME" \
     "sif=$SIF" \
-    "result_root=$RESULT_ROOT"
+    "result_root=$RESULT_ROOT" \
+    "submit_accession_reports=$PRIDEQC_REPORTS" \
+    "report_require_complete=$PRIDEQC_REPORT_REQUIRE_COMPLETE"
 
 echo
 echo "Tasks per accession:"
@@ -121,3 +131,23 @@ echo "Submitted file-level Slurm array: $JOB_ID"
 echo "Monitor: squeue -j $JOB_BASE"
 echo "Accounting: sacct -j $JOB_BASE --format=JobID,State,Elapsed,AllocCPUS,MaxRSS,ExitCode"
 echo "Results: $RESULT_ROOT/$RUN_NAME"
+
+if [[ "$PRIDEQC_REPORTS" == 1 ]]; then
+    echo
+    echo "==> Submit accession-level pmultiqc/MultiQC aggregation after file tasks"
+    if [[ "$TASK_RANGE" != "1-${TASK_COUNT}" && "$PRIDEQC_REPORT_REQUIRE_COMPLETE" == 1 ]]; then
+        echo "WARNING: TASK_RANGE=$TASK_RANGE is a subset; completeness-gated accession reports may intentionally fail." >&2
+    fi
+    PERSIST_ROOT="$PERSIST_ROOT" \
+    SIF="$SIF" \
+    RUN_NAME="$RUN_NAME" \
+    RESULT_ROOT="$RESULT_ROOT" \
+    LOG_ROOT="$LOG_ROOT" \
+    SCRATCH_ROOT="$SCRATCH_ROOT" \
+    MANIFEST_ROOT="$MANIFEST_ROOT" \
+    MANIFEST="$MANIFEST" \
+    PARTITION="$PARTITION" \
+    DEPENDENCY_JOB_ID="$JOB_BASE" \
+    PRIDEQC_REPORT_REQUIRE_COMPLETE="$PRIDEQC_REPORT_REQUIRE_COMPLETE" \
+        bash "$REPORT_SUBMITTER"
+fi

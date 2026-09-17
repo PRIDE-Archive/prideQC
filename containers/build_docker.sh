@@ -12,6 +12,8 @@ PYTHON_IMAGE="${PRIDEQC_PYTHON_IMAGE:-python:3.12.14-slim-bookworm}"
 RUST_IMAGE="${PRIDEQC_RUST_IMAGE:-rust:1.98.1-slim-bookworm}"
 UV_IMAGE="${PRIDEQC_UV_IMAGE:-ghcr.io/astral-sh/uv:0.12.11}"
 DOTNET_IMAGE="${PRIDEQC_DOTNET_IMAGE:-mcr.microsoft.com/dotnet/runtime:8.0.29-bookworm-slim}"
+PMULTIQC_GIT_URL="${PRIDEQC_PMULTIQC_GIT_URL:-https://github.com/singjc/pmultiqc.git}"
+PMULTIQC_GIT_REF="${PRIDEQC_PMULTIQC_GIT_REF:-mzqc-multiqc-reporting}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -79,6 +81,8 @@ build_args=(
     --build-arg "RUST_IMAGE=$RUST_IMAGE"
     --build-arg "UV_IMAGE=$UV_IMAGE"
     --build-arg "DOTNET_IMAGE=$DOTNET_IMAGE"
+    --build-arg "PMULTIQC_GIT_URL=$PMULTIQC_GIT_URL"
+    --build-arg "PMULTIQC_GIT_REF=$PMULTIQC_GIT_REF"
 )
 
 if [[ "${PRIDEQC_DOCKER_NO_CACHE:-0}" == 1 ]]; then
@@ -98,6 +102,13 @@ docker run --rm "$IMAGE" prideqc --version
 docker run --rm "$IMAGE" python -c \
   "import importlib.metadata as m, pyopenms as oms; print('Python/pyOpenMS:', m.version('pyopenms')); assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"
 docker run --rm "$IMAGE" dotnet --info >/dev/null
+docker run --rm "$IMAGE" multiqc --version
+docker run --rm "$IMAGE" /opt/pmultiqc/.venv/bin/python -c \
+  "from pmultiqc.modules.mzqc import MzQCModule, parse_mzqc_document; print('pmultiqc mzQC module: OK')"
+docker run --rm "$IMAGE" /opt/prideqc/.venv/bin/python -c \
+  "import importlib.metadata as m; print('core pyOpenMS', m.version('pyopenms'))"
+docker run --rm "$IMAGE" /opt/pmultiqc/.venv/bin/python -c \
+  "import importlib.metadata as m; print('reporting pyOpenMS', m.version('pyopenms'))"
 docker run --rm "$IMAGE" cat /opt/prideqc/build-info.txt
 
 echo "==> Docker image ID"

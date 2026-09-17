@@ -54,7 +54,11 @@ echo "==> SIF smoke tests"
 "$CONTAINER_BIN" exec "$SIF" python -c \
   "import importlib.metadata as m, pyopenms as oms; print('pyOpenMS', m.version('pyopenms')); assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"
 "$CONTAINER_BIN" exec "$SIF" dotnet --info >/dev/null
+"$CONTAINER_BIN" exec "$SIF" multiqc --version
+"$CONTAINER_BIN" exec "$SIF" /opt/pmultiqc/.venv/bin/python -c \
+  "from pmultiqc.modules.mzqc import MzQCModule, parse_mzqc_document; print('pmultiqc mzQC module: OK')"
 "$CONTAINER_BIN" exec "$SIF" test -r /opt/prideqc/build-info.txt
+"$CONTAINER_BIN" exec "$SIF" grep -q '^pmultiqc_resolved_sha=' /opt/prideqc/build-info.txt
 
 rust_manifest="$("$CONTAINER_BIN" exec "$SIF" cat /opt/prideqc/rust-bin-manifest.txt)"
 if [[ "$rust_manifest" != none ]]; then

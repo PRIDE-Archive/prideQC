@@ -286,6 +286,47 @@ variable. Credentials are not included in prideQC manifests. Broader metadata
 search and non-PRIDE repository discovery remain available via the installed
 `uv run pridepy --help`; prideQC's integrated selection accepts PRIDE `PXD` IDs.
 
+
+## Optional accession-level pmultiqc reporting
+
+The Docker/Singularity runtime also contains an **isolated optional reporting
+environment** at `/opt/pmultiqc/.venv`. This environment provides MultiQC plus
+the current direct-mzQC pmultiqc development branch without changing prideQC's
+scientific Python environment.
+
+The separation is intentional. prideQC requires the pinned pyOpenMS development
+build used for native Thermo RAW and Bruker TDF readers, while the current
+pmultiqc package has its own pyOpenMS constraint. `prideqc` therefore runs from
+`/opt/prideqc/.venv`, and `multiqc` runs from `/opt/pmultiqc/.venv`.
+
+For a completed accession result tree:
+
+```bash
+multiqc --module mzqc \
+  --force \
+  --outdir report \
+  results/PXD000000
+```
+
+On Codon, prefer the supplied dependent Slurm reporting workflow. File-level
+prideQC tasks finish first; one report task per accession then recursively reads
+the persisted `*.mzQC` outputs and writes:
+
+```text
+results/<run>/<PXD>/_multiqc/
+  multiqc_report.html
+  multiqc_data/
+  multiqc.log
+  mzqc-files.txt
+  report-info.txt
+  container-build-info.txt
+```
+
+Set `PRIDEQC_REPORTS=1` when using `scripts/slurm/submit_prideqc_files.sh` to
+submit this aggregation automatically after the file array. Reporting remains
+optional and does not affect prideQC analysis when disabled. See
+`docs/codon-pride-file-array.md` for the complete cluster commands.
+
 ## Python API
 
 ```python

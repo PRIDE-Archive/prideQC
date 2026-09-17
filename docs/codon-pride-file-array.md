@@ -35,6 +35,8 @@ rsync -avP \
   scripts/slurm/prepare_ground_truth_task_subset.py \
   scripts/slurm/submit_prideqc_files.sh \
   scripts/slurm/prideqc_file_array.sbatch \
+  scripts/slurm/submit_prideqc_accession_reports.sh \
+  scripts/slurm/prideqc_accession_report.sbatch \
   scripts/slurm/inspect_prideqc_array.sh \
   "$CLUSTER_HOST:$PERSIST_ROOT/scripts/"
 
@@ -137,6 +139,80 @@ adaptive ladder of 0.5 Da followed by 1.0 Da. The estimator uses the narrowest w
 whose robust three-sigma pairwise core stays below 90% of the window and abstains if
 1.0 Da remains censored. Do not change the Slurm wrapper or RAW data to pre-centroid
 profile spectra; profile peak centers are derived ephemerally inside prideQC.
+
+
+## Optional accession-level pmultiqc report
+
+The container includes pmultiqc/MultiQC as a reporting layer in a separate
+Python environment. It is deliberately not installed into prideQC's scientific
+venv because the two projects currently require different pyOpenMS versions.
+The command `prideqc` continues to use `/opt/prideqc/.venv`; the `multiqc`
+entry point uses `/opt/pmultiqc/.venv`.
+
+Verify both environments in the immutable SIF before a full-accession run:
+
+```bash
+singularity exec "$SIF" prideqc --version
+singularity exec "$SIF" multiqc --version
+singularity exec "$SIF" grep -E \
+  '^(pyopenms_version|pmultiqc_resolved_sha|pmultiqc_version|multiqc_version|reporting_pyopenms_version)=' \
+  /opt/prideqc/build-info.txt
+```
+
+To submit file-level QC and automatically generate one accession-level report
+after the file array finishes:
+
+```bash
+export PRIDEQC_REPORTS=1
+export PRIDEQC_REPORT_REQUIRE_COMPLETE=1
+
+bash "$PERSIST_ROOT/scripts/submit_prideqc_files.sh"
+```
+
+The report array uses a Slurm `afterany` dependency so it still runs when one
+file-level task fails. It records how many mzQC files were expected and found,
+and with `PRIDEQC_REPORT_REQUIRE_COMPLETE=1` a partial accession report is
+persisted for diagnosis but the report task exits nonzero.
+
+Report output is written under:
+
+```text
+results/<run>/<PXD>/_multiqc/
+  multiqc_report.html
+  multiqc_data/
+  multiqc.log
+  mzqc-files.txt
+  report-info.txt
+  container-build-info.txt
+```
+
+The report command is constrained to the new generic mzQC module:
+
+```text
+multiqc --module mzqc ...
+```
+
+so unrelated `metrics.tsv`, SDRF, and other files in the accession tree do not
+activate pmultiqc's legacy pipeline-specific modules.
+
+You can also report an already-completed run without rerunning QC:
+
+```bash
+export PERSIST_ROOT=/nfs/research/juan/DIA/singj/prideQC
+export SIF="$PERSIST_ROOT/containers/<immutable-prideqc>.sif"
+export RUN_NAME=<existing-run-name>
+export MANIFEST="$PERSIST_ROOT/benchmarks/manifests/${RUN_NAME}.tsv"
+
+bash "$PERSIST_ROOT/scripts/submit_prideqc_accession_reports.sh"
+```
+
+For a development image, the Docker build defaults to the
+`singjc/pmultiqc:mzqc-multiqc-reporting` branch. The image resolves that ref to
+a concrete Git SHA during the build and stores `pmultiqc_resolved_sha` in
+`/opt/prideqc/build-info.txt`. GitHub Actions resolves the branch before the
+Docker build and passes the full SHA, so the published image records the exact
+pmultiqc source revision used. Once the pmultiqc PR is merged/released, change
+the build default to the upstream immutable release/commit.
 
 ## Monitor
 
