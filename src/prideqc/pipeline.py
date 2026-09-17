@@ -18,6 +18,7 @@ from prideqc.annotations import DiagnosticIonCollector, TechnicalAnnotator
 from prideqc.conversion import ExternalConverter
 from prideqc.io import atomic_text, json_safe, write_json
 from prideqc.mass_error import RepeatSpectrumMassErrorCollector
+from prideqc.mass_shift import MassShiftCollector
 from prideqc.metrics import QCMetricCalculator, RunSummary
 from prideqc.models import AnalysisResult, EvidenceCollector, FloatArray, Spectrum, SpectrumReader
 from prideqc.mzqc import MzQCWriter
@@ -91,6 +92,7 @@ class WorkflowOptions:
     workers: int = 1
     diagnostics: bool = False
     estimate_mass_error: bool = False
+    estimate_mass_shifts: bool = False
     estimate_peak_type: bool = False
     converter: str | None = None
     converter_executable: str | None = None
@@ -168,12 +170,20 @@ def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
         collectors: list[EvidenceCollector] = []
         if options.diagnostics:
             collectors.append(DiagnosticIonCollector())
+        mass_error_collector = None
         if options.estimate_mass_error:
-            collectors.append(RepeatSpectrumMassErrorCollector())
+            mass_error_collector = RepeatSpectrumMassErrorCollector()
+            collectors.append(mass_error_collector)
+        if options.estimate_mass_shifts:
+            collectors.append(MassShiftCollector(precision_source=mass_error_collector))
         from prideqc.readers import PyOpenMSReader, vendor_format
 
         reader = PyOpenMSReader(
-            estimate_peak_type=options.estimate_peak_type or options.estimate_mass_error,
+            estimate_peak_type=(
+                options.estimate_peak_type
+                or options.estimate_mass_error
+                or options.estimate_mass_shifts
+            ),
         )
         is_mzml = source.name.casefold().endswith((".mzml", ".mzml.gz"))
         detected_vendor = vendor_format(source)
@@ -367,10 +377,15 @@ class Workflow:
                             Path(f"{prefix}.summary.json"),
                             outcome.result.to_dict(),
                         )
+                        if self.options.estimate_mass_shifts:
+                            self._write_mass_shift_table(
+                                [outcome.result],
+                                Path(f"{prefix}.mass-shifts.tsv"),
+                            )
                     except Exception as exc:
                         outcome.error = f"OutputError: {exc}"
                         outcome.result = None
-                        for suffix in (".mzQC", ".obo", ".summary.json"):
+                        for suffix in (".mzQC", ".obo", ".summary.json", ".mass-shifts.tsv"):
                             Path(f"{prefix}{suffix}").unlink(missing_ok=True)
                 outcomes.append(outcome)
                 progress.update(outcome)
@@ -404,6 +419,11 @@ class Workflow:
                     "status": "failed" if o.error else "success",
                     "error": o.error,
                     "mzqc": f"{o.source.name}.mzQC" if o.result else None,
+                    "mass_shifts": (
+                        f"{o.source.name}.mass-shifts.tsv"
+                        if o.result and self.options.estimate_mass_shifts
+                        else None
+                    ),
                     "elapsed_seconds": o.result.elapsed_seconds if o.result else None,
                 }
                 for o in outcomes
@@ -517,3 +537,98 @@ class Workflow:
                             annotation.detail,
                         ]
                     )
+        if self.options.estimate_mass_shifts:
+            self._write_mass_shift_table(results, output / "mass-shifts.tsv")
+
+    def _write_mass_shift_table(
+        self,
+        results: list[AnalysisResult],
+        path: Path,
+    ) -> None:
+        """Write one row per recurrent cluster / plausible UniMod candidate."""
+
+        fields = [
+            "data_file",
+            "cluster_rank",
+            "delta_mass_da",
+            "cluster_sigma_da",
+            "cluster_min_da",
+            "cluster_max_da",
+            "pair_support",
+            "unique_spectrum_support",
+            "median_spectral_similarity",
+            "classification",
+            "confidence",
+            "match_tolerance_da",
+            "artifact_name",
+            "artifact_theoretical_delta_mass_da",
+            "artifact_residual_da",
+            "candidate_rank",
+            "unimod_accession",
+            "unimod_name",
+            "unimod_theoretical_delta_mass_da",
+            "unimod_residual_da",
+            "unimod_origins",
+            "unimod_term_specificities",
+            "unimod_source_classification",
+            "orientation",
+        ]
+        with atomic_text(path) as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=fields,
+                delimiter="\t",
+                lineterminator="\n",
+            )
+            writer.writeheader()
+            for result in results:
+                annotation = next(
+                    (
+                        item
+                        for item in result.annotations
+                        if item.field == "putative_modification_mass_shifts"
+                    ),
+                    None,
+                )
+                clusters = annotation.value if annotation and isinstance(annotation.value, list) else []
+                for cluster_rank, cluster in enumerate(clusters, start=1):
+                    artifact = cluster.get("artifact_candidate") or {}
+                    candidates = cluster.get("unimod_candidates") or [None]
+                    for candidate_rank, candidate in enumerate(candidates, start=1):
+                        candidate = candidate or {}
+                        writer.writerow({
+                            "data_file": result.input_path.name,
+                            "cluster_rank": cluster_rank,
+                            "delta_mass_da": cluster.get("delta_mass_da"),
+                            "cluster_sigma_da": cluster.get("cluster_sigma_da"),
+                            "cluster_min_da": cluster.get("cluster_min_da"),
+                            "cluster_max_da": cluster.get("cluster_max_da"),
+                            "pair_support": cluster.get("pair_support"),
+                            "unique_spectrum_support": cluster.get("unique_spectrum_support"),
+                            "median_spectral_similarity": cluster.get(
+                                "median_spectral_similarity"
+                            ),
+                            "classification": cluster.get("classification"),
+                            "confidence": cluster.get("confidence"),
+                            "match_tolerance_da": cluster.get("match_tolerance_da"),
+                            "artifact_name": artifact.get("name"),
+                            "artifact_theoretical_delta_mass_da": artifact.get(
+                                "theoretical_delta_mass_da"
+                            ),
+                            "artifact_residual_da": artifact.get("residual_da"),
+                            "candidate_rank": candidate_rank if candidate else "",
+                            "unimod_accession": candidate.get("unimod_accession"),
+                            "unimod_name": candidate.get("name"),
+                            "unimod_theoretical_delta_mass_da": candidate.get(
+                                "theoretical_delta_mass_da"
+                            ),
+                            "unimod_residual_da": candidate.get("residual_da"),
+                            "unimod_origins": ";".join(candidate.get("origins") or []),
+                            "unimod_term_specificities": ";".join(
+                                candidate.get("term_specificities") or []
+                            ),
+                            "unimod_source_classification": candidate.get(
+                                "source_classification"
+                            ),
+                            "orientation": cluster.get("orientation"),
+                        })

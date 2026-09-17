@@ -512,6 +512,16 @@ class RepeatSpectrumMassErrorCollector:
         while len(queue) > self.max_candidates_per_bin:
             queue.popleft()
 
+    def precursor_precision_ppm(self) -> dict[str, float | int] | None:
+        """Return the current robust precursor precision summary without mutating state.
+
+        This small read-only accessor allows downstream QC collectors to consume
+        the frozen repeat-observation precision estimate as calibration without
+        duplicating or retuning the v19 estimator.
+        """
+
+        return _robust_error(self.precursor_errors_ppm)
+
     def consume_spectrum(self, spectrum: Spectrum) -> None:
         if spectrum.ms_level != 2:
             return

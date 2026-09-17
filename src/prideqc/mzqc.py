@@ -12,7 +12,7 @@ from typing import Any
 
 from prideqc import __version__
 from prideqc.io import atomic_text, json_safe, write_json
-from prideqc.models import AnalysisResult, CVTerm, Metric
+from prideqc.models import AnalysisResult, Annotation, CVTerm, Metric
 
 SECOND = CVTerm("UO:0000010", "second")
 COUNT = CVTerm("UO:0000189", "count unit")
@@ -270,6 +270,19 @@ LEVEL_DEFINITIONS = {
 }
 
 
+ANNOTATION_DESCRIPTIONS = {
+    "putative_modification_mass_shifts": (
+        "putative modification mass shifts",
+        (
+            "Identification-free recurrent absolute neutral precursor-mass differences from "
+            "fragment-related centroid MS2 spectra, with artifact classification and "
+            "mass-compatible OpenMS/UniMod candidates. These are hypotheses, not localized PTM "
+            "identifications."
+        ),
+    ),
+}
+
+
 FILE_FORMATS = {
     ".raw": ("MS:1000563", "Thermo RAW format"),
     ".d": ("MS:1002817", "Bruker TDF format"),
@@ -289,6 +302,21 @@ def file_format(path: Path) -> dict[str, str]:
 
 def _local_accession(key: str) -> str:
     return "QCPRIDE:" + hashlib.sha256(key.encode()).hexdigest()[:20].upper()
+
+
+def annotation_definition(annotation: Annotation) -> MetricDefinition | None:
+    """Map selected evidence annotations into structured mzQC metrics."""
+
+    item = ANNOTATION_DESCRIPTIONS.get(annotation.field)
+    if item is None:
+        return None
+    name, description = item
+    return MetricDefinition(
+        _local_accession(f"annotation:{annotation.field}"),
+        name,
+        description,
+        "table",
+    )
 
 
 def definition(metric: Metric) -> MetricDefinition:
@@ -333,6 +361,17 @@ class MzQCWriter:
             if term.unit:
                 item["unit"] = {"accession": term.unit.accession, "name": term.unit.name}
             metrics.append(item)
+        for annotation in result.annotations:
+            term = annotation_definition(annotation)
+            value = json_safe(annotation.value)
+            if term is None or value is None:
+                continue
+            metrics.append({
+                "accession": term.accession,
+                "name": term.name,
+                "description": f"{term.description} Evidence field: {annotation.field}.",
+                "value": value,
+            })
         properties: list[dict[str, Any]] = [
             {"accession": term.accession, "name": term.name}
             for term in result.metadata.instruments
@@ -370,11 +409,22 @@ class MzQCWriter:
 
     def write(self, result: AnalysisResult, path: Path) -> None:
         cv_path = path.with_suffix(".obo")
-        self.write_vocabulary(result.metrics, cv_path)
+        self.write_vocabulary(result.metrics, cv_path, result.annotations)
         write_json(path, self.build(result, cv_path))
 
-    def write_vocabulary(self, metrics: list[Metric], path: Path) -> None:
+    def write_vocabulary(
+        self,
+        metrics: list[Metric],
+        path: Path,
+        annotations: list[Annotation] | None = None,
+    ) -> None:
         terms = [definition(metric) for metric in metrics]
+        terms.extend(
+            term
+            for annotation in annotations or []
+            if (term := annotation_definition(annotation)) is not None
+            and annotation.value is not None
+        )
         with atomic_text(path) as handle:
             handle.write("format-version: 1.2\ndata-version: 1\nontology: prideqc\n")
             for accession, name in (("QCPRIDE:SOFTWARE", "prideqc"), ("QCPRIDE:SOURCEFILE", "original vendor file")):
