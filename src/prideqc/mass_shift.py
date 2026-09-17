@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict, deque
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from statistics import median
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 

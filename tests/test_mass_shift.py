@@ -6,9 +6,9 @@ import json
 import math
 import tempfile
 import unittest
-from unittest.mock import patch
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -19,7 +19,6 @@ from prideqc.models import AnalysisResult, EvidenceKind, RunMetadata
 from prideqc.mzqc import MzQCWriter
 from prideqc.pipeline import FileOutcome, Workflow, WorkflowOptions
 from tests.helpers import spectrum
-
 
 PHOSPHO = ModificationRecord(
     "UNIMOD:21",
