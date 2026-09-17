@@ -21,7 +21,7 @@ def _text(value: Any) -> str:
 
 def main() -> int:
     import pyopenms as oms
-
+    from pyopenms.Constants import C13C12_MASSDIFF_U, PROTON_MASS_U
     started = time.perf_counter()
     database = oms.ModificationsDB()
     count = int(database.getNumberOfModifications())
@@ -47,8 +47,8 @@ def main() -> int:
     spectrum_alignment_score = getattr(oms, "SpectrumAlignmentScore", None)
     output = {
         "pyopenms_version": getattr(oms, "__version__", None),
-        "openms_proton_mass_u": float(oms.Constants.PROTON_MASS_U),
-        "openms_c13_c12_massdiff_u": float(oms.Constants.C13C12_MASSDIFF_U),
+        "openms_proton_mass_u": float(PROTON_MASS_U),
+        "openms_c13_c12_massdiff_u": float(C13C12_MASSDIFF_U),
         "modifications_db_entries": count,
         "unimod_bearing_entries": unimod,
         "modification_api": {
