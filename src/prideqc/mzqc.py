@@ -362,14 +362,16 @@ class MzQCWriter:
                 item["unit"] = {"accession": term.unit.accession, "name": term.unit.name}
             metrics.append(item)
         for annotation in result.annotations:
-            term = annotation_definition(annotation)
+            annotation_term = annotation_definition(annotation)
             value = json_safe(annotation.value)
-            if term is None or value is None:
+            if annotation_term is None or value is None:
                 continue
             metrics.append({
-                "accession": term.accession,
-                "name": term.name,
-                "description": f"{term.description} Evidence field: {annotation.field}.",
+                "accession": annotation_term.accession,
+                "name": annotation_term.name,
+                "description": (
+                    f"{annotation_term.description} Evidence field: {annotation.field}."
+                ),
                 "value": value,
             })
         properties: list[dict[str, Any]] = [

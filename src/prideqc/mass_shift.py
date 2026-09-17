@@ -94,12 +94,16 @@ def _text(value: Any) -> str:
 def _openms_constants(oms: Any | None = None) -> tuple[float, float]:
     """Return proton and C13-C12 masses from the active pyOpenMS build."""
 
+    active_oms: Any
     if oms is None:
         try:
-            import pyopenms as oms  # type: ignore[no-redef]
+            import pyopenms
         except ImportError:
             return _FALLBACK_PROTON_MASS_U, _FALLBACK_C13C12_MASSDIFF_U
-    constants = getattr(oms, "Constants", None)
+        active_oms = pyopenms
+    else:
+        active_oms = oms
+    constants = getattr(active_oms, "Constants", None)
     proton = float(getattr(constants, "PROTON_MASS_U", _FALLBACK_PROTON_MASS_U))
     isotope = float(
         getattr(constants, "C13C12_MASSDIFF_U", _FALLBACK_C13C12_MASSDIFF_U)
@@ -115,10 +119,15 @@ def load_openms_modifications(oms: Any | None = None) -> tuple[ModificationRecor
     while preserving all observed origins and terminal specificities.
     """
 
+    active_oms: Any
     if oms is None:
-        import pyopenms as oms  # type: ignore[no-redef]
+        import pyopenms
 
-    database = oms.ModificationsDB()
+        active_oms = pyopenms
+    else:
+        active_oms = oms
+
+    database = active_oms.ModificationsDB()
     grouped: dict[tuple[str, str, float], dict[str, Any]] = {}
     for index in range(int(database.getNumberOfModifications())):
         modification = database.getModification(index)
@@ -624,14 +633,14 @@ class MassShiftCollector:
         cluster_tolerance = self.base_cluster_tolerance_da
         if self.precision_source is not None:
             precision = self.precision_source.precursor_precision_ppm()
-            enough_support = (
+            if (
                 precision is not None
                 and self.precision_source.precursor_paired_spectra
                 >= self.precision_source.min_tolerance_pairs
                 and self.precision_source.precursor_clusters_used
                 >= self.precision_source.min_tolerance_clusters
-            )
-            if enough_support and self._observations:
+                and self._observations
+            ):
                 sigma_ppm = float(precision["single_measurement_sigma"])
                 representative_mass = float(
                     median(item.mean_neutral_mass for item in self._observations)
