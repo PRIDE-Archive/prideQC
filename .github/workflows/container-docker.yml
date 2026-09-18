@@ -33,7 +33,7 @@ concurrency:
 env:
   DOCKER_METADATA_SHORT_SHA_LENGTH: '12'
   PMULTIQC_GIT_URL: 'https://github.com/singjc/pmultiqc.git'
-  PMULTIQC_GIT_REF: 'b133b57a2774e5c54179ea198590db863a551ba2'
+  PMULTIQC_GIT_REF: '21ca6ee4b9abb399725d4fc65cff13ada21e4b0d'
 
 jobs:
   docker:
