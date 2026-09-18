@@ -271,6 +271,67 @@ LEVEL_DEFINITIONS = {
 
 
 ANNOTATION_DESCRIPTIONS = {
+    "estimated_precursor_mass_error_ppm": (
+        "estimated precursor mass error precision",
+        (
+            "Robust repeat-observation estimate of single-measurement precursor mass precision "
+            "in parts per million. This is measurement-precision evidence, not a recovered "
+            "historical database-search tolerance."
+        ),
+    ),
+    "estimated_precursor_mass_error_da": (
+        "estimated precursor mass error precision in daltons",
+        (
+            "Robust repeat-observation estimate of single-measurement precursor mass precision "
+            "in daltons. This is measurement-precision evidence, not a recovered historical "
+            "database-search tolerance."
+        ),
+    ),
+    "estimated_fragment_mass_error_ppm": (
+        "estimated fragment mass error precision",
+        (
+            "Robust repeated-spectrum estimate of single-measurement fragment mass precision in "
+            "parts per million, including the estimator's resolution-regime diagnostics."
+        ),
+    ),
+    "estimated_fragment_mass_error_da": (
+        "estimated fragment mass error precision in daltons",
+        (
+            "Robust repeated-spectrum estimate of single-measurement fragment mass precision in "
+            "daltons, including the estimator's resolution-regime diagnostics."
+        ),
+    ),
+    "suggested_precursor_search_tolerance_ppm": (
+        "suggested precursor search tolerance",
+        (
+            "Precision-derived precursor search-tolerance starting point in parts per million. "
+            "It is not a recovered historical search setting and is not guaranteed search-optimal."
+        ),
+    ),
+    "suggested_fragment_search_tolerance_ppm": (
+        "suggested fragment search tolerance",
+        (
+            "Precision-derived high-resolution fragment search-tolerance starting point in parts "
+            "per million. It is emitted only when the estimator resolves a supported "
+            "high-resolution regime."
+        ),
+    ),
+    "suggested_fragment_search_tolerance_da": (
+        "suggested fragment search tolerance in daltons",
+        (
+            "Precision-derived low-resolution fragment search-tolerance starting point in "
+            "daltons. "
+            "It is emitted only when the estimator resolves a supported uncensored "
+            "low-resolution regime."
+        ),
+    ),
+    "mass_error_estimator_diagnostics": (
+        "mass error estimator diagnostics",
+        (
+            "Support and accounting diagnostics for the frozen repeat-observation mass-error "
+            "estimator, including paired-spectrum counts and resolution-regime evidence."
+        ),
+    ),
     "putative_modification_mass_shifts": (
         "putative modification mass shifts",
         (
@@ -279,6 +340,14 @@ ANNOTATION_DESCRIPTIONS = {
             "OpenMS PeakPickerHiRes processing for profile MS2), with artifact-family "
             "classification and QC-filtered mass-compatible OpenMS/UniMod candidates. These are "
             "hypotheses, not localized PTM identifications."
+        ),
+    ),
+    "mass_shift_scout_diagnostics": (
+        "mass shift scout diagnostics",
+        (
+            "Runtime, support, profile-centroiding and reporting-accounting diagnostics for the "
+            "identification-free recurrent mass-shift scout. Raw cluster counts are diagnostic; "
+            "the bounded reported cluster set is the QC-facing result."
         ),
     ),
 }

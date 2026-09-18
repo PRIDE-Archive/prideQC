@@ -753,6 +753,61 @@ class SerializationTests(unittest.TestCase):
             jsonschema.Draft7Validator(schema, format_checker=jsonschema.FormatChecker()).validate(
                 MzQCWriter().build(result, Path("local.obo")))
 
+    def test_mass_error_annotations_are_serialized_for_reporting(self):
+        result = analyze()
+        result.annotations.extend([
+            Annotation(
+                "estimated_precursor_mass_error_ppm",
+                {"unit": "ppm", "single_measurement_sigma": 1.25},
+                EvidenceKind.INFERRED,
+                "test",
+                support=120,
+                total=300,
+            ),
+            Annotation(
+                "suggested_precursor_search_tolerance_ppm",
+                {
+                    "unit": "ppm",
+                    "suggested_tolerance": 7.5,
+                    "single_measurement_sigma": 1.25,
+                    "confidence": "moderate",
+                },
+                EvidenceKind.INFERRED,
+                "test",
+                support=120,
+                total=300,
+            ),
+            Annotation(
+                "mass_error_estimator_diagnostics",
+                {
+                    "precursor_paired_spectra": 120,
+                    "precursor_clusters_used": 42,
+                    "fragment_pairs": 900,
+                    "fragment_resolution_regime": "high-resolution",
+                },
+                EvidenceKind.INFERRED,
+                "test",
+                support=120,
+                total=300,
+            ),
+        ])
+
+        run = MzQCWriter().build(result, Path("local.obo"))["mzQC"]["runQualities"][0]
+        metrics = {item["name"]: item["value"] for item in run["qualityMetrics"]}
+
+        self.assertEqual(
+            metrics["estimated precursor mass error precision"]["single_measurement_sigma"],
+            1.25,
+        )
+        self.assertEqual(
+            metrics["suggested precursor search tolerance"]["suggested_tolerance"],
+            7.5,
+        )
+        self.assertEqual(
+            metrics["mass error estimator diagnostics"]["precursor_clusters_used"],
+            42,
+        )
+
     def test_cv_shape_stable_when_unavailable(self):
         self.assertEqual(definition(Metric("MzRange_MS2", None)).shape, "tuple")
         self.assertEqual(definition(Metric("MzRange_MS2", [400, 600])).shape, "tuple")

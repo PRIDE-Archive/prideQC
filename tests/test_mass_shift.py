@@ -544,9 +544,16 @@ class MzQCMassShiftTests(unittest.TestCase):
             candidate = next(
                 item for item in metrics if item["name"] == "putative modification mass shifts"
             )
+            diagnostics = next(
+                item for item in metrics if item["name"] == "mass shift scout diagnostics"
+            )
             self.assertEqual(candidate["value"][0]["unimod_candidates"][0]["unimod_accession"], "UNIMOD:21")
             self.assertIn("hypotheses", candidate["description"].lower())
-            self.assertIn("putative modification mass shifts", cv.read_text())
+            self.assertGreaterEqual(diagnostics["value"]["raw_recurrent_clusters"], 1)
+            self.assertGreaterEqual(diagnostics["value"]["reported_clusters"], 1)
+            vocabulary = cv.read_text()
+            self.assertIn("putative modification mass shifts", vocabulary)
+            self.assertIn("mass shift scout diagnostics", vocabulary)
 
     def test_workflow_persists_per_file_and_aggregate_mass_shift_tables(self):
         collector = MassShiftCollector(

@@ -324,8 +324,18 @@ results/<run>/<PXD>/_multiqc/
 
 Set `PRIDEQC_REPORTS=1` when using `scripts/slurm/submit_prideqc_files.sh` to
 submit this aggregation automatically after the file array. Reporting remains
-optional and does not affect prideQC analysis when disabled. See
-`docs/codon-pride-file-array.md` for the complete cluster commands.
+optional and does not affect prideQC analysis when disabled.
+
+When the corresponding analysis options are enabled, prideQC keeps the frozen
+mass-error and recurrent mass-shift evidence in mzQC as structured local metrics.
+The pmultiqc mzQC module can therefore render estimated precursor/fragment search
+tolerances, estimator support, mass-shift classification, a recurrent mass-shift
+family heatmap, a mass-shift landscape and a bounded candidate table without
+recomputing any prideQC science. Mass-compatible modification labels remain
+hypotheses and are never presented as peptide- or site-localized PTM
+identifications.
+
+See `docs/codon-pride-file-array.md` for the complete cluster commands.
 
 ## Python API
 
