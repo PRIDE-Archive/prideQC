@@ -23,6 +23,12 @@ class ContainerReportingTests(unittest.TestCase):
         self.assertIn("from pmultiqc.modules.mzqc import MzQCModule", text)
         self.assertIn("pmultiqc_resolved_sha=", text)
 
+    def test_runtime_includes_process_listing_for_multiqc_flat_rendering(self) -> None:
+        text = self.dockerfile()
+        self.assertIn("procps", text)
+        self.assertIn("command -v ps >/dev/null", text)
+        self.assertIn("ps aux >/dev/null", text)
+
 
 if __name__ == "__main__":
     unittest.main()
