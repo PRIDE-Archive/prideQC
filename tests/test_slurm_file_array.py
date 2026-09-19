@@ -19,6 +19,16 @@ class SlurmFileArrayTests(unittest.TestCase):
         self.assertIn('download_flags+=(--no-checksum-check)', text)
         self.assertIn('pride_checksum_check=$PRIDEQC_CHECKSUM_CHECK', text)
 
+    def test_wrapper_supports_metadata_only_manifest_without_fake_sdrf(self) -> None:
+        text = self.wrapper().read_text(encoding="utf-8")
+        self.assertIn('HAS_SDRF=0', text)
+        self.assertIn('if [[ -n "$SDRF_MANIFEST_PATH" ]]; then', text)
+        self.assertIn('SAFE_SDRF="repository-metadata"', text)
+        self.assertIn('sdrf_flags=()', text)
+        self.assertIn('sdrf_flags=(--sdrf /work/input.sdrf.tsv --sdrf-template "$SDRF_TEMPLATE")', text)
+        self.assertIn('"${sdrf_flags[@]}"', text)
+        self.assertIn('Metadata-only manifest rows cannot require an SDRF file map', text)
+
 
 if __name__ == "__main__":
     unittest.main()

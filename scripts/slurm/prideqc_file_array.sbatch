@@ -46,21 +46,39 @@ IFS=$'\x1f' read -r ROW_ID PXD SDRF_BASENAME SDRF_MANIFEST_PATH SDRF_SHA SDRF_UR
 [[ "$ROW_ID" == "$TASK_ID" ]] || { echo "Manifest task mismatch" >&2; exit 2; }
 [[ "$PXD" =~ ^PXD[0-9]{6,}$ ]] || { echo "Invalid accession in manifest: $PXD" >&2; exit 2; }
 
-# Manifest preparation runs with PERSIST_ROOT bound at /persist inside the SIF.
-# Resolve persisted paths back to the real host NFS root before host-side checks/copies.
-case "$SDRF_MANIFEST_PATH" in
-    /persist/*) SDRF_PATH="$PERSIST_ROOT/${SDRF_MANIFEST_PATH#/persist/}" ;;
-    /*) SDRF_PATH="$SDRF_MANIFEST_PATH" ;;
-    *) SDRF_PATH="$PERSIST_ROOT/$SDRF_MANIFEST_PATH" ;;
-esac
-test -r "$SDRF_PATH" || {
-    echo "SDRF not readable: $SDRF_PATH (manifest path: $SDRF_MANIFEST_PATH)" >&2
-    exit 2
-}
-[[ "$(sha256sum "$SDRF_PATH" | awk '{print $1}')" == "$SDRF_SHA" ]] || {
-    echo "SDRF checksum mismatch: $SDRF_PATH" >&2
-    exit 2
-}
+HAS_SDRF=0
+SDRF_PATH=""
+if [[ -n "$SDRF_MANIFEST_PATH" ]]; then
+    HAS_SDRF=1
+    [[ -n "$SDRF_BASENAME" && -n "$SDRF_SHA" && -n "$SDRF_TEMPLATE" ]] || {
+        echo "Incomplete SDRF provenance in manifest row for task $TASK_ID" >&2
+        exit 2
+    }
+    # Manifest preparation runs with PERSIST_ROOT bound at /persist inside the SIF.
+    # Resolve persisted paths back to the real host NFS root before host-side checks/copies.
+    case "$SDRF_MANIFEST_PATH" in
+        /persist/*) SDRF_PATH="$PERSIST_ROOT/${SDRF_MANIFEST_PATH#/persist/}" ;;
+        /*) SDRF_PATH="$SDRF_MANIFEST_PATH" ;;
+        *) SDRF_PATH="$PERSIST_ROOT/$SDRF_MANIFEST_PATH" ;;
+    esac
+    test -r "$SDRF_PATH" || {
+        echo "SDRF not readable: $SDRF_PATH (manifest path: $SDRF_MANIFEST_PATH)" >&2
+        exit 2
+    }
+    [[ "$(sha256sum "$SDRF_PATH" | awk '{print $1}')" == "$SDRF_SHA" ]] || {
+        echo "SDRF checksum mismatch: $SDRF_PATH" >&2
+        exit 2
+    }
+else
+    [[ -z "$SDRF_BASENAME" && -z "$SDRF_SHA" && -z "$SDRF_URL" && -z "$SDRF_TEMPLATE" && -z "$SDRF_DATA_FILE" ]] || {
+        echo "Metadata-only manifest rows must leave SDRF provenance columns blank" >&2
+        exit 2
+    }
+    [[ "$NEEDS_FILE_MAP" == 0 ]] || {
+        echo "Metadata-only manifest rows cannot require an SDRF file map" >&2
+        exit 2
+    }
+fi
 [[ "$NEEDS_FILE_MAP" == 0 || "$NEEDS_FILE_MAP" == 1 ]] || {
     echo "Invalid needs_file_map value: $NEEDS_FILE_MAP" >&2
     exit 2
@@ -70,8 +88,12 @@ test -r "$SDRF_PATH" || {
     exit 2
 }
 
-SAFE_SDRF="${SDRF_BASENAME%.sdrf.tsv}"
-SAFE_SDRF="${SAFE_SDRF//[^A-Za-z0-9._-]/_}"
+if [[ "$HAS_SDRF" == 1 ]]; then
+    SAFE_SDRF="${SDRF_BASENAME%.sdrf.tsv}"
+    SAFE_SDRF="${SAFE_SDRF//[^A-Za-z0-9._-]/_}"
+else
+    SAFE_SDRF="repository-metadata"
+fi
 SAFE_FILE="${ARCHIVE_FILE//[^A-Za-z0-9._-]/_}"
 [[ -n "$SAFE_FILE" ]] || SAFE_FILE="file"
 
@@ -156,7 +178,7 @@ cp -a "$SIF" "$LOCAL_SIF"
     exit 2
 }
 
-cp -a "$SDRF_PATH" "$LOCAL_SDRF"
+[[ "$HAS_SDRF" == 0 ]] || cp -a "$SDRF_PATH" "$LOCAL_SDRF"
 
 echo "==> Software provenance"
 "$CONTAINER_BIN" exec "$LOCAL_SIF" prideqc --version
@@ -184,6 +206,11 @@ analysis_flags=()
 download_flags=()
 [[ "$PRIDEQC_CHECKSUM_CHECK" == 0 ]] && download_flags+=(--no-checksum-check)
 
+sdrf_flags=()
+if [[ "$HAS_SDRF" == 1 ]]; then
+    sdrf_flags=(--sdrf /work/input.sdrf.tsv --sdrf-template "$SDRF_TEMPLATE")
+fi
+
 file_map_flags=()
 if [[ "$NEEDS_FILE_MAP" == 1 ]]; then
     "$CONTAINER_BIN" exec --cleanenv --bind "$WORK_ROOT:/work" "$LOCAL_SIF" \
@@ -203,8 +230,7 @@ set +e
       --protocol "$PRIDE_PROTOCOL" \
       "${download_flags[@]}" \
       --download-dir /work/download \
-      --sdrf /work/input.sdrf.tsv \
-      --sdrf-template "$SDRF_TEMPLATE" \
+      "${sdrf_flags[@]}" \
       --workers 1 \
       --no-progress \
       --overwrite \
@@ -264,7 +290,7 @@ elif [[ $PRIDEQC_STATUS -ne 0 && "$TASK_OUTCOME" == "success" ]]; then
 fi
 
 [[ -f "$LOCAL_DOWNLOAD/download-manifest.json" ]] && cp -a "$LOCAL_DOWNLOAD/download-manifest.json" "$LOCAL_RESULTS/download-manifest.json"
-cp -a "$LOCAL_SDRF" "$LOCAL_RESULTS/input.sdrf.tsv"
+[[ "$HAS_SDRF" == 0 ]] || cp -a "$LOCAL_SDRF" "$LOCAL_RESULTS/input.sdrf.tsv"
 [[ -f "$LOCAL_FILE_MAP" ]] && cp -a "$LOCAL_FILE_MAP" "$LOCAL_RESULTS/file-map.json"
 cp -a "$RUN_LOG" "$LOCAL_RESULTS/hpc-analysis.log"
 printf 'task_id\tpxd_accession\tsdrf_basename\tsdrf_path\tsdrf_sha256\tsource_sdrf_url\tsdrf_template\tsdrf_data_file\tarchive_file\tfile_uri\tneeds_file_map\n' > "$LOCAL_RESULTS/manifest-row.tsv"
@@ -283,6 +309,7 @@ printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     echo "archive_file=$ARCHIVE_FILE"
     echo "file_uri=$FILE_URI"
     echo "needs_file_map=$NEEDS_FILE_MAP"
+    echo "manifest_mode=$([[ "$HAS_SDRF" == 1 ]] && echo sdrf || echo pride-project-metadata)"
     echo "sdrf=$SDRF_BASENAME"
     echo "sdrf_sha256=$SDRF_SHA"
     echo "sdrf_url=$SDRF_URL"
