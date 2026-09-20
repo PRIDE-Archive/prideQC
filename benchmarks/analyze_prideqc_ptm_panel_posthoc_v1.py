@@ -7,7 +7,6 @@ import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
 
-
 TARGETS = {
     "PXD000138": [
         ("phosphorylation", 79.966331, 96),
