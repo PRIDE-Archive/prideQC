@@ -74,22 +74,55 @@ def resolve_case_table(
     raw_file: str,
     sdrf_data_file: str,
 ) -> Path:
-    wanted = {Path(raw_file).name, Path(sdrf_data_file).name}
-    matches: list[Path] = []
-    for path, names in indexed:
-        if accession.upper() not in {part.upper() for part in path.parts}:
-            continue
-        if wanted & names:
-            matches.append(path)
-    unique = sorted(set(matches))
-    if len(unique) != 1:
-        detail = "\n".join(str(path) for path in unique[:20])
-        raise SystemExit(
-            f"{accession} {raw_file}: expected exactly one mass-shift TSV, "
-            f"found {len(unique)}"
-            + (f"\n{detail}" if detail else "")
-        )
-    return unique[0]
+    wanted = {
+        Path(raw_file).name.casefold(),
+        Path(sdrf_data_file).name.casefold(),
+    }
+
+    # Prefer the per-file artifact name.  The frozen holdout layout does not
+    # guarantee that a PXD accession appears in every directory path.
+    basename_matches = sorted(
+        {
+            path
+            for path, _names in indexed
+            if path.name.removesuffix(".mass-shifts.tsv").casefold() in wanted
+        }
+    )
+    if len(basename_matches) == 1:
+        return basename_matches[0]
+
+    # Fall back to the TSV's data_file value.  This supports result layouts
+    # where the artifact itself has an opaque/generated filename.
+    content_matches = sorted(
+        {
+            path
+            for path, names in indexed
+            if wanted & {name.casefold() for name in names}
+        }
+    )
+    if len(content_matches) == 1:
+        return content_matches[0]
+
+    # Accession-in-path is only a tie-breaker, never a prerequisite.
+    candidates = basename_matches or content_matches
+    accession_upper = accession.upper()
+    accession_scoped = [
+        path
+        for path in candidates
+        if accession_upper in {part.upper() for part in path.parts}
+    ]
+    if len(accession_scoped) == 1:
+        return accession_scoped[0]
+
+    detail_paths = accession_scoped or candidates
+    detail = "\n".join(str(path) for path in detail_paths[:20])
+    raise SystemExit(
+        f"{accession} {raw_file}: expected exactly one mass-shift TSV; "
+        f"basename_matches={len(basename_matches)}, "
+        f"content_matches={len(content_matches)}, "
+        f"accession_scoped={len(accession_scoped)}"
+        + (f"\n{detail}" if detail else "")
+    )
 
 
 def write_case_evidence(path: Path, rows: list[dict[str, str]]) -> None:
