@@ -90,6 +90,21 @@ def apply_review(
         for index in modification_indices:
             existing_accessions.update(_accessions(row[index]))
 
+    # Keep new repeated modification columns with the existing modification block.
+    # SDRF factor columns must remain at the end of the table, so blindly appending
+    # a new modification column can invalidate an otherwise valid SDRF.
+    if modification_indices:
+        insertion_index = modification_indices[-1] + 1
+    else:
+        insertion_index = next(
+            (
+                index
+                for index, name in enumerate(new_columns)
+                if name.strip().casefold().startswith("factor value[")
+            ),
+            len(new_columns),
+        )
+
     audit: list[dict[str, str]] = []
     seen: set[str] = set()
     for item in accepted:
@@ -117,9 +132,10 @@ def apply_review(
                 }
             )
             continue
-        new_columns.append(MODIFICATION_COLUMN)
+        new_columns.insert(insertion_index, MODIFICATION_COLUMN)
         for row in new_rows:
-            row.append(item.sdrf_value)
+            row.insert(insertion_index, item.sdrf_value)
+        insertion_index += 1
         existing_accessions.add(accession)
         audit.append(
             {

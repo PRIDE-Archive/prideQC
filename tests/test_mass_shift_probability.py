@@ -251,6 +251,52 @@ class ConfidentPtmSdrfApplyTests(unittest.TestCase):
             "skipped-existing-accession",
         ])
 
+    def test_apply_keeps_factor_columns_last(self) -> None:
+        columns = [
+            "source name",
+            "comment[modification parameters]",
+            "comment[file uri]",
+            "comment[data file]",
+            "factor value[compound]",
+            "factor value[enrichment process]",
+        ]
+        rows = [
+            [
+                "s1",
+                "NT=Carbamidomethyl;AC=UNIMOD:4",
+                "file:///a.raw",
+                "a.raw",
+                "none",
+                "phosphoproteomics",
+            ]
+        ]
+        accepted = [
+            APPLY_MODULE.AcceptedModification(
+                "PXD1",
+                "UNIMOD:21",
+                "Phosphorylation",
+                "NT=Phosphorylation;AC=UNIMOD:21",
+            )
+        ]
+
+        new_columns, new_rows, audit = APPLY_MODULE.apply_review(columns, rows, accepted)
+
+        self.assertEqual(
+            new_columns,
+            [
+                "source name",
+                "comment[modification parameters]",
+                "comment[modification parameters]",
+                "comment[file uri]",
+                "comment[data file]",
+                "factor value[compound]",
+                "factor value[enrichment process]",
+            ],
+        )
+        self.assertEqual(new_rows[0][2], "NT=Phosphorylation;AC=UNIMOD:21")
+        self.assertEqual(new_rows[0][-2:], ["none", "phosphoproteomics"])
+        self.assertEqual(audit[0]["action"], "added")
+
     def test_accepted_review_value_must_contain_matching_accession(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             review = Path(tmp) / "review.tsv"
