@@ -243,8 +243,7 @@ def main() -> None:
             command,
             check=False,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
         (case_root / "v4.stdout.txt").write_text(completed.stdout, encoding="utf-8")
         (case_root / "v4.stderr.txt").write_text(completed.stderr, encoding="utf-8")
