@@ -108,6 +108,51 @@ class AnalysisResult:
         result["source_path"] = str(self.source_path) if self.source_path else None
         return result
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AnalysisResult:
+        """Reconstruct a result from prideQC's own ``*.summary.json`` payload."""
+        metadata_data = data.get("metadata") or {}
+        metadata = RunMetadata(
+            instruments=[CVTerm(**item) for item in metadata_data.get("instruments", [])],
+            analyzers=[CVTerm(**item) for item in metadata_data.get("analyzers", [])],
+            ionization=[CVTerm(**item) for item in metadata_data.get("ionization", [])],
+            serial_numbers=list(metadata_data.get("serial_numbers", [])),
+            source_files=list(metadata_data.get("source_files", [])),
+            started_at=metadata_data.get("started_at"),
+            instrument_details=dict(metadata_data.get("instrument_details", {})),
+        )
+        metrics = [Metric(str(item["key"]), item.get("value")) for item in data.get("metrics", [])]
+        annotations = [
+            Annotation(
+                field=str(item["field"]),
+                value=item.get("value"),
+                kind=EvidenceKind(str(item["kind"])),
+                method=str(item.get("method") or ""),
+                detail=str(item.get("detail") or ""),
+                support=item.get("support"),
+                total=item.get("total"),
+                sdrf_column=item.get("sdrf_column"),
+                sdrf_value=item.get("sdrf_value"),
+            )
+            for item in data.get("annotations", [])
+        ]
+        source_path = data.get("source_path")
+        return cls(
+            input_path=Path(str(data["input_path"])),
+            metadata=metadata,
+            metrics=metrics,
+            annotations=annotations,
+            warnings=[str(item) for item in data.get("warnings", [])],
+            engine_version=str(data.get("engine_version") or ""),
+            elapsed_seconds=float(data.get("elapsed_seconds") or 0.0),
+            source_path=Path(str(source_path)) if source_path else None,
+            project_accession=(
+                str(data["project_accession"]).strip().upper()
+                if data.get("project_accession")
+                else None
+            ),
+        )
+
 
 class SpectrumSink(Protocol):
     def consume_spectrum(self, spectrum: Spectrum) -> None: ...

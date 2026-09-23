@@ -749,7 +749,8 @@ class RepeatSpectrumMassErrorCollector:
                 "The repeat-observation method measures random precision but cannot observe a fixed "
                 "calibration offset or choose isotope-error handling. The suggestion is therefore "
                 "not a recovered historical search setting, is not guaranteed search-optimal, and "
-                "is never written into SDRF automatically. Small fixed-target runs abstain via the "
+                "is not written directly into SDRF. Explicit cohort refinement may combine supported "
+                "per-run estimates into a shared reanalysis recommendation. Small fixed-target runs "
                 "precursor-cluster support requirement."
             ),
             support=self.precursor_paired_spectra,
@@ -833,8 +834,9 @@ class RepeatSpectrumMassErrorCollector:
             "The payload reports the fraction of broad-match fragment deltas within three robust "
             "pairwise sigmas as a diagnostic only. Profile-mode evidence uses ephemeral local "
             "peak-center estimates and never modifies the input spectra. The suggestion cannot "
-            "recover historical search settings or guarantee search-optimal parameters and is never "
-            "written into SDRF automatically."
+            "recover historical search settings or guarantee search-optimal parameters and is not "
+            "written directly into SDRF. Explicit cohort refinement may combine supported per-run "
+            "estimates into a shared reanalysis recommendation."
         )
         for field_name, payload in (
             ("suggested_fragment_search_tolerance_ppm", fragment_tolerance_ppm),

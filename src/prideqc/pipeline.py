@@ -15,6 +15,11 @@ from typing import TYPE_CHECKING, Any
 
 from prideqc import __version__
 from prideqc.annotations import DiagnosticIonCollector, TechnicalAnnotator
+from prideqc.cohort import (
+    COHORT_OVERWRITE_FIELDS,
+    COHORT_SDRF_FIELDS,
+    synthesize_cohort,
+)
 from prideqc.conversion import ExternalConverter
 from prideqc.io import atomic_text, json_safe, write_json
 from prideqc.mass_error import RepeatSpectrumMassErrorCollector
@@ -22,7 +27,7 @@ from prideqc.mass_shift import MassShiftCollector
 from prideqc.metrics import QCMetricCalculator, RunSummary
 from prideqc.models import AnalysisResult, EvidenceCollector, FloatArray, Spectrum, SpectrumReader
 from prideqc.mzqc import MzQCWriter
-from prideqc.sdrf import SDRFDocument
+from prideqc.sdrf import SDRFChange, SDRFDocument
 from prideqc.validation import SDRFPipelinesValidator, SDRFValidator
 
 if TYPE_CHECKING:
@@ -100,6 +105,7 @@ class WorkflowOptions:
     continue_on_error: bool = False
     include_inferred: bool = False
     overwrite_sdrf_values: bool = False
+    refine_sdrf_qc: bool = False
     sdrf_template: str = "ms-proteomics"
     validate_ontology: bool = False
     progress: bool = False
@@ -323,6 +329,8 @@ class Workflow:
             )
         if len(set(inputs)) != len(inputs):
             raise ValueError("Duplicate input paths are not allowed.")
+        if self.options.refine_sdrf_qc and sdrf is None:
+            raise ValueError("--refine-sdrf-qc requires an input SDRF.")
         document = SDRFDocument.read(sdrf) if sdrf else None
         output = Path(output_directory).resolve()
         if any(
@@ -348,6 +356,8 @@ class Workflow:
                     child.unlink()
         input_validation = self.validator.validate(sdrf) if sdrf else None
         output.mkdir(parents=True, exist_ok=True)
+        if self.options.refine_sdrf_qc and sdrf is not None:
+            shutil.copyfile(sdrf, output / "original.sdrf.tsv")
         if input_validation:
             write_json(
                 output / "sdrf-validation.json",
@@ -420,6 +430,7 @@ class Workflow:
         outcomes.sort(key=lambda outcome: positions[outcome.source])
         processed = {outcome.source for outcome in outcomes}
         results = [outcome.result for outcome in outcomes if outcome.result is not None]
+        cohort_synthesis = None
         manifest: dict[str, Any] = {
             "prideqc_version": __version__,
             "options": asdict(self.options),
@@ -443,8 +454,36 @@ class Workflow:
             "sdrf_validation": {"input": input_validation.to_dict()}
             if input_validation
             else None,
+            "cohort_refinement": {"enabled": self.options.refine_sdrf_qc},
         }
         try:
+            if self.options.refine_sdrf_qc and results:
+                if document is None:
+                    raise ValueError("Cohort SDRF refinement requires an input SDRF.")
+                cohort_results, missing = document.resolve_results(results, aliases)
+                if missing:
+                    raise ValueError(
+                        "Cohort SDRF refinement requires complete analyzed coverage; missing: "
+                        + ", ".join(missing)
+                    )
+                cohort_synthesis = synthesize_cohort(cohort_results)
+                write_json(output / "cohort-refinement.json", cohort_synthesis.to_dict())
+                manifest["cohort_refinement"] = {
+                    "enabled": True,
+                    "artifact": "cohort-refinement.json",
+                    "original_sdrf": "original.sdrf.tsv",
+                    "experiment_groups": len(cohort_synthesis.groups),
+                    "sdrf_eligible_ptm_families": len(cohort_synthesis.ptm_families),
+                }
+                # Per-file mzQC/summary files were written as soon as each analysis
+                # completed. Rewrite successful outputs once so cohort annotations
+                # become part of the same provenance consumed by downstream tools.
+                for outcome in outcomes:
+                    if outcome.result is None:
+                        continue
+                    prefix = output / outcome.source.name
+                    MzQCWriter().write(outcome.result, Path(f"{prefix}.mzQC"))
+                    write_json(Path(f"{prefix}.summary.json"), outcome.result.to_dict())
             self._write_tables(results, output)
             if document:
                 changes = document.annotate(
@@ -452,25 +491,26 @@ class Workflow:
                     aliases,
                     self.options.include_inferred,
                     self.options.overwrite_sdrf_values,
+                    include_inferred_fields=(
+                        COHORT_SDRF_FIELDS if self.options.refine_sdrf_qc else frozenset()
+                    ),
+                    overwrite_fields=(
+                        COHORT_OVERWRITE_FIELDS
+                        if self.options.refine_sdrf_qc
+                        else frozenset()
+                    ),
+                    append_columns=(
+                        frozenset({"comment[modification parameters]"})
+                        if self.options.refine_sdrf_qc
+                        else frozenset()
+                    ),
                 )
                 document.write(output / "refined.sdrf.tsv")
-                with atomic_text(output / "sdrf-changes.tsv") as handle:
-                    writer = csv.DictWriter(
-                        handle,
-                        fieldnames=[
-                            "row",
-                            "data_file",
-                            "column",
-                            "previous",
-                            "proposed",
-                            "status",
-                            "evidence",
-                        ],
-                        delimiter="\t",
-                        lineterminator="\n",
-                    )
-                    writer.writeheader()
-                    writer.writerows(asdict(change) for change in changes)
+                self._write_sdrf_change_outputs(
+                    changes,
+                    output,
+                    cohort_synthesis.to_dict() if cohort_synthesis is not None else None,
+                )
                 try:
                     refined_validation = self.validator.validate(
                         output / "refined.sdrf.tsv"
@@ -503,6 +543,192 @@ class Workflow:
         )
         write_json(output / "manifest.json", manifest)
         return manifest
+
+    def refine_existing_sdrf(
+        self,
+        results_root: Path | str,
+        output_directory: Path | str,
+        *,
+        sdrf: Path,
+        aliases: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Refine one SDRF from previously generated per-file summary artifacts.
+
+        This is the accession-level companion to the Slurm one-file-per-task
+        workflow: all successful ``*.summary.json`` files are loaded first, then
+        experiment groups, shared tolerances and strict recurrent PTM families
+        are synthesized once across the whole cohort.
+        """
+        import json
+
+        root = Path(results_root).resolve()
+        output = Path(output_directory).resolve()
+        sdrf = Path(sdrf).resolve(strict=True)
+        if not root.is_dir():
+            raise ValueError(f"Results root is not a directory: {root}")
+        if output == root or root.is_relative_to(output):
+            raise ValueError(
+                "Refinement output cannot equal or contain the results root. "
+                "A subdirectory below the results root is allowed."
+            )
+        if output.exists() and not output.is_dir():
+            raise FileExistsError(f"Output path is not a directory: {output}")
+        if output.exists() and any(output.iterdir()):
+            if not self.options.overwrite:
+                raise FileExistsError(
+                    f"Output directory is not empty: {output}. Choose a new directory "
+                    "or pass --overwrite."
+                )
+            for child in output.iterdir():
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+
+        summary_paths = sorted(root.rglob("*.summary.json"))
+        if not summary_paths:
+            raise ValueError(f"No *.summary.json files found below {root}")
+        results: list[AnalysisResult] = []
+        for summary_path in summary_paths:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError(f"Invalid prideQC summary object: {summary_path}")
+            results.append(AnalysisResult.from_dict(payload))
+        names = [result.input_path.name.casefold() for result in results]
+        if len(set(names)) != len(names):
+            raise ValueError(
+                "Duplicate analyzed input basenames found below results root; "
+                "select one accession/run set."
+            )
+        accessions = sorted(
+            {result.project_accession for result in results if result.project_accession}
+        )
+        if len(accessions) > 1:
+            raise ValueError(
+                "Results root contains multiple ProteomeXchange accessions: "
+                + ", ".join(accessions)
+            )
+
+        input_validation = self.validator.validate(sdrf)
+        document = SDRFDocument.read(sdrf)
+        output.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(sdrf, output / "original.sdrf.tsv")
+
+        cohort_results, missing = document.resolve_results(results, aliases)
+        if missing:
+            raise ValueError(
+                "Cohort SDRF refinement requires complete analyzed coverage; missing: "
+                + ", ".join(missing)
+            )
+        synthesis = synthesize_cohort(cohort_results)
+        write_json(output / "cohort-refinement.json", synthesis.to_dict())
+        changes = document.annotate(
+            cohort_results,
+            aliases,
+            include_inferred=False,
+            overwrite=False,
+            include_inferred_fields=COHORT_SDRF_FIELDS,
+            overwrite_fields=COHORT_OVERWRITE_FIELDS,
+            append_columns=frozenset({"comment[modification parameters]"}),
+        )
+        document.write(output / "refined.sdrf.tsv")
+        self._write_sdrf_change_outputs(changes, output, synthesis.to_dict())
+        refined_validation = self.validator.validate(output / "refined.sdrf.tsv")
+        validation = {
+            "input": input_validation.to_dict(),
+            "refined": refined_validation.to_dict(),
+        }
+        write_json(output / "sdrf-validation.json", validation)
+        manifest = {
+            "prideqc_version": __version__,
+            "mode": "existing-results-sdrf-refinement",
+            "results_root": str(root),
+            "summary_files": [str(path) for path in summary_paths],
+            "summary_count": len(cohort_results),
+            "discovered_summary_count": len(summary_paths),
+            "project_accession": accessions[0] if accessions else None,
+            "original_sdrf": "original.sdrf.tsv",
+            "refined_sdrf": "refined.sdrf.tsv",
+            "cohort_refinement": "cohort-refinement.json",
+            "sdrf_changes": "sdrf-changes.tsv",
+            "sdrf_refinement_log": "sdrf-refinement.log.txt",
+            "experiment_groups": len(synthesis.groups),
+            "sdrf_eligible_ptm_families": len(synthesis.ptm_families),
+            "success": refined_validation.valid,
+        }
+        write_json(output / "manifest.json", manifest)
+        return manifest
+
+    def _write_sdrf_change_outputs(
+        self,
+        changes: list[SDRFChange],
+        output: Path,
+        cohort: dict[str, Any] | None,
+    ) -> None:
+        fields = [
+            "row",
+            "data_file",
+            "column",
+            "previous",
+            "proposed",
+            "status",
+            "evidence",
+            "annotation_field",
+            "experiment_group",
+            "method",
+            "detail",
+            "support",
+            "total",
+        ]
+        with atomic_text(output / "sdrf-changes.tsv") as handle:
+            writer = csv.DictWriter(
+                handle, fieldnames=fields, delimiter="\t", lineterminator="\n"
+            )
+            writer.writeheader()
+            writer.writerows(asdict(change) for change in changes)
+
+        applied = [
+            change
+            for change in changes
+            if change.status in {"filled", "replaced", "appended"}
+        ]
+        review = [
+            change
+            for change in changes
+            if change.status in {"conflict", "suggestion", "ambiguous_column", "unmatched"}
+        ]
+        with atomic_text(output / "sdrf-refinement.log.txt") as handle:
+            handle.write("prideQC SDRF refinement log\n")
+            handle.write("===========================\n")
+            handle.write(f"applied_changes={len(applied)}\n")
+            handle.write(f"review_items={len(review)}\n")
+            if cohort is not None:
+                groups = cohort.get("groups", {})
+                ptms = cohort.get("ptm_families", [])
+                handle.write(f"experiment_groups={len(groups)}\n")
+                handle.write(f"sdrf_eligible_ptm_families={len(ptms)}\n")
+                for label, summary in groups.items():
+                    handle.write(
+                        f"group={label} files={summary.get('files', 0)} "
+                        f"members={','.join(summary.get('members', []))}\n"
+                    )
+            handle.write("\n[applied]\n")
+            for change in applied:
+                handle.write(
+                    f"row={change.row} data_file={change.data_file} status={change.status} "
+                    f"column={change.column} previous={change.previous!r} "
+                    f"proposed={change.proposed!r} field={change.annotation_field} "
+                    f"group={change.experiment_group!r} support={change.support}/{change.total} "
+                    f"method={change.method}\n"
+                )
+            handle.write("\n[review_or_not_applied]\n")
+            for change in review:
+                handle.write(
+                    f"row={change.row} data_file={change.data_file} status={change.status} "
+                    f"column={change.column} previous={change.previous!r} "
+                    f"proposed={change.proposed!r} field={change.annotation_field} "
+                    f"group={change.experiment_group!r}\n"
+                )
 
     def _write_tables(self, results: list[AnalysisResult], output: Path) -> None:
         import json

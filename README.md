@@ -34,7 +34,8 @@ uv run prideqc analyze data/*.mzML \
 The destination must be new or empty. Each successful input receives its own
 `.mzQC`, `.obo` vocabulary and `.summary.json`, plus shared `metrics.tsv`,
 `annotations.tsv`, and `manifest.json`. Supplying an SDRF also produces
-`refined.sdrf.tsv`, `sdrf-changes.tsv` and `sdrf-validation.json`. Keep each mzQC with its companion OBO.
+`refined.sdrf.tsv`, `sdrf-changes.tsv`, `sdrf-refinement.log.txt` and
+`sdrf-validation.json`. Keep each mzQC with its companion OBO.
 Output filenames retain the entire input basename, e.g. `sample.mzML.mzQC`.
 Use `--overwrite` when intentionally rerunning into an existing results
 directory; it clears that directory's contents before analysis. Without this
@@ -171,7 +172,11 @@ Historical search tolerances remain **unavailable from RAW alone** unless they a
 provided by SDRF/search provenance; an isolation width or instrument category is not a
 search tolerance. The optional repeat-spectrum mass-error estimator reports separate
 measurement-precision evidence and does not claim to recover the historical search
-settings. No enzyme, sample label, fixed modification or enrichment is invented.
+settings. With the explicit `--refine-sdrf-qc` workflow, supported per-run precision
+estimates are instead synthesized within conservatively inferred experiment groups and
+written as **new reanalysis recommendations** in the standard SDRF tolerance columns.
+The original SDRF is retained separately and every replacement is logged. No enzyme,
+sample label, fixed modification or enrichment is invented.
 
 `--diagnostics` adds a centroid MS2/MS3 reporter/oxonium screen for TMT-family,
 iTRAQ-family and glycan signatures. This returns counts and thresholds,
@@ -193,10 +198,14 @@ also emits `suggested_precursor_search_tolerance_ppm`, an experimental six-sigma
 starting envelope derived from the robust precursor precision estimate. The suggestion
 requires at least 200 repeat differences and abstains on small fixed-target grids. It
 does not observe fixed calibration bias or isotope-error handling, is not a recovered
-historical setting, and is never treated as search-provenance ground truth. Historical
-SDRF `comment[precursor mass tolerance]` and `comment[fragment mass tolerance]` remain
-separate and are never filled or overwritten from RAW-derived estimates. After
-profile-fragment precision is established, the estimator can also emit one of
+historical setting, and is never treated as search-provenance ground truth. By default,
+historical SDRF `comment[precursor mass tolerance]` and
+`comment[fragment mass tolerance]` remain separate and are not changed from RAW-derived
+estimates. When `--refine-sdrf-qc` is requested, prideQC requires complete analyzed SDRF
+coverage, infers compatible experiment groups, and writes one conservative shared
+reanalysis tolerance per group; the group maximum is used so the setting covers every
+supported run, with at least 80% estimate coverage required. After profile-fragment
+precision is established, the estimator can also emit one of
 `suggested_fragment_search_tolerance_ppm` or
 `suggested_fragment_search_tolerance_da`. This experimental recommendation requires
 at least 1,000 matched fragment differences from at least 50 paired spectra and uses
@@ -220,6 +229,46 @@ creates the pair itself. The robust inlier fraction remains diagnostic and is no
 as a hard quality cutoff.
 This is a recommended starting envelope, not reconstructed search provenance.
 `--estimate-peak-type` can also be requested independently.
+
+### Cohort-level SDRF QC refinement
+
+For a normal multi-file invocation, add `--refine-sdrf-qc` together with the mass-error
+and mass-shift estimators:
+
+```bash
+uv run prideqc analyze data/*.mzML \
+  --sdrf study.sdrf.tsv \
+  --estimate-mass-error \
+  --estimate-mass-shifts \
+  --refine-sdrf-qc \
+  -o results/refined
+```
+
+This mode preserves `original.sdrf.tsv`, writes `cohort-refinement.json`, and records
+every SDRF proposal in `sdrf-changes.tsv` plus the human-readable
+`sdrf-refinement.log.txt`. Existing modification parameters are never replaced: a new
+confidence-gated PTM uses an empty repeated `comment[modification parameters]` slot or
+adds another repeated column. Automatic PTM writing is deliberately strict: a 0.02-Da
+recurrent family must occur in at least three runs and at least 90% of its experiment
+group, at least 80% of supporting runs must have high-support per-run evidence,
+`P(prevalence > 10%)` must be at least 0.99, and exactly one biological UniMod candidate
+may remain mass-compatible. Ambiguous chemistry remains in QC evidence and is not
+asserted in SDRF.
+
+The Codon file-array workflow analyzes one RAW per task, so cohort synthesis must run
+after the array instead of inside each task. Point the post-hoc command at the accession's
+persisted prideQC result subtree:
+
+```bash
+uv run prideqc refine-sdrf-qc \
+  --results-root results/<run>/<PXD> \
+  --sdrf study.sdrf.tsv \
+  -o results/<run>/<PXD>/sdrf-refinement
+```
+
+The command reconstructs the per-file evidence from `*.summary.json`, requires complete
+coverage of the SDRF data files, performs one accession-level cohort synthesis, writes
+the refined SDRF, and validates it before reporting success.
 
 Supplying `--sdrf` validates the input and refined output through
 `sdrf_pipelines.sdrf.sdrf.read_sdrf(...).validate_sdrf(...)`. The default template

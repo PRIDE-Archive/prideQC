@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from prideqc.io import atomic_text
-from prideqc.models import AnalysisResult, EvidenceKind
+from prideqc.models import AnalysisResult, Annotation, EvidenceKind
 
 MISSING = frozenset({"", "not available", "not provided"})
 
@@ -41,6 +41,12 @@ class SDRFChange:
     proposed: str
     status: str
     evidence: str
+    annotation_field: str = ""
+    experiment_group: str = ""
+    method: str = ""
+    detail: str = ""
+    support: int | None = None
+    total: int | None = None
 
 
 class SDRFDocument:
@@ -82,15 +88,10 @@ class SDRFDocument:
         """Return file cells in row order, preserving case and repeated samples."""
         return [row[self.file_column] for row in self.rows]
 
-    def annotate(self, results: Iterable[AnalysisResult], aliases: dict[str, str] | None = None,
-                 include_inferred: bool = False, overwrite: bool = False) -> list[SDRFChange]:
-        """Fill missing cells by default; report disagreements without replacing.
-
-        aliases maps an exact SDRF basename to the analyzed input's basename.
-        Source-file names recorded by mzML are also legitimate exact aliases.
-        Ambiguous mappings raise before any cell changes.
-        """
-        results = list(results)
+    @staticmethod
+    def _result_lookup(
+        results: Iterable[AnalysisResult], aliases: dict[str, str] | None = None
+    ) -> dict[str, AnalysisResult]:
         lookup: dict[str, AnalysisResult] = {}
         for result in results:
             names = [result.input_path.name, *result.metadata.source_files]
@@ -111,19 +112,62 @@ class SDRFDocument:
             if key in lookup and lookup[key] is not result:
                 raise ValueError(f"File-map alias conflicts with observed source: {key!r}")
             lookup[key] = result
-        changes = []
+        return lookup
+
+    def resolve_results(
+        self, results: Iterable[AnalysisResult], aliases: dict[str, str] | None = None
+    ) -> tuple[list[AnalysisResult], list[str]]:
+        """Return unique analyzed results referenced by the SDRF and missing file cells."""
+        lookup = self._result_lookup(results, aliases)
+        matched: list[AnalysisResult] = []
+        missing: list[str] = []
+        seen_results: set[int] = set()
+        seen_missing: set[str] = set()
+        for value in self.data_files():
+            key = file_name(value)
+            result = lookup.get(key)
+            if result is None:
+                if key not in seen_missing:
+                    missing.append(value)
+                    seen_missing.add(key)
+                continue
+            marker = id(result)
+            if marker not in seen_results:
+                matched.append(result)
+                seen_results.add(marker)
+        return matched, missing
+
+    def annotate(
+        self,
+        results: Iterable[AnalysisResult],
+        aliases: dict[str, str] | None = None,
+        include_inferred: bool = False,
+        overwrite: bool = False,
+        *,
+        include_inferred_fields: frozenset[str] = frozenset(),
+        overwrite_fields: frozenset[str] = frozenset(),
+        append_columns: frozenset[str] = frozenset(),
+    ) -> list[SDRFChange]:
+        """Apply evidence while preserving submitted values and repeated columns.
+
+        ``include_inferred_fields`` and ``overwrite_fields`` provide a narrow
+        opt-in path for confidence-gated cohort refinement without enabling or
+        overwriting unrelated inferred annotations.  Columns listed in
+        ``append_columns`` preserve existing assertions and use repeated SDRF
+        columns for additional values.
+        """
+        results = list(results)
+        lookup = self._result_lookup(results, aliases)
+        append_column_names = {value.casefold() for value in append_columns}
+
+        changes: list[SDRFChange] = []
         for row_number, row in enumerate(self.rows, start=2):
             name = row[self.file_column]
             matched_result = lookup.get(file_name(name))
             if matched_result is None:
                 changes.append(
                     SDRFChange(
-                        row_number,
-                        name,
-                        "",
-                        "",
-                        "",
-                        "unmatched",
+                        row_number, name, "", "", "", "unmatched",
                         "No analyzed file matched",
                     ),
                 )
@@ -132,32 +176,26 @@ class SDRFDocument:
                 column, proposed = annotation.sdrf_column, annotation.sdrf_value
                 if not column or not proposed:
                     continue
-                if annotation.kind == EvidenceKind.INFERRED and not include_inferred:
+                allowed_inferred = (
+                    include_inferred or annotation.field in include_inferred_fields
+                )
+                if annotation.kind == EvidenceKind.INFERRED and not allowed_inferred:
+                    changes.append(self._change(
+                        row_number, name, column, "", proposed, "suggestion", annotation
+                    ))
+                    continue
+                if column.casefold() in append_column_names:
                     changes.append(
-                        SDRFChange(
-                            row_number,
-                            name,
-                            column,
-                            "",
-                            proposed,
-                            "suggestion",
-                            annotation.kind.value,
-                        ),
+                        self._append_repeated_value(
+                            row_number, row, name, column, proposed, annotation
+                        )
                     )
                     continue
                 indices = self.indices(column)
                 if len(indices) > 1:
-                    changes.append(
-                        SDRFChange(
-                            row_number,
-                            name,
-                            column,
-                            "",
-                            proposed,
-                            "ambiguous_column",
-                            annotation.kind.value,
-                        ),
-                    )
+                    changes.append(self._change(
+                        row_number, name, column, "", proposed, "ambiguous_column", annotation
+                    ))
                     continue
                 if not indices:
                     self.columns.append(column)
@@ -166,26 +204,84 @@ class SDRFDocument:
                     indices = [len(self.columns) - 1]
                 index = indices[0]
                 previous = row[index]
+                effective_overwrite = overwrite or annotation.field in overwrite_fields
                 if _equal(previous, proposed):
                     status = "match"
                 elif previous.strip().casefold() in MISSING:
                     row[index], status = proposed, "filled"
-                elif overwrite:
+                elif effective_overwrite:
                     row[index], status = proposed, "replaced"
                 else:
                     status = "conflict"
-                changes.append(
-                    SDRFChange(
-                        row_number,
-                        name,
-                        column,
-                        previous,
-                        proposed,
-                        status,
-                        annotation.kind.value,
-                    ),
-                )
+                changes.append(self._change(
+                    row_number, name, column, previous, proposed, status, annotation
+                ))
         return changes
+
+    @staticmethod
+    def _change(
+        row_number: int,
+        data_file: str,
+        column: str,
+        previous: str,
+        proposed: str,
+        status: str,
+        annotation: Annotation,
+    ) -> SDRFChange:
+        field = str(getattr(annotation, "field", ""))
+        value = getattr(annotation, "value", None)
+        experiment_group = (
+            str(value.get("experiment_group") or "") if isinstance(value, dict) else ""
+        )
+        kind = getattr(annotation, "kind", "")
+        evidence = str(getattr(kind, "value", kind))
+        return SDRFChange(
+            row_number,
+            data_file,
+            column,
+            previous,
+            proposed,
+            status,
+            evidence,
+            field,
+            experiment_group,
+            str(getattr(annotation, "method", "")),
+            str(getattr(annotation, "detail", "")),
+            getattr(annotation, "support", None),
+            getattr(annotation, "total", None),
+        )
+
+    def _append_repeated_value(
+        self,
+        row_number: int,
+        row: list[str],
+        data_file: str,
+        column: str,
+        proposed: str,
+        annotation: Annotation,
+    ) -> SDRFChange:
+        indices = self.indices(column)
+        for index in indices:
+            if _equal(row[index], proposed):
+                return self._change(
+                    row_number, data_file, column, row[index], proposed, "match", annotation
+                )
+        for index in indices:
+            previous = row[index]
+            if previous.strip().casefold() in MISSING:
+                row[index] = proposed
+                return self._change(
+                    row_number, data_file, column, previous, proposed, "filled", annotation
+                )
+        self.columns.append(column)
+        for existing in self.rows:
+            existing.append("not available")
+        index = len(self.columns) - 1
+        previous = row[index]
+        row[index] = proposed
+        return self._change(
+            row_number, data_file, column, previous, proposed, "appended", annotation
+        )
 
     def write(self, path: Path) -> None:
         with atomic_text(path) as handle:

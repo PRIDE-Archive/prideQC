@@ -114,6 +114,14 @@ def parser() -> argparse.ArgumentParser:
         help="Replace conflicting SDRF values and record each change",
     )
     analyze.add_argument(
+        "--refine-sdrf-qc",
+        action="store_true",
+        help=(
+            "Write confidence-gated cohort tolerance/PTM evidence to standard SDRF columns; "
+            "preserve original modifications and record every proposal/change"
+        ),
+    )
+    analyze.add_argument(
         "--continue-on-error",
         action="store_true",
         help="Process remaining local inputs after analysis failure; exit code still nonzero",
@@ -150,6 +158,36 @@ def parser() -> argparse.ArgumentParser:
         help="Write validation results as JSON",
     )
     _validation_arguments(validate)
+    refine = commands.add_parser(
+        "refine-sdrf-qc",
+        help="Refine one SDRF from previously generated prideQC per-file summaries",
+    )
+    refine.add_argument(
+        "--results-root",
+        required=True,
+        type=Path,
+        help="Directory containing one accession/run set of *.summary.json artifacts",
+    )
+    refine.add_argument("--sdrf", required=True, type=Path)
+    refine.add_argument(
+        "-o",
+        "--output-dir",
+        required=True,
+        type=Path,
+        help="New or empty cohort-refinement output directory",
+    )
+    refine.add_argument(
+        "--file-map",
+        type=Path,
+        help="Optional JSON object: exact SDRF filename to analyzed filename",
+    )
+    refine.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Clear an existing output directory before writing refinement artifacts",
+    )
+    _validation_arguments(refine)
+
     fetch = commands.add_parser("fetch", help="Download an explicit PRIDE selection using pridepy")
     fetch.add_argument("accession")
     fetch.add_argument(
@@ -208,6 +246,7 @@ def _analyze(arguments: argparse.Namespace) -> int:
         converter_executable=arguments.converter_executable,
         conversion_timeout=arguments.conversion_timeout, continue_on_error=arguments.continue_on_error,
         include_inferred=arguments.include_inferred, overwrite_sdrf_values=arguments.overwrite_sdrf_values,
+        refine_sdrf_qc=arguments.refine_sdrf_qc,
         sdrf_template=arguments.sdrf_template, validate_ontology=arguments.validate_ontology,
         progress=arguments.progress, overwrite=arguments.overwrite,
     ))
@@ -246,6 +285,38 @@ def _analyze(arguments: argparse.Namespace) -> int:
     return 0 if manifest["success"] else 1
 
 
+def _refine_sdrf_qc(arguments: argparse.Namespace) -> int:
+    from prideqc.pipeline import Workflow, WorkflowOptions
+
+    aliases = None
+    if arguments.file_map:
+        aliases = json.loads(arguments.file_map.read_text(encoding="utf-8"))
+        if not isinstance(aliases, dict) or not all(
+            isinstance(key, str) and isinstance(value, str) for key, value in aliases.items()
+        ):
+            raise ValueError("--file-map must contain a JSON object of string-to-string mappings.")
+    workflow = Workflow(
+        WorkflowOptions(
+            refine_sdrf_qc=True,
+            overwrite=arguments.overwrite,
+            sdrf_template=arguments.sdrf_template,
+            validate_ontology=arguments.validate_ontology,
+        )
+    )
+    manifest = workflow.refine_existing_sdrf(
+        arguments.results_root,
+        arguments.output_dir,
+        sdrf=arguments.sdrf,
+        aliases=aliases,
+    )
+    print(
+        f"Refined {manifest['summary_count']} files into "
+        f"{manifest['experiment_groups']} experiment group(s). "
+        f"Results: {arguments.output_dir}"
+    )
+    return 0 if manifest["success"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = parser().parse_args(argv)
     try:
@@ -263,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
             for issue in report.issues:
                 print(issue, file=sys.stderr)
             return 0 if report.valid else 1
+        if arguments.command == "refine-sdrf-qc":
+            return _refine_sdrf_qc(arguments)
         if arguments.command == "fetch":
             from prideqc.pride import PrideRepository
             from prideqc.sdrf import SDRFDocument
