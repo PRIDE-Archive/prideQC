@@ -26,8 +26,15 @@ EXPERIMENT_GROUP_FIELD = "prideqc_experiment_group"
 COHORT_PRECURSOR_FIELD = "cohort_precursor_search_tolerance"
 COHORT_FRAGMENT_FIELD = "cohort_fragment_search_tolerance"
 COHORT_MODIFICATION_FIELD = "cohort_high_support_modification"
+COHORT_PUTATIVE_MODIFICATION_FIELD = "cohort_putative_modification"
+PUTATIVE_MODIFICATION_COLUMN = "comment[miscellaneous parameter]"
 COHORT_SDRF_FIELDS = frozenset(
-    {COHORT_PRECURSOR_FIELD, COHORT_FRAGMENT_FIELD, COHORT_MODIFICATION_FIELD}
+    {
+        COHORT_PRECURSOR_FIELD,
+        COHORT_FRAGMENT_FIELD,
+        COHORT_MODIFICATION_FIELD,
+        COHORT_PUTATIVE_MODIFICATION_FIELD,
+    }
 )
 COHORT_OVERWRITE_FIELDS = frozenset({COHORT_PRECURSOR_FIELD, COHORT_FRAGMENT_FIELD})
 
@@ -708,6 +715,40 @@ def synthesize_cohort(
                 result.annotations.append(precursor)
             if fragment is not None:
                 result.annotations.append(fragment)
+            for ptm in ptm_review:
+                putative_value = (
+                    "prideqc putative modification: "
+                    + CVTerm(
+                        str(ptm["unimod_accession"]), str(ptm["unimod_name"])
+                    ).sdrf_value()
+                    + f";DM={float(ptm['median_mass_da']):.6f} Da"
+                    + f";EG={label}"
+                    + f";RUNS={int(ptm['family_runs'])}/{int(ptm['group_runs'])}"
+                    + f";PREV={float(ptm['run_prevalence']):.6f}"
+                    + f";P_PREV_GT_0.1={float(ptm['raw_prevalence_probability']):.12g}"
+                    + f";HIGH_SUPPORT={float(ptm['high_support_run_fraction']):.6f}"
+                    + f";CANDIDATE_SUPPORT={float(ptm['candidate_run_fraction']):.6f}"
+                    + f";SEMANTIC={ptm['semantic_evidence_status']}"
+                    + f";STATUS={ptm['sdrf_status']}"
+                )
+                result.annotations.append(
+                    Annotation(
+                        COHORT_PUTATIVE_MODIFICATION_FIELD,
+                        ptm,
+                        EvidenceKind.INFERRED,
+                        "prideQC recurrent putative PTM mass-family synthesis v1",
+                        (
+                            "Identification-free recurrent mass-shift candidate retained in "
+                            "the refined SDRF through the documented miscellaneous-parameter "
+                            "extension point. This does not assert peptide/site localization or "
+                            "original search parameters."
+                        ),
+                        support=int(ptm["family_runs"]),
+                        total=int(ptm["group_runs"]),
+                        sdrf_column=PUTATIVE_MODIFICATION_COLUMN,
+                        sdrf_value=putative_value,
+                    )
+                )
             for ptm in ptms:
                 result.annotations.append(
                     Annotation(
@@ -716,10 +757,11 @@ def synthesize_cohort(
                         EvidenceKind.INFERRED,
                         "prideQC recurrent PTM mass-family synthesis v2",
                         (
-                            "Automatic SDRF PTM write-back requires both strict recurrent RAW "
-                            "mass-family support and independent semantic/study evidence that "
-                            "supports the exact UniMod accession. RAW recurrence alone remains "
-                            "review-only and does not establish peptide or site localization."
+                            "Automatic standard SDRF PTM write-back requires both strict recurrent "
+                            "RAW mass-family support and independent semantic/study evidence that "
+                            "supports the exact UniMod accession. The paired prideQC putative "
+                            "columns retain RAW-derived candidates whether or not this promotion "
+                            "gate passes."
                         ),
                         support=int(ptm["family_runs"]),
                         total=int(ptm["group_runs"]),

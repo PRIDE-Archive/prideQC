@@ -19,6 +19,7 @@ from prideqc.annotations import DiagnosticIonCollector, TechnicalAnnotator
 from prideqc.cohort import (
     COHORT_OVERWRITE_FIELDS,
     COHORT_SDRF_FIELDS,
+    PUTATIVE_MODIFICATION_COLUMN,
     SemanticEvidence,
     read_semantic_evidence,
     synthesize_cohort,
@@ -560,7 +561,12 @@ class Workflow:
                         else frozenset()
                     ),
                     append_columns=(
-                        frozenset({"comment[modification parameters]"})
+                        frozenset(
+                            {
+                                "comment[modification parameters]",
+                                PUTATIVE_MODIFICATION_COLUMN,
+                            }
+                        )
                         if self.options.refine_sdrf_qc
                         else frozenset()
                     ),
@@ -688,7 +694,12 @@ class Workflow:
             overwrite=False,
             include_inferred_fields=COHORT_SDRF_FIELDS,
             overwrite_fields=COHORT_OVERWRITE_FIELDS,
-            append_columns=frozenset({"comment[modification parameters]"}),
+            append_columns=frozenset(
+                {
+                    "comment[modification parameters]",
+                    PUTATIVE_MODIFICATION_COLUMN,
+                }
+            ),
         )
         document.write(output / "refined.sdrf.tsv")
         self._write_sdrf_change_outputs(changes, output, synthesis.to_dict())
@@ -715,6 +726,7 @@ class Workflow:
             "experiment_groups": len(synthesis.groups),
             "sdrf_eligible_ptm_families": len(synthesis.ptm_families),
             "ptm_review_families": len(synthesis.ptm_review_families),
+            "putative_ptm_families_written": len(synthesis.ptm_review_families),
             "success": refined_validation.valid,
         }
         write_json(output / "manifest.json", manifest)

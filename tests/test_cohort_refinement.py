@@ -12,6 +12,8 @@ from prideqc.cohort import (
     COHORT_FRAGMENT_FIELD,
     COHORT_MODIFICATION_FIELD,
     COHORT_PRECURSOR_FIELD,
+    COHORT_PUTATIVE_MODIFICATION_FIELD,
+    PUTATIVE_MODIFICATION_COLUMN,
     SemanticEvidence,
     read_semantic_evidence,
     synthesize_cohort,
@@ -160,6 +162,15 @@ class CohortRefinementTests(unittest.TestCase):
             self.assertEqual(
                 modification.sdrf_value, "NT=Phosphorylation;AC=UniMod:21"
             )
+            putative = next(
+                item
+                for item in result.annotations
+                if item.field == COHORT_PUTATIVE_MODIFICATION_FIELD
+            )
+            self.assertIn(
+                "prideqc putative modification: NT=Phosphorylation;AC=UniMod:21",
+                putative.sdrf_value or "",
+            )
 
     def test_mass_only_recurrent_ptm_family_is_review_only(self) -> None:
         results = [
@@ -181,6 +192,20 @@ class CohortRefinementTests(unittest.TestCase):
                 for item in result.annotations
             )
         )
+        for result in results:
+            putative = [
+                item
+                for item in result.annotations
+                if item.field == COHORT_PUTATIVE_MODIFICATION_FIELD
+            ]
+            self.assertEqual(len(putative), 1)
+            self.assertEqual(putative[0].sdrf_column, PUTATIVE_MODIFICATION_COLUMN)
+            self.assertIn(
+                "prideqc putative modification: NT=Methylation;AC=UniMod:34",
+                putative[0].sdrf_value or "",
+            )
+            self.assertIn("DM=14.015", putative[0].sdrf_value or "")
+            self.assertIn("STATUS=hold-semantic-not-supported", putative[0].sdrf_value or "")
 
     def test_mass_ambiguous_recurrent_family_is_not_written_as_modification(self) -> None:
         results = [
@@ -352,7 +377,10 @@ class CohortRefinementTests(unittest.TestCase):
             refined = SDRFDocument.read(output / "refined.sdrf.tsv")
             self.assertEqual(refined.rows[0][1], "10 ppm")
             self.assertIn("NT=Oxidation;AC=UniMod:35", refined.rows[0])
-            self.assertNotIn("NT=Phosphorylation;AC=UniMod:21", refined.rows[0])
+            self.assertNotIn("NT=Phosphorylation;AC=UniMod:21", [
+                refined.rows[0][index]
+                for index in refined.indices("comment[modification parameters]")
+            ])
             changes = (output / "sdrf-changes.tsv").read_text(encoding="utf-8")
             self.assertIn("annotation_field", changes)
             self.assertIn("cohort_precursor_search_tolerance", changes)
@@ -405,8 +433,25 @@ class CohortRefinementTests(unittest.TestCase):
             self.assertEqual(manifest["ptm_review_families"], 1)
             refined = SDRFDocument.read(output / "refined.sdrf.tsv")
             self.assertEqual(refined.columns[-1], "factor value[condition]")
+            putative_indices = refined.indices(PUTATIVE_MODIFICATION_COLUMN)
+            self.assertEqual(len(putative_indices), 1)
+            self.assertTrue(
+                all(
+                    "prideqc putative modification: NT=Methylation;AC=UniMod:34"
+                    in row[putative_indices[0]]
+                    for row in refined.rows
+                )
+            )
+            standard_modification_indices = refined.indices("comment[modification parameters]")
             self.assertFalse(
-                any("UniMod:34" in cell for row in refined.rows for cell in row)
+                any(
+                    "UniMod:34" in row[index]
+                    for row in refined.rows
+                    for index in standard_modification_indices
+                )
+            )
+            self.assertIn(
+                "STATUS=hold-semantic-not-supported", refined.rows[0][putative_indices[0]]
             )
             log = (output / "sdrf-refinement.log.txt").read_text(encoding="utf-8")
             self.assertIn("unimod=UniMod:34", log)
