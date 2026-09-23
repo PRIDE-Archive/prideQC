@@ -66,6 +66,56 @@ class LocalLLMTests(unittest.TestCase):
             self.assertFalse(destination.exists())
             self.assertFalse(destination.with_name("artifact.bin.part").exists())
 
+
+    def test_stream_download_follows_http_partial_content_ranges(self) -> None:
+        payload = b"abcdefghijklmnopqrstuvwxyz"
+
+        class FakeHeaders(dict[str, str]):
+            pass
+
+        class FakeResponse(io.BytesIO):
+            def __init__(self, data: bytes, *, content_range: str) -> None:
+                super().__init__(data)
+                self.status = 206
+                self.headers = FakeHeaders({"Content-Range": content_range})
+
+            def __enter__(self) -> FakeResponse:
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                self.close()
+
+        requests: list[str | None] = []
+
+        def urlopen(request: object, timeout: int) -> FakeResponse:
+            self.assertEqual(timeout, 120)
+            range_header = request.get_header("Range")  # type: ignore[attr-defined]
+            requests.append(range_header)
+            if range_header is None:
+                return FakeResponse(
+                    payload[:10],
+                    content_range=f"bytes 0-9/{len(payload)}",
+                )
+            if range_header == "bytes=10-":
+                return FakeResponse(
+                    payload[10:20],
+                    content_range=f"bytes 10-19/{len(payload)}",
+                )
+            if range_header == "bytes=20-":
+                return FakeResponse(
+                    payload[20:],
+                    content_range=f"bytes 20-25/{len(payload)}",
+                )
+            raise AssertionError(range_header)
+
+        output = io.BytesIO()
+        with patch("prideqc.local_llm.urllib.request.urlopen", side_effect=urlopen):
+            size = local_llm._stream_download("https://example.invalid/model", output)
+
+        self.assertEqual(size, len(payload))
+        self.assertEqual(output.getvalue(), payload)
+        self.assertEqual(requests, [None, "bytes=10-", "bytes=20-"])
+
     def test_tar_extraction_rejects_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

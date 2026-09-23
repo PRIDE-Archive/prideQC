@@ -174,14 +174,76 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _parse_content_range(value: str | None) -> tuple[int, int, int] | None:
+    if not value:
+        return None
+    units, _, remainder = value.partition(" ")
+    if units.casefold() != "bytes":
+        return None
+    byte_range, _, total_text = remainder.partition("/")
+    start_text, separator, end_text = byte_range.partition("-")
+    if separator != "-" or not start_text or not end_text or not total_text:
+        return None
+    if total_text == "*":
+        return None
+    try:
+        start = int(start_text)
+        end = int(end_text)
+        total = int(total_text)
+    except ValueError:
+        return None
+    if start < 0 or end < start or total <= end:
+        return None
+    return start, end, total
+
+
 def _stream_download(url: str, output: BinaryIO) -> int:
-    request = urllib.request.Request(url, headers={"User-Agent": "prideQC-local-llm"})
+    """Stream one object, following bounded HTTP partial-content responses.
+
+    Hugging Face's Xet-backed resolve endpoint can return a large GGUF as a sequence
+    of HTTP 206 responses. urllib follows the redirect but does not automatically
+    fetch the remaining byte ranges, so explicitly continue from Content-Range.
+    """
     count = 0
-    with urllib.request.urlopen(request, timeout=120) as response:
-        while chunk := response.read(1024 * 1024):
-            output.write(chunk)
-            count += len(chunk)
-    return count
+    remote_size: int | None = None
+    while True:
+        headers = {
+            "User-Agent": "prideQC-local-llm",
+            "Accept-Encoding": "identity",
+        }
+        if count:
+            headers["Range"] = f"bytes={count}-"
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=120) as response:
+            status = getattr(response, "status", None)
+            content_range = _parse_content_range(response.headers.get("Content-Range"))
+            if content_range is not None:
+                start, _end, total = content_range
+                if start != count:
+                    raise RuntimeError(
+                        "Unexpected HTTP Content-Range while downloading local LLM asset: "
+                        f"expected byte {count}, received {start}"
+                    )
+                if remote_size is not None and total != remote_size:
+                    raise RuntimeError(
+                        "Remote size changed while downloading local LLM asset: "
+                        f"{remote_size} != {total}"
+                    )
+                remote_size = total
+            elif count and status == 200:
+                raise RuntimeError(
+                    "Server ignored HTTP Range while resuming local LLM asset download"
+                )
+
+            before = count
+            while chunk := response.read(1024 * 1024):
+                output.write(chunk)
+                count += len(chunk)
+
+        if count == before:
+            raise RuntimeError("Local LLM asset download made no progress")
+        if remote_size is None or count >= remote_size:
+            return count
 
 
 def _download_verified(
