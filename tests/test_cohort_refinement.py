@@ -390,11 +390,20 @@ class CohortRefinementTests(unittest.TestCase):
             self.assertIn("sdrf_eligible_ptm_families=0", log)
             self.assertTrue((output / "cohort-refinement.json").exists())
             self.assertTrue((output / "llm-refinement-packet.json").exists())
+            self.assertTrue((output / "llm-adjudication-request.json").exists())
             packet = json.loads(
                 (output / "llm-refinement-packet.json").read_text(encoding="utf-8")
             )
             self.assertEqual(packet["packet_scope"], "accession-sdrf")
             self.assertEqual(len(packet["runs"]), 1)
+            request = json.loads(
+                (output / "llm-adjudication-request.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(request["request_scope"], "accession-sdrf")
+            self.assertEqual(
+                manifest["cohort_refinement"]["llm_adjudication_request"],
+                "llm-adjudication-request.json",
+            )
 
     def test_existing_results_recovers_accession_and_holds_mass_only_ptm(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -438,6 +447,10 @@ class CohortRefinementTests(unittest.TestCase):
             self.assertEqual(manifest["sdrf_eligible_ptm_families"], 0)
             self.assertEqual(manifest["ptm_review_families"], 1)
             self.assertEqual(manifest["llm_refinement_packet"], "llm-refinement-packet.json")
+            self.assertEqual(
+                manifest["llm_adjudication_request"], "llm-adjudication-request.json"
+            )
+            self.assertTrue((output / "llm-adjudication-request.json").exists())
             packet = json.loads(
                 (output / "llm-refinement-packet.json").read_text(encoding="utf-8")
             )

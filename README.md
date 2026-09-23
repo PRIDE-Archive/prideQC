@@ -251,8 +251,11 @@ every SDRF proposal in `sdrf-changes.tsv` plus the human-readable
 evidence, inferred experiment groups, original SDRF values, and PTM evidence for later
 LLM/human adjudication. Broad recurrent mass-compatible PTM families are retained only
 as non-actionable `ptm_context`; only the stricter cohort PTM review families become
-`decision_candidates`. The packet is deterministic, contains all SDRF-mapped runs, and
-does not itself call an LLM or mutate the SDRF. Existing
+`decision_candidates`. A second deterministic artifact, `llm-adjudication-request.json`,
+reduces that packet to actionable decisions plus only decision-local context. The request
+is provider-independent, fingerprints the exact source packet, and constrains later model
+responses to `accept`, `reject`, or `abstain`; an accepted value must exactly match a
+candidate supplied by prideQC. Neither artifact calls an LLM or mutates the SDRF. Existing
 modification parameters are never replaced: a new
 confidence-gated PTM uses an empty repeated `comment[modification parameters]` slot or
 adds another repeated column. Automatic PTM writing is deliberately strict: a 0.02-Da

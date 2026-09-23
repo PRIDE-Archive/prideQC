@@ -31,6 +31,10 @@ from prideqc.mass_shift import MassShiftCollector
 from prideqc.metrics import QCMetricCalculator, RunSummary
 from prideqc.models import AnalysisResult, EvidenceCollector, FloatArray, Spectrum, SpectrumReader
 from prideqc.mzqc import MzQCWriter
+from prideqc.refinement_adjudication import (
+    build_llm_adjudication_request,
+    validate_llm_adjudication_request,
+)
 from prideqc.refinement_packet import (
     build_llm_refinement_packet,
     validate_llm_refinement_packet,
@@ -558,10 +562,14 @@ class Workflow:
                 )
                 validate_llm_refinement_packet(packet)
                 write_json(output / "llm-refinement-packet.json", packet)
+                adjudication_request = build_llm_adjudication_request(packet)
+                validate_llm_adjudication_request(adjudication_request)
+                write_json(output / "llm-adjudication-request.json", adjudication_request)
                 manifest["cohort_refinement"] = {
                     "enabled": True,
                     "artifact": "cohort-refinement.json",
                     "llm_refinement_packet": "llm-refinement-packet.json",
+                    "llm_adjudication_request": "llm-adjudication-request.json",
                     "original_sdrf": "original.sdrf.tsv",
                     "experiment_groups": len(cohort_synthesis.groups),
                     "sdrf_eligible_ptm_families": len(cohort_synthesis.ptm_families),
@@ -743,6 +751,9 @@ class Workflow:
         )
         validate_llm_refinement_packet(packet)
         write_json(output / "llm-refinement-packet.json", packet)
+        adjudication_request = build_llm_adjudication_request(packet)
+        validate_llm_adjudication_request(adjudication_request)
+        write_json(output / "llm-adjudication-request.json", adjudication_request)
         changes = document.annotate(
             cohort_results,
             aliases,
@@ -778,6 +789,7 @@ class Workflow:
             "refined_sdrf": "refined.sdrf.tsv",
             "cohort_refinement": "cohort-refinement.json",
             "llm_refinement_packet": "llm-refinement-packet.json",
+            "llm_adjudication_request": "llm-adjudication-request.json",
             "sdrf_changes": "sdrf-changes.tsv",
             "sdrf_refinement_log": "sdrf-refinement.log.txt",
             "experiment_groups": len(synthesis.groups),

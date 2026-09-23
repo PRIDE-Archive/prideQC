@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prideqc.org/schema/llm-refinement-decision-v1.schema.json",
+  "title": "prideQC LLM SDRF refinement decisions v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "request_id",
+    "project_accession",
+    "decisions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "prideqc-llm-refinement-decision-v1"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "project_accession": {
+      "type": ["string", "null"]
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "decision_id",
+          "decision",
+          "selected_value",
+          "reason"
+        ],
+        "properties": {
+          "decision_id": {"type": "string", "minLength": 1},
+          "decision": {
+            "enum": ["accept", "reject", "abstain"]
+          },
+          "selected_value": {
+            "type": ["string", "null"]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
