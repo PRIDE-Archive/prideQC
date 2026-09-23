@@ -255,8 +255,10 @@ as non-actionable `ptm_context`; only the stricter cohort PTM review families be
 reduces that packet to actionable decisions plus only decision-local context. The request
 is provider-independent, fingerprints the exact source packet, and constrains later model
 responses to `accept`, `reject`, or `abstain`; an accepted value must exactly match a
-candidate supplied by prideQC. Neither artifact calls an LLM or mutates the SDRF. Existing
-modification parameters are never replaced: a new
+candidate supplied by prideQC. Cohort refinement itself does not call an LLM or apply LLM
+decisions to the SDRF. Local adjudication is an explicit subsequent `prideqc llm adjudicate`
+step, and validated decisions are still not applied automatically. Existing modification
+parameters are never replaced: a new
 confidence-gated PTM uses an empty repeated `comment[modification parameters]` slot or
 adds another repeated column. Automatic PTM writing is deliberately strict: a 0.02-Da
 recurrent family must occur in at least three runs and at least 90% of its experiment
@@ -279,6 +281,48 @@ same families remain fully represented in `cohort-refinement.json` and
 `evidence_source` and `evidence_note` columns. Ambiguous chemistry remains in QC evidence
 and is not asserted in SDRF. Newly created non-factor SDRF columns are inserted before
 existing `factor value[...]` columns so factor columns remain last.
+
+### Free local LLM adjudication
+
+prideQC provides an optional no-account local adjudication path. It does not bundle model
+weights inside the Python package and does not compile llama.cpp. Instead, `prideqc llm
+setup` downloads a pinned prebuilt CPU runtime into the user's cache, verifies the release
+archive SHA-256, downloads the pinned Qwen3-4B Q4_K_M GGUF, verifies its SHA-256, and
+records the installed runtime/model provenance. The default cache can be overridden with
+`PRIDEQC_LLM_CACHE` or `--cache-dir`.
+
+```bash
+uv run prideqc llm setup
+uv run prideqc llm status
+```
+
+The reference local model is `Qwen/Qwen3-4B-GGUF`, Q4_K_M, pinned to an immutable model
+revision. The managed runtime supports Linux x86_64/arm64, Apple Silicon macOS, and
+Windows x86_64 CPU packages. No clang, CMake, CUDA toolkit, PyTorch, API account, or API
+key is required for the managed CPU path.
+
+Adjudication remains a separate explicit stage:
+
+```bash
+uv run prideqc llm adjudicate \
+  --request results/refined/llm-adjudication-request.json
+```
+
+The command starts `llama-server` only on `127.0.0.1`, disables Qwen thinking mode for
+the initial reference policy, requests schema-constrained JSON, stops the server after the
+request, and writes `llm-refinement-decisions.json` plus `llm-model-run.json`. The latter
+keeps runtime/model/prompt provenance and the raw transport response for audit. Every
+model decision is revalidated by prideQC: all requested decision IDs must be covered once,
+`accept` must use an exact supplied candidate, and `reject`/`abstain` cannot provide a new
+value. Invalid output is rejected rather than repaired silently.
+
+`--server-path` and `--model-path` permit an advanced user to test a custom local
+llama.cpp runtime or GGUF without changing the scientific packet/adjudication contract.
+The adapter interface is intentionally provider-independent so an OpenAI-compatible remote
+backend can be added later without changing cohort science or SDRF application policy.
+
+The validated LLM decision artifact is audit output only at this stage. Applying accepted
+decisions to canonical SDRF columns remains a separate future deterministic step.
 
 The Codon file-array workflow analyzes one RAW per task, so cohort synthesis must run
 after the array instead of inside each task. Point the post-hoc command at the accession's

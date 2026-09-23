@@ -212,6 +212,49 @@ def parser() -> argparse.ArgumentParser:
     )
     _validation_arguments(refine)
 
+    llm = commands.add_parser(
+        "llm",
+        help="Manage and run the optional local LLM used for SDRF adjudication",
+    )
+    llm_commands = llm.add_subparsers(dest="llm_command", required=True)
+    llm_setup = llm_commands.add_parser(
+        "setup",
+        help="Download and verify the pinned llama.cpp runtime and default GGUF model",
+    )
+    llm_setup.add_argument("--cache-dir", type=Path)
+    llm_setup.add_argument(
+        "--force",
+        action="store_true",
+        help="Redownload and replace the managed runtime and model",
+    )
+    llm_status = llm_commands.add_parser(
+        "status",
+        help="Show whether the managed local runtime and model are installed",
+    )
+    llm_status.add_argument("--cache-dir", type=Path)
+    llm_adjudicate = llm_commands.add_parser(
+        "adjudicate",
+        help="Adjudicate a prideQC request with the managed local llama.cpp model",
+    )
+    llm_adjudicate.add_argument("--request", required=True, type=Path)
+    llm_adjudicate.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        help="Validated decision JSON (default: beside request as llm-refinement-decisions.json)",
+    )
+    llm_adjudicate.add_argument(
+        "--audit-output",
+        type=Path,
+        help="Raw model/audit JSON (default: beside request as llm-model-run.json)",
+    )
+    llm_adjudicate.add_argument("--cache-dir", type=Path)
+    llm_adjudicate.add_argument("--server-path", type=Path)
+    llm_adjudicate.add_argument("--model-path", type=Path)
+    llm_adjudicate.add_argument("--startup-timeout", type=float, default=180.0)
+    llm_adjudicate.add_argument("--request-timeout", type=float, default=300.0)
+    llm_adjudicate.add_argument("--context-size", type=int, default=8192)
+
     fetch = commands.add_parser("fetch", help="Download an explicit PRIDE selection using pridepy")
     fetch.add_argument("accession")
     fetch.add_argument(
@@ -349,6 +392,51 @@ def _refine_sdrf_qc(arguments: argparse.Namespace) -> int:
     return 0 if manifest["success"] else 1
 
 
+def _llm(arguments: argparse.Namespace) -> int:
+    if arguments.llm_command == "setup":
+        from prideqc.local_llm import setup_local_llm
+
+        status = setup_local_llm(arguments.cache_dir, force=arguments.force)
+        print(json.dumps(status, indent=2, sort_keys=True))
+        return 0
+    if arguments.llm_command == "status":
+        from prideqc.local_llm import local_llm_status
+
+        status = local_llm_status(arguments.cache_dir)
+        print(json.dumps(status, indent=2, sort_keys=True))
+        return 0 if status["runtime"]["ready"] and status["model"]["ready"] else 1
+    if arguments.llm_command == "adjudicate":
+        from prideqc.io import write_json
+        from prideqc.refinement_adjudication import validate_llm_adjudication_request
+        from prideqc.refinement_model import LocalLlamaCppAdapter
+
+        request = json.loads(arguments.request.read_text(encoding="utf-8"))
+        if not isinstance(request, dict):
+            raise ValueError("--request must contain one JSON object")
+        validate_llm_adjudication_request(request)
+        if arguments.context_size < 2048:
+            raise ValueError("--context-size must be at least 2048")
+        if arguments.startup_timeout <= 0 or arguments.request_timeout <= 0:
+            raise ValueError("LLM timeouts must be positive")
+        output = arguments.output or arguments.request.with_name("llm-refinement-decisions.json")
+        audit_output = arguments.audit_output or arguments.request.with_name("llm-model-run.json")
+        adapter = LocalLlamaCppAdapter(
+            cache_dir=arguments.cache_dir,
+            server_path=arguments.server_path,
+            model_path=arguments.model_path,
+            startup_timeout=arguments.startup_timeout,
+            request_timeout=arguments.request_timeout,
+            context_size=arguments.context_size,
+        )
+        result = adapter.adjudicate(request)
+        write_json(output, result.decisions)
+        write_json(audit_output, result.audit)
+        print(f"Validated LLM decisions: {output}")
+        print(f"LLM audit: {audit_output}")
+        return 0
+    raise ValueError(f"Unknown llm command: {arguments.llm_command}")
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = parser().parse_args(argv)
     try:
@@ -368,6 +456,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if report.valid else 1
         if arguments.command == "refine-sdrf-qc":
             return _refine_sdrf_qc(arguments)
+        if arguments.command == "llm":
+            return _llm(arguments)
         if arguments.command == "fetch":
             from prideqc.pride import PrideRepository
             from prideqc.sdrf import SDRFDocument
