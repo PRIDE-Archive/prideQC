@@ -9,10 +9,12 @@ annotation.
 
 from __future__ import annotations
 
+import csv
 import math
 from collections import defaultdict
 from dataclasses import dataclass
 from math import ceil, comb, log10
+from pathlib import Path
 from statistics import median
 from typing import Any
 
@@ -49,11 +51,19 @@ _FEATURE_NAMES = {
 
 
 @dataclass(frozen=True, slots=True)
+class SemanticEvidence:
+    status: str
+    sources: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class CohortSynthesis:
     assignments: dict[str, str]
     groups: dict[str, dict[str, Any]]
     evidence: list[str]
     ptm_families: list[dict[str, Any]]
+    ptm_review_families: list[dict[str, Any]]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -61,7 +71,68 @@ class CohortSynthesis:
             "groups": self.groups,
             "evidence": self.evidence,
             "ptm_families": self.ptm_families,
+            "ptm_review_families": self.ptm_review_families,
         }
+
+
+def read_semantic_evidence(path: Path) -> dict[tuple[str, str], SemanticEvidence]:
+    """Read independent accession/UniMod evidence using the v4 benchmark schema."""
+    allowed = {"supported", "conflicting", "not-found"}
+    grouped: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        required = {"pxd_accession", "unimod_accession", "evidence_status"}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(
+                "PTM study evidence TSV is missing required columns: "
+                + ", ".join(sorted(missing))
+            )
+        for row in reader:
+            accession = (row.get("pxd_accession") or "").strip().upper()
+            unimod = (row.get("unimod_accession") or "").strip().upper()
+            status = (row.get("evidence_status") or "").strip().casefold()
+            if not accession or not unimod:
+                raise ValueError(
+                    "PTM study evidence rows require pxd_accession and unimod_accession"
+                )
+            if status not in allowed:
+                raise ValueError(
+                    "PTM study evidence status must be supported, conflicting, or not-found"
+                )
+            grouped[(accession, unimod)].append(row)
+
+    output: dict[tuple[str, str], SemanticEvidence] = {}
+    for key, rows in grouped.items():
+        statuses = {(row.get("evidence_status") or "").strip().casefold() for row in rows}
+        if "supported" in statuses and "conflicting" in statuses:
+            status = "mixed"
+        elif "conflicting" in statuses:
+            status = "conflicting"
+        elif "supported" in statuses:
+            status = "supported"
+        else:
+            status = "not-found"
+        sources = tuple(
+            sorted(
+                {
+                    (row.get("evidence_source") or "").strip()
+                    for row in rows
+                    if (row.get("evidence_source") or "").strip()
+                }
+            )
+        )
+        notes = tuple(
+            sorted(
+                {
+                    (row.get("evidence_note") or "").strip()
+                    for row in rows
+                    if (row.get("evidence_note") or "").strip()
+                }
+            )
+        )
+        output[key] = SemanticEvidence(status=status, sources=sources, notes=notes)
+    return output
 
 
 def _annotation(result: AnalysisResult, field: str) -> Annotation | None:
@@ -263,6 +334,48 @@ def _supported_categorical_split(
     return [buckets[value] for value in sorted(buckets)]
 
 
+def _supported_duration_split(
+    group: list[str], features: dict[str, dict[str, Any]], min_group: int
+) -> tuple[list[list[str]], str] | None:
+    """Split clearly separated chromatography-duration regimes conservatively."""
+    values: list[tuple[float, str]] = []
+    for name in group:
+        value = _positive_number(features[name].get("rt"))
+        if value is None:
+            return None
+        values.append((value, name))
+    if len(values) < 2 * min_group:
+        return None
+    values.sort()
+    best: tuple[float, list[list[str]], float, float] | None = None
+    for cut in range(min_group, len(values) - min_group + 1):
+        left = values[:cut]
+        right = values[cut:]
+        left_values = [item[0] for item in left]
+        right_values = [item[0] for item in right]
+        median_ratio = median(right_values) / median(left_values)
+        boundary_ratio = right_values[0] / left_values[-1]
+        if median_ratio < _SEPARATION_THRESHOLDS["rt"] or boundary_ratio < 1.10:
+            continue
+        matrix = np.asarray([[log10(value)] for value, _ in values], dtype=float)
+        labels = np.asarray([0] * len(left) + [1] * len(right), dtype=int)
+        score = _silhouette(matrix, labels)
+        if score < 0.60:
+            continue
+        buckets = [[name for _, name in left], [name for _, name in right]]
+        if best is None or score > best[0]:
+            best = (score, buckets, median_ratio, boundary_ratio)
+    if best is None:
+        return None
+    score, buckets, median_ratio, boundary_ratio = best
+    return (
+        buckets,
+        "univariate chromatography duration split, "
+        f"silhouette={score:.2f}; median ratio={median_ratio:.2f}x; "
+        f"boundary gap={boundary_ratio:.2f}x",
+    )
+
+
 def _experiment_groups(
     results: list[AnalysisResult], max_groups: int = 4
 ) -> tuple[dict[str, str], list[str], dict[str, dict[str, Any]]]:
@@ -292,7 +405,9 @@ def _experiment_groups(
             if len(updated) + remaining + 2 > max_groups:
                 updated.append(group)
                 continue
-            numeric_split = _supported_numeric_split(group, features, min_group)
+            numeric_split = _supported_duration_split(group, features, min_group)
+            if numeric_split is None:
+                numeric_split = _supported_numeric_split(group, features, min_group)
             if numeric_split is None:
                 updated.append(group)
                 continue
@@ -331,7 +446,7 @@ def _group_tolerance_annotation(
         )
         sdrf_column = "comment[fragment mass tolerance]"
     estimates: list[tuple[float, str]] = []
-    source_support = 0
+    source_measurement_support = 0
     for result in results:
         for source_field in source_fields:
             payload = _payload(result, source_field)
@@ -342,7 +457,7 @@ def _group_tolerance_annotation(
             if value is not None and unit in {"ppm", "Da"}:
                 estimates.append((value, unit))
                 annotation = _annotation(result, source_field)
-                source_support += int(annotation.support or 0) if annotation else 0
+                source_measurement_support += int(annotation.support or 0) if annotation else 0
                 break
     required = max(1, ceil(len(results) * 0.80))
     if len(estimates) < required:
@@ -363,6 +478,7 @@ def _group_tolerance_annotation(
             "common_max": common,
             "files_with_estimate": len(estimates),
             "group_files": len(results),
+            "source_measurement_support": source_measurement_support,
         },
         EvidenceKind.INFERRED,
         "prideQC cohort reanalysis tolerance synthesis v1",
@@ -372,7 +488,7 @@ def _group_tolerance_annotation(
             "tolerance so one shared reanalysis setting covers all supported runs in the group; "
             "at least 80% of group runs must provide a compatible estimate."
         ),
-        support=source_support,
+        support=len(estimates),
         total=len(results),
         sdrf_column=sdrf_column,
         sdrf_value=formatted_value,
@@ -434,8 +550,13 @@ def _sdrf_candidates(record: dict[str, Any]) -> dict[str, tuple[str, str]]:
 
 
 def _group_ptm_families(
-    results: list[AnalysisResult], label: str
+    results: list[AnalysisResult],
+    label: str,
+    *,
+    semantic_evidence: dict[tuple[str, str], SemanticEvidence] | None = None,
+    project_accession: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Return strict RAW-supported PTM families with an independent semantic gate."""
     observations: list[tuple[float, str, dict[str, Any]]] = []
     for result in results:
         for record in _mass_shift_records(result):
@@ -446,6 +567,8 @@ def _group_ptm_families(
     rows: list[dict[str, Any]] = []
     if len(results) < 3:
         return rows
+    accession_key = (project_accession or "").strip().upper()
+    evidence_lookup = semantic_evidence or {}
     for family in families:
         run_hits = {item[1] for item in family}
         if len(run_hits) < 3:
@@ -473,6 +596,11 @@ def _group_ptm_families(
         candidate_run_fraction = len(candidate_runs) / len(run_hits) if run_hits else 0.0
         if category != "biological-ptm" or candidate_run_fraction < 0.80:
             continue
+        semantic = evidence_lookup.get((accession_key, accession.upper()))
+        semantic_status = semantic.status if semantic is not None else "not-evaluated"
+        sdrf_status = (
+            "eligible" if semantic_status == "supported" else "hold-semantic-not-supported"
+        )
         rows.append(
             {
                 "experiment_group": label,
@@ -489,6 +617,10 @@ def _group_ptm_families(
                     int(item[2].get("pair_support", 0) or 0) for item in family
                 ),
                 "mass_identity_ambiguous": False,
+                "semantic_evidence_status": semantic_status,
+                "semantic_evidence_sources": list(semantic.sources) if semantic else [],
+                "semantic_evidence_notes": list(semantic.notes) if semantic else [],
+                "sdrf_status": sdrf_status,
             }
         )
     rows.sort(
@@ -502,10 +634,15 @@ def _group_ptm_families(
     return rows[:5]
 
 
-def synthesize_cohort(results: list[AnalysisResult]) -> CohortSynthesis:
+def synthesize_cohort(
+    results: list[AnalysisResult],
+    *,
+    semantic_evidence: dict[tuple[str, str], SemanticEvidence] | None = None,
+    project_accession: str | None = None,
+) -> CohortSynthesis:
     """Attach conservative cohort-level SDRF proposals to successful results."""
     if not results:
-        return CohortSynthesis({}, {}, [], [])
+        return CohortSynthesis({}, {}, [], [], [])
     assignments, evidence, features = _experiment_groups(results)
     by_name = {result.input_path.name: result for result in results}
     grouped: dict[str, list[AnalysisResult]] = defaultdict(list)
@@ -513,13 +650,21 @@ def synthesize_cohort(results: list[AnalysisResult]) -> CohortSynthesis:
         grouped[label].append(by_name[name])
 
     group_summaries: dict[str, dict[str, Any]] = {}
-    ptm_families: list[dict[str, Any]] = []
+    eligible_ptm_families: list[dict[str, Any]] = []
+    review_ptm_families: list[dict[str, Any]] = []
     for label, members in grouped.items():
         durations = _numeric_values([item.input_path.name for item in members], features, "rt")
         precursor = _group_tolerance_annotation(members, label, COHORT_PRECURSOR_FIELD)
         fragment = _group_tolerance_annotation(members, label, COHORT_FRAGMENT_FIELD)
-        ptms = _group_ptm_families(members, label)
-        ptm_families.extend(ptms)
+        ptm_review = _group_ptm_families(
+            members,
+            label,
+            semantic_evidence=semantic_evidence,
+            project_accession=project_accession,
+        )
+        ptms = [item for item in ptm_review if item["sdrf_status"] == "eligible"]
+        review_ptm_families.extend(ptm_review)
+        eligible_ptm_families.extend(ptms)
         summary: dict[str, Any] = {
             "files": len(members),
             "members": [item.input_path.name for item in members],
@@ -536,6 +681,7 @@ def synthesize_cohort(results: list[AnalysisResult]) -> CohortSynthesis:
             summary["precursor_tolerance"] = precursor.value
         if fragment is not None:
             summary["fragment_tolerance"] = fragment.value
+        summary["ptm_review_families"] = ptm_review
         summary["sdrf_eligible_ptms"] = ptms
         group_summaries[label] = summary
 
@@ -550,9 +696,9 @@ def synthesize_cohort(results: list[AnalysisResult]) -> CohortSynthesis:
                         "Grouping uses compatible fragment units/regimes, instrument/acquisition "
                         "metadata when complete, and robustly scaled precursor tolerance, fragment "
                         "tolerance, chromatography duration, MS2 isolation width and MS1/MS2 "
-                        "counts. "
-                        "It indicates acquisition heterogeneity and is not proof of separate "
-                        "biological experiments."
+                        "counts. Strong, well-separated chromatography-duration regimes are "
+                        "split before multivariate clustering. It indicates acquisition "
+                        "heterogeneity and is not proof of separate biological experiments."
                     ),
                     support=len(members),
                     total=len(results),
@@ -568,15 +714,12 @@ def synthesize_cohort(results: list[AnalysisResult]) -> CohortSynthesis:
                         COHORT_MODIFICATION_FIELD,
                         ptm,
                         EvidenceKind.INFERRED,
-                        "prideQC recurrent PTM mass-family synthesis v1",
+                        "prideQC recurrent PTM mass-family synthesis v2",
                         (
-                            "Eligible only when a recurrent 0.02-Da family occurs in at least 90% "
-                            "of experiment-group runs, at least 80% of supporting runs have "
-                            "high-support per-run evidence, P(prevalence > 10%) is at least 0.99, "
-                            "and at least 80% of supporting runs agree on exactly one non-artifact "
-                            "biological UniMod candidate with no competing non-decoy catalog identity. "
-                            "This remains identification-free evidence without peptide "
-                            "or site localization."
+                            "Automatic SDRF PTM write-back requires both strict recurrent RAW "
+                            "mass-family support and independent semantic/study evidence that "
+                            "supports the exact UniMod accession. RAW recurrence alone remains "
+                            "review-only and does not establish peptide or site localization."
                         ),
                         support=int(ptm["family_runs"]),
                         total=int(ptm["group_runs"]),
@@ -587,4 +730,10 @@ def synthesize_cohort(results: list[AnalysisResult]) -> CohortSynthesis:
                     )
                 )
 
-    return CohortSynthesis(assignments, group_summaries, evidence, ptm_families)
+    return CohortSynthesis(
+        assignments,
+        group_summaries,
+        evidence,
+        eligible_ptm_families,
+        review_ptm_families,
+    )

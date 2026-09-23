@@ -12,6 +12,8 @@ from prideqc.cohort import (
     COHORT_FRAGMENT_FIELD,
     COHORT_MODIFICATION_FIELD,
     COHORT_PRECURSOR_FIELD,
+    SemanticEvidence,
+    read_semantic_evidence,
     synthesize_cohort,
 )
 from prideqc.models import AnalysisResult, Annotation, CVTerm, EvidenceKind, Metric, RunMetadata
@@ -116,6 +118,8 @@ class CohortRefinementTests(unittest.TestCase):
             self.assertEqual(fragment.sdrf_value, "25 ppm")
             self.assertEqual(precursor.value["common_max"], 9.4)
             self.assertEqual(fragment.value["common_max"], 24.1)
+            self.assertEqual((precursor.support, precursor.total), (4, 4))
+            self.assertEqual(precursor.value["source_measurement_support"], 4000)
 
     def test_chromatography_duration_can_separate_experiment_groups(self) -> None:
         results = [
@@ -130,14 +134,22 @@ class CohortRefinementTests(unittest.TestCase):
         self.assertEqual(len(long_groups), 1)
         self.assertNotEqual(short_groups, long_groups)
 
-    def test_only_strict_unambiguous_recurrent_ptm_family_is_sdrf_eligible(self) -> None:
+    def test_only_semantic_supported_recurrent_ptm_family_is_sdrf_eligible(self) -> None:
         results = [
             _result(f"run-{index}.raw", mass_shift=79.9663 + index * 1e-5)
             for index in range(10)
         ]
-        synthesis = synthesize_cohort(results)
+        evidence = {
+            ("PXDTEST", "UNIMOD:21"): SemanticEvidence(
+                "supported", ("publication",), ("phosphopeptide enrichment",)
+            )
+        }
+        synthesis = synthesize_cohort(
+            results, semantic_evidence=evidence, project_accession="PXDTEST"
+        )
         self.assertEqual(len(synthesis.ptm_families), 1)
         self.assertEqual(synthesis.ptm_families[0]["unimod_accession"], "UniMod:21")
+        self.assertEqual(synthesis.ptm_families[0]["semantic_evidence_status"], "supported")
         self.assertGreaterEqual(
             synthesis.ptm_families[0]["raw_prevalence_probability"], 0.99
         )
@@ -148,6 +160,27 @@ class CohortRefinementTests(unittest.TestCase):
             self.assertEqual(
                 modification.sdrf_value, "NT=Phosphorylation;AC=UniMod:21"
             )
+
+    def test_mass_only_recurrent_ptm_family_is_review_only(self) -> None:
+        results = [
+            _result(f"run-{index}.raw", mass_shift=14.0155 + index * 1e-5,
+                    candidates=[("UniMod:34", "Methylation")])
+            for index in range(10)
+        ]
+        synthesis = synthesize_cohort(results, project_accession="PXD000612")
+        self.assertEqual(synthesis.ptm_families, [])
+        self.assertEqual(len(synthesis.ptm_review_families), 1)
+        review = synthesis.ptm_review_families[0]
+        self.assertEqual(review["unimod_accession"], "UniMod:34")
+        self.assertEqual(review["semantic_evidence_status"], "not-evaluated")
+        self.assertEqual(review["sdrf_status"], "hold-semantic-not-supported")
+        self.assertFalse(
+            any(
+                item.field == COHORT_MODIFICATION_FIELD
+                for result in results
+                for item in result.annotations
+            )
+        )
 
     def test_mass_ambiguous_recurrent_family_is_not_written_as_modification(self) -> None:
         results = [
@@ -170,6 +203,75 @@ class CohortRefinementTests(unittest.TestCase):
                 for item in result.annotations
             )
         )
+
+    def test_large_chromatography_duration_gap_splits_before_multivariate_clustering(self) -> None:
+        results = [
+            *[_result(f"short-{index}.raw", duration=7200 + index) for index in range(4)],
+            *[_result(f"long-{index}.raw", duration=15900 + index) for index in range(6)],
+        ]
+        synthesis = synthesize_cohort(results)
+        self.assertEqual(len(synthesis.groups), 2)
+        short_groups = {synthesis.assignments[f"short-{index}.raw"] for index in range(4)}
+        long_groups = {synthesis.assignments[f"long-{index}.raw"] for index in range(6)}
+        self.assertEqual(len(short_groups), 1)
+        self.assertEqual(len(long_groups), 1)
+        self.assertNotEqual(short_groups, long_groups)
+        self.assertTrue(
+            any("univariate chromatography duration split" in item for item in synthesis.evidence)
+        )
+
+    def test_study_evidence_reader_uses_v4_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "evidence.tsv"
+            path.write_text(
+                "pxd_accession\tunimod_accession\tevidence_status\tevidence_source\tevidence_note\n"
+                "PXD000612\tUniMod:21\tsupported\tpublication\tphosphorylation study\n",
+                encoding="utf-8",
+            )
+            evidence = read_semantic_evidence(path)
+        item = evidence[("PXD000612", "UNIMOD:21")]
+        self.assertEqual(item.status, "supported")
+        self.assertEqual(item.sources, ("publication",))
+
+    def test_new_sdrf_columns_are_inserted_before_factor_columns(self) -> None:
+        result = _result("run.raw")
+        result.annotations.extend(
+            [
+                Annotation(
+                    "collision_energy_ms2",
+                    "25 eV",
+                    EvidenceKind.OBSERVED,
+                    "mzML activation energy",
+                    sdrf_column="comment[collision energy]",
+                    sdrf_value="25 eV",
+                ),
+                Annotation(
+                    COHORT_MODIFICATION_FIELD,
+                    {"experiment_group": "Experiment group 1"},
+                    EvidenceKind.INFERRED,
+                    "cohort PTM",
+                    sdrf_column="comment[modification parameters]",
+                    sdrf_value="NT=Phosphorylation;AC=UniMod:21",
+                ),
+            ]
+        )
+        document = SDRFDocument(
+            [
+                "comment[data file]",
+                "comment[modification parameters]",
+                "factor value[condition]",
+            ],
+            [["run.raw", "NT=Oxidation;AC=UniMod:35", "control"]],
+        )
+        document.annotate(
+            [result],
+            include_inferred_fields=frozenset({COHORT_MODIFICATION_FIELD}),
+            append_columns=frozenset({"comment[modification parameters]"}),
+        )
+        self.assertEqual(document.columns[-1], "factor value[condition]")
+        self.assertEqual(document.rows[0][-1], "control")
+        self.assertIn("comment[collision energy]", document.columns[:-1])
+        self.assertEqual(document.columns[-2], "comment[modification parameters]")
 
     def test_sdrf_refinement_replaces_tolerance_but_appends_new_modification(self) -> None:
         result = _result("run.raw")
@@ -260,6 +362,56 @@ class CohortRefinementTests(unittest.TestCase):
             self.assertIn("sdrf_eligible_ptm_families=0", log)
             self.assertTrue((output / "cohort-refinement.json").exists())
 
+    def test_existing_results_recovers_accession_and_holds_mass_only_ptm(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            results_root = root / "results" / "PXD000612"
+            results_root.mkdir(parents=True)
+            for index in range(10):
+                result = _result(
+                    f"run-{index}.raw",
+                    precursor=7.0 + index * 0.05,
+                    fragment=12.0 + index * 0.05,
+                    mass_shift=14.0155 + index * 1e-5,
+                    candidates=[("UniMod:34", "Methylation")],
+                )
+                task = results_root / f"task-{index}"
+                task.mkdir()
+                (task / f"run-{index}.raw.summary.json").write_text(
+                    json.dumps(result.to_dict()), encoding="utf-8"
+                )
+            sdrf = root / "PXD000612.holdout10.sdrf.tsv"
+            sdrf.write_text(
+                "comment[data file]\tcomment[precursor mass tolerance]"
+                "\tfactor value[condition]\n"
+                + "".join(
+                    f"run-{index}.raw\t20 ppm\tcontrol\n" for index in range(10)
+                ),
+                encoding="utf-8",
+            )
+            validator = MagicMock()
+            validator.validate.side_effect = [
+                ValidationReport(str(sdrf), "ms-proteomics", False, (), "test"),
+                ValidationReport("refined", "ms-proteomics", False, (), "test"),
+            ]
+            output = root / "refinement"
+            manifest = Workflow(
+                WorkflowOptions(refine_sdrf_qc=True), validator=validator
+            ).refine_existing_sdrf(results_root, output, sdrf=sdrf)
+
+            self.assertTrue(manifest["success"])
+            self.assertEqual(manifest["project_accession"], "PXD000612")
+            self.assertEqual(manifest["sdrf_eligible_ptm_families"], 0)
+            self.assertEqual(manifest["ptm_review_families"], 1)
+            refined = SDRFDocument.read(output / "refined.sdrf.tsv")
+            self.assertEqual(refined.columns[-1], "factor value[condition]")
+            self.assertFalse(
+                any("UniMod:34" in cell for row in refined.rows for cell in row)
+            )
+            log = (output / "sdrf-refinement.log.txt").read_text(encoding="utf-8")
+            self.assertIn("unimod=UniMod:34", log)
+            self.assertIn("sdrf_status=hold-semantic-not-supported", log)
+
     def test_existing_results_refinement_combines_file_array_summaries(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -289,9 +441,18 @@ class CohortRefinementTests(unittest.TestCase):
                 ValidationReport(str(sdrf), "ms-proteomics", False, (), "test"),
                 ValidationReport("refined", "ms-proteomics", False, (), "test"),
             ]
+            evidence = root / "study-evidence.tsv"
+            evidence.write_text(
+                "pxd_accession\tunimod_accession\tevidence_status\n"
+                "PXD041271\tUniMod:21\tsupported\n",
+                encoding="utf-8",
+            )
             output = results_root / "sdrf-refinement"
             manifest = Workflow(
-                WorkflowOptions(refine_sdrf_qc=True), validator=validator
+                WorkflowOptions(
+                    refine_sdrf_qc=True, ptm_study_evidence=str(evidence)
+                ),
+                validator=validator,
             ).refine_existing_sdrf(results_root, output, sdrf=sdrf)
 
             self.assertTrue(manifest["success"])

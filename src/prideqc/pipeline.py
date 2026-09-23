@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import multiprocessing
+import re
 import shutil
 import sys
 import time
@@ -18,6 +19,8 @@ from prideqc.annotations import DiagnosticIonCollector, TechnicalAnnotator
 from prideqc.cohort import (
     COHORT_OVERWRITE_FIELDS,
     COHORT_SDRF_FIELDS,
+    SemanticEvidence,
+    read_semantic_evidence,
     synthesize_cohort,
 )
 from prideqc.conversion import ExternalConverter
@@ -106,6 +109,8 @@ class WorkflowOptions:
     include_inferred: bool = False
     overwrite_sdrf_values: bool = False
     refine_sdrf_qc: bool = False
+    ptm_study_evidence: str | None = None
+    project_accession: str | None = None
     sdrf_template: str = "ms-proteomics"
     validate_ontology: bool = False
     progress: bool = False
@@ -214,6 +219,18 @@ def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
         return FileOutcome(source, error=f"{type(exc).__name__}: {exc}")
 
 
+def _path_project_accession(paths: Iterable[Path]) -> str | None:
+    accessions: set[str] = set()
+    for path in paths:
+        accessions.update(match.upper() for match in re.findall(r"PXD\d+", str(path), re.I))
+    if len(accessions) > 1:
+        raise ValueError(
+            "Multiple ProteomeXchange accessions found in refinement paths: "
+            + ", ".join(sorted(accessions))
+        )
+    return next(iter(accessions), None)
+
+
 class Workflow:
     """Produce per-file QC and batch summaries with explicit failure accounting."""
 
@@ -228,6 +245,41 @@ class Workflow:
             self.options.sdrf_template,
             ontology=self.options.validate_ontology,
         )
+
+    def _ptm_semantic_evidence(
+        self,
+    ) -> dict[tuple[str, str], SemanticEvidence] | None:
+        if not self.options.ptm_study_evidence:
+            return None
+        path = Path(self.options.ptm_study_evidence).resolve(strict=True)
+        return read_semantic_evidence(path)
+
+    def _cohort_project_accession(
+        self,
+        results: Iterable[AnalysisResult],
+        *,
+        extra_paths: Iterable[Path] = (),
+    ) -> str | None:
+        result_accessions = {
+            str(result.project_accession).strip().upper()
+            for result in results
+            if result.project_accession
+        }
+        if len(result_accessions) > 1:
+            raise ValueError(
+                "Results contain multiple ProteomeXchange accessions: "
+                + ", ".join(sorted(result_accessions))
+            )
+        observed = next(iter(result_accessions), None)
+        explicit = (self.options.project_accession or "").strip().upper() or None
+        inferred = _path_project_accession(extra_paths)
+        candidates = {value for value in (observed, explicit, inferred) if value}
+        if len(candidates) > 1:
+            raise ValueError(
+                "Conflicting ProteomeXchange accessions for cohort refinement: "
+                + ", ".join(sorted(candidates))
+            )
+        return next(iter(candidates), None)
 
     def run_project(
         self,
@@ -466,7 +518,14 @@ class Workflow:
                         "Cohort SDRF refinement requires complete analyzed coverage; missing: "
                         + ", ".join(missing)
                     )
-                cohort_synthesis = synthesize_cohort(cohort_results)
+                project_accession = self._cohort_project_accession(
+                    cohort_results, extra_paths=(sdrf,) if sdrf is not None else ()
+                )
+                cohort_synthesis = synthesize_cohort(
+                    cohort_results,
+                    semantic_evidence=self._ptm_semantic_evidence(),
+                    project_accession=project_accession,
+                )
                 write_json(output / "cohort-refinement.json", cohort_synthesis.to_dict())
                 manifest["cohort_refinement"] = {
                     "enabled": True,
@@ -474,6 +533,7 @@ class Workflow:
                     "original_sdrf": "original.sdrf.tsv",
                     "experiment_groups": len(cohort_synthesis.groups),
                     "sdrf_eligible_ptm_families": len(cohort_synthesis.ptm_families),
+                    "ptm_review_families": len(cohort_synthesis.ptm_review_families),
                 }
                 # Per-file mzQC/summary files were written as soon as each analysis
                 # completed. Rewrite successful outputs once so cohort annotations
@@ -600,14 +660,9 @@ class Workflow:
                 "Duplicate analyzed input basenames found below results root; "
                 "select one accession/run set."
             )
-        accessions = sorted(
-            {result.project_accession for result in results if result.project_accession}
+        project_accession = self._cohort_project_accession(
+            results, extra_paths=(*summary_paths, sdrf)
         )
-        if len(accessions) > 1:
-            raise ValueError(
-                "Results root contains multiple ProteomeXchange accessions: "
-                + ", ".join(accessions)
-            )
 
         input_validation = self.validator.validate(sdrf)
         document = SDRFDocument.read(sdrf)
@@ -620,7 +675,11 @@ class Workflow:
                 "Cohort SDRF refinement requires complete analyzed coverage; missing: "
                 + ", ".join(missing)
             )
-        synthesis = synthesize_cohort(cohort_results)
+        synthesis = synthesize_cohort(
+            cohort_results,
+            semantic_evidence=self._ptm_semantic_evidence(),
+            project_accession=project_accession,
+        )
         write_json(output / "cohort-refinement.json", synthesis.to_dict())
         changes = document.annotate(
             cohort_results,
@@ -646,7 +705,8 @@ class Workflow:
             "summary_files": [str(path) for path in summary_paths],
             "summary_count": len(cohort_results),
             "discovered_summary_count": len(summary_paths),
-            "project_accession": accessions[0] if accessions else None,
+            "project_accession": project_accession,
+            "ptm_study_evidence": self.options.ptm_study_evidence,
             "original_sdrf": "original.sdrf.tsv",
             "refined_sdrf": "refined.sdrf.tsv",
             "cohort_refinement": "cohort-refinement.json",
@@ -654,6 +714,7 @@ class Workflow:
             "sdrf_refinement_log": "sdrf-refinement.log.txt",
             "experiment_groups": len(synthesis.groups),
             "sdrf_eligible_ptm_families": len(synthesis.ptm_families),
+            "ptm_review_families": len(synthesis.ptm_review_families),
             "success": refined_validation.valid,
         }
         write_json(output / "manifest.json", manifest)
@@ -705,8 +766,10 @@ class Workflow:
             if cohort is not None:
                 groups = cohort.get("groups", {})
                 ptms = cohort.get("ptm_families", [])
+                ptm_review = cohort.get("ptm_review_families", [])
                 handle.write(f"experiment_groups={len(groups)}\n")
                 handle.write(f"sdrf_eligible_ptm_families={len(ptms)}\n")
+                handle.write(f"ptm_review_families={len(ptm_review)}\n")
                 for label, summary in groups.items():
                     handle.write(
                         f"group={label} files={summary.get('files', 0)} "
@@ -729,6 +792,19 @@ class Workflow:
                     f"proposed={change.proposed!r} field={change.annotation_field} "
                     f"group={change.experiment_group!r}\n"
                 )
+            if cohort is not None:
+                handle.write("\n[ptm_review_families]\n")
+                for item in cohort.get("ptm_review_families", []):
+                    handle.write(
+                        f"group={item.get('experiment_group', '')!r} "
+                        f"unimod={item.get('unimod_accession', '')} "
+                        f"name={item.get('unimod_name', '')!r} "
+                        f"mass_da={item.get('median_mass_da')} "
+                        f"runs={item.get('family_runs')}/{item.get('group_runs')} "
+                        f"raw_prevalence_probability={item.get('raw_prevalence_probability')} "
+                        f"semantic_status={item.get('semantic_evidence_status', '')} "
+                        f"sdrf_status={item.get('sdrf_status', '')}\n"
+                    )
 
     def _write_tables(self, results: list[AnalysisResult], output: Path) -> None:
         import json

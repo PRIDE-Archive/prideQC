@@ -137,6 +137,22 @@ class SDRFDocument:
                 seen_results.add(marker)
         return matched, missing
 
+    def _new_column_index(self) -> int:
+        """Insert non-factor columns before the first factor-value column."""
+        for index, name in enumerate(self.columns):
+            if name.strip().casefold().startswith("factor value["):
+                return index
+        return len(self.columns)
+
+    def _insert_column(self, column: str, default: str = "not available") -> int:
+        index = self._new_column_index()
+        self.columns.insert(index, column)
+        for existing in self.rows:
+            existing.insert(index, default)
+        if index <= self.file_column:
+            self.file_column += 1
+        return index
+
     def annotate(
         self,
         results: Iterable[AnalysisResult],
@@ -180,9 +196,29 @@ class SDRFDocument:
                     include_inferred or annotation.field in include_inferred_fields
                 )
                 if annotation.kind == EvidenceKind.INFERRED and not allowed_inferred:
-                    changes.append(self._change(
-                        row_number, name, column, "", proposed, "suggestion", annotation
-                    ))
+                    existing_indices = self.indices(column)
+                    matched_index = next(
+                        (index for index in existing_indices if _equal(row[index], proposed)),
+                        None,
+                    )
+                    if matched_index is not None:
+                        changes.append(
+                            self._change(
+                                row_number,
+                                name,
+                                column,
+                                row[matched_index],
+                                proposed,
+                                "match",
+                                annotation,
+                            )
+                        )
+                    else:
+                        changes.append(
+                            self._change(
+                                row_number, name, column, "", proposed, "suggestion", annotation
+                            )
+                        )
                     continue
                 if column.casefold() in append_column_names:
                     changes.append(
@@ -198,10 +234,7 @@ class SDRFDocument:
                     ))
                     continue
                 if not indices:
-                    self.columns.append(column)
-                    for existing in self.rows:
-                        existing.append("not available")
-                    indices = [len(self.columns) - 1]
+                    indices = [self._insert_column(column)]
                 index = indices[0]
                 previous = row[index]
                 effective_overwrite = overwrite or annotation.field in overwrite_fields
@@ -273,10 +306,7 @@ class SDRFDocument:
                 return self._change(
                     row_number, data_file, column, previous, proposed, "filled", annotation
                 )
-        self.columns.append(column)
-        for existing in self.rows:
-            existing.append("not available")
-        index = len(self.columns) - 1
+        index = self._insert_column(column)
         previous = row[index]
         row[index] = proposed
         return self._change(

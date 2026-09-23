@@ -252,8 +252,15 @@ adds another repeated column. Automatic PTM writing is deliberately strict: a 0.
 recurrent family must occur in at least three runs and at least 90% of its experiment
 group, at least 80% of supporting runs must have high-support per-run evidence,
 `P(prevalence > 10%)` must be at least 0.99, and exactly one biological UniMod candidate
-may remain mass-compatible. Ambiguous chemistry remains in QC evidence and is not
-asserted in SDRF.
+may remain mass-compatible. In addition, the exact UniMod accession must be independently
+supported by a semantic/study-evidence TSV supplied with `--ptm-study-evidence`; RAW
+recurrence without this independent support remains visible as review-only evidence in
+`cohort-refinement.json` and `sdrf-refinement.log.txt` and is not asserted in SDRF. The
+evidence TSV uses the v4 columns `pxd_accession`, `unimod_accession`, and
+`evidence_status` (`supported`, `conflicting`, or `not-found`), with optional
+`evidence_source` and `evidence_note` columns. Ambiguous chemistry remains in QC evidence
+and is not asserted in SDRF. Newly created non-factor SDRF columns are inserted before
+existing `factor value[...]` columns so factor columns remain last.
 
 The Codon file-array workflow analyzes one RAW per task, so cohort synthesis must run
 after the array instead of inside each task. Point the post-hoc command at the accession's
@@ -263,12 +270,18 @@ persisted prideQC result subtree:
 uv run prideqc refine-sdrf-qc \
   --results-root results/<run>/<PXD> \
   --sdrf study.sdrf.tsv \
+  --project-accession <PXD> \
+  --ptm-study-evidence study-evidence.tsv \
   -o results/<run>/<PXD>/sdrf-refinement
 ```
 
 The command reconstructs the per-file evidence from `*.summary.json`, requires complete
 coverage of the SDRF data files, performs one accession-level cohort synthesis, writes
-the refined SDRF, and validates it before reporting success.
+the refined SDRF, and validates it before reporting success. `--project-accession` is
+optional when the accession is already serialized in the summaries or can be recovered
+unambiguously from the result/SDRF paths; it is useful for older result trees. Omit
+`--ptm-study-evidence` when only tolerance refinement is desired: recurrent PTM families
+will still be reported for review but will not be written automatically.
 
 Supplying `--sdrf` validates the input and refined output through
 `sdrf_pipelines.sdrf.sdrf.read_sdrf(...).validate_sdrf(...)`. The default template

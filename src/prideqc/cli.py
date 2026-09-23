@@ -122,6 +122,18 @@ def parser() -> argparse.ArgumentParser:
         ),
     )
     analyze.add_argument(
+        "--ptm-study-evidence",
+        type=Path,
+        help=(
+            "Optional independent PTM semantic-evidence TSV; exact UniMod support is required "
+            "before recurrent mass-shift evidence is written as an SDRF modification"
+        ),
+    )
+    analyze.add_argument(
+        "--project-accession",
+        help="Explicit ProteomeXchange accession for local cohort refinement provenance",
+    )
+    analyze.add_argument(
         "--continue-on-error",
         action="store_true",
         help="Process remaining local inputs after analysis failure; exit code still nonzero",
@@ -180,6 +192,18 @@ def parser() -> argparse.ArgumentParser:
         "--file-map",
         type=Path,
         help="Optional JSON object: exact SDRF filename to analyzed filename",
+    )
+    refine.add_argument(
+        "--ptm-study-evidence",
+        type=Path,
+        help=(
+            "Optional independent PTM semantic-evidence TSV using pxd_accession, "
+            "unimod_accession and evidence_status columns"
+        ),
+    )
+    refine.add_argument(
+        "--project-accession",
+        help="Explicit ProteomeXchange accession when older summaries do not contain it",
     )
     refine.add_argument(
         "--overwrite",
@@ -247,6 +271,10 @@ def _analyze(arguments: argparse.Namespace) -> int:
         conversion_timeout=arguments.conversion_timeout, continue_on_error=arguments.continue_on_error,
         include_inferred=arguments.include_inferred, overwrite_sdrf_values=arguments.overwrite_sdrf_values,
         refine_sdrf_qc=arguments.refine_sdrf_qc,
+        ptm_study_evidence=(
+            str(arguments.ptm_study_evidence) if arguments.ptm_study_evidence else None
+        ),
+        project_accession=arguments.project_accession or arguments.accession,
         sdrf_template=arguments.sdrf_template, validate_ontology=arguments.validate_ontology,
         progress=arguments.progress, overwrite=arguments.overwrite,
     ))
@@ -298,6 +326,10 @@ def _refine_sdrf_qc(arguments: argparse.Namespace) -> int:
     workflow = Workflow(
         WorkflowOptions(
             refine_sdrf_qc=True,
+            ptm_study_evidence=(
+                str(arguments.ptm_study_evidence) if arguments.ptm_study_evidence else None
+            ),
+            project_accession=arguments.project_accession,
             overwrite=arguments.overwrite,
             sdrf_template=arguments.sdrf_template,
             validate_ontology=arguments.validate_ontology,
