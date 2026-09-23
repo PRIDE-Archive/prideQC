@@ -31,6 +31,10 @@ from prideqc.mass_shift import MassShiftCollector
 from prideqc.metrics import QCMetricCalculator, RunSummary
 from prideqc.models import AnalysisResult, EvidenceCollector, FloatArray, Spectrum, SpectrumReader
 from prideqc.mzqc import MzQCWriter
+from prideqc.refinement_packet import (
+    build_llm_refinement_packet,
+    validate_llm_refinement_packet,
+)
 from prideqc.sdrf import SDRFChange, SDRFDocument
 from prideqc.validation import SDRFPipelinesValidator, SDRFValidator
 
@@ -511,7 +515,7 @@ class Workflow:
         }
         try:
             if self.options.refine_sdrf_qc and results:
-                if document is None:
+                if document is None or sdrf is None:
                     raise ValueError("Cohort SDRF refinement requires an input SDRF.")
                 cohort_results, missing = document.resolve_results(results, aliases)
                 if missing:
@@ -522,15 +526,42 @@ class Workflow:
                 project_accession = self._cohort_project_accession(
                     cohort_results, extra_paths=(sdrf,) if sdrf is not None else ()
                 )
+                semantic_evidence = self._ptm_semantic_evidence()
                 cohort_synthesis = synthesize_cohort(
                     cohort_results,
-                    semantic_evidence=self._ptm_semantic_evidence(),
+                    semantic_evidence=semantic_evidence,
                     project_accession=project_accession,
                 )
                 write_json(output / "cohort-refinement.json", cohort_synthesis.to_dict())
+                packet_artifacts: dict[str, dict[str, str]] = {}
+                for outcome in outcomes:
+                    if outcome.result is None:
+                        continue
+                    artifact_prefix = outcome.source.name
+                    refs = {
+                        "summary_json": f"{artifact_prefix}.summary.json",
+                        "mzqc": f"{artifact_prefix}.mzQC",
+                    }
+                    if self.options.estimate_mass_shifts:
+                        refs["mass_shifts_tsv"] = f"{artifact_prefix}.mass-shifts.tsv"
+                    packet_artifacts[outcome.result.input_path.name] = refs
+                packet = build_llm_refinement_packet(
+                    document,
+                    cohort_results,
+                    cohort_synthesis,
+                    project_accession=project_accession,
+                    sdrf_path=sdrf.resolve(strict=True),
+                    prideqc_version=__version__,
+                    aliases=aliases,
+                    source_artifacts=packet_artifacts,
+                    semantic_evidence=semantic_evidence,
+                )
+                validate_llm_refinement_packet(packet)
+                write_json(output / "llm-refinement-packet.json", packet)
                 manifest["cohort_refinement"] = {
                     "enabled": True,
                     "artifact": "cohort-refinement.json",
+                    "llm_refinement_packet": "llm-refinement-packet.json",
                     "original_sdrf": "original.sdrf.tsv",
                     "experiment_groups": len(cohort_synthesis.groups),
                     "sdrf_eligible_ptm_families": len(cohort_synthesis.ptm_families),
@@ -655,11 +686,22 @@ class Workflow:
         if not summary_paths:
             raise ValueError(f"No *.summary.json files found below {root}")
         results: list[AnalysisResult] = []
+        packet_artifacts: dict[str, dict[str, str]] = {}
         for summary_path in summary_paths:
             payload = json.loads(summary_path.read_text(encoding="utf-8"))
             if not isinstance(payload, dict):
                 raise ValueError(f"Invalid prideQC summary object: {summary_path}")
-            results.append(AnalysisResult.from_dict(payload))
+            result = AnalysisResult.from_dict(payload)
+            results.append(result)
+            refs = {"summary_json": summary_path.relative_to(root).as_posix()}
+            prefix = summary_path.name.removesuffix(".summary.json")
+            mzqc_path = summary_path.with_name(f"{prefix}.mzQC")
+            if mzqc_path.exists():
+                refs["mzqc"] = mzqc_path.relative_to(root).as_posix()
+            mass_shift_path = summary_path.with_name(f"{prefix}.mass-shifts.tsv")
+            if mass_shift_path.exists():
+                refs["mass_shifts_tsv"] = mass_shift_path.relative_to(root).as_posix()
+            packet_artifacts[result.input_path.name] = refs
         names = [result.input_path.name.casefold() for result in results]
         if len(set(names)) != len(names):
             raise ValueError(
@@ -681,12 +723,26 @@ class Workflow:
                 "Cohort SDRF refinement requires complete analyzed coverage; missing: "
                 + ", ".join(missing)
             )
+        semantic_evidence = self._ptm_semantic_evidence()
         synthesis = synthesize_cohort(
             cohort_results,
-            semantic_evidence=self._ptm_semantic_evidence(),
+            semantic_evidence=semantic_evidence,
             project_accession=project_accession,
         )
         write_json(output / "cohort-refinement.json", synthesis.to_dict())
+        packet = build_llm_refinement_packet(
+            document,
+            cohort_results,
+            synthesis,
+            project_accession=project_accession,
+            sdrf_path=sdrf,
+            prideqc_version=__version__,
+            aliases=aliases,
+            source_artifacts=packet_artifacts,
+            semantic_evidence=semantic_evidence,
+        )
+        validate_llm_refinement_packet(packet)
+        write_json(output / "llm-refinement-packet.json", packet)
         changes = document.annotate(
             cohort_results,
             aliases,
@@ -721,6 +777,7 @@ class Workflow:
             "original_sdrf": "original.sdrf.tsv",
             "refined_sdrf": "refined.sdrf.tsv",
             "cohort_refinement": "cohort-refinement.json",
+            "llm_refinement_packet": "llm-refinement-packet.json",
             "sdrf_changes": "sdrf-changes.tsv",
             "sdrf_refinement_log": "sdrf-refinement.log.txt",
             "experiment_groups": len(synthesis.groups),

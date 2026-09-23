@@ -246,7 +246,12 @@ uv run prideqc analyze data/*.mzML \
 
 This mode preserves `original.sdrf.tsv`, writes `cohort-refinement.json`, and records
 every SDRF proposal in `sdrf-changes.tsv` plus the human-readable
-`sdrf-refinement.log.txt`. Existing modification parameters are never replaced: a new
+`sdrf-refinement.log.txt`. It also writes one accession-level
+`llm-refinement-packet.json` containing compact per-run precursor/fragment tolerance
+evidence, inferred experiment groups, original SDRF values, and constrained PTM
+candidates for later LLM/human adjudication. The packet is deterministic, contains all
+SDRF-mapped runs, and does not itself call an LLM or mutate the SDRF. Existing
+modification parameters are never replaced: a new
 confidence-gated PTM uses an empty repeated `comment[modification parameters]` slot or
 adds another repeated column. Automatic PTM writing is deliberately strict: a 0.02-Da
 recurrent family must occur in at least three runs and at least 90% of its experiment

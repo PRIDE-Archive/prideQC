@@ -389,6 +389,12 @@ class CohortRefinementTests(unittest.TestCase):
             self.assertIn("comment[precursor mass tolerance]", log)
             self.assertIn("sdrf_eligible_ptm_families=0", log)
             self.assertTrue((output / "cohort-refinement.json").exists())
+            self.assertTrue((output / "llm-refinement-packet.json").exists())
+            packet = json.loads(
+                (output / "llm-refinement-packet.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(packet["packet_scope"], "accession-sdrf")
+            self.assertEqual(len(packet["runs"]), 1)
 
     def test_existing_results_recovers_accession_and_holds_mass_only_ptm(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -431,6 +437,12 @@ class CohortRefinementTests(unittest.TestCase):
             self.assertEqual(manifest["project_accession"], "PXD000612")
             self.assertEqual(manifest["sdrf_eligible_ptm_families"], 0)
             self.assertEqual(manifest["ptm_review_families"], 1)
+            self.assertEqual(manifest["llm_refinement_packet"], "llm-refinement-packet.json")
+            packet = json.loads(
+                (output / "llm-refinement-packet.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(packet["project_accession"], "PXD000612")
+            self.assertEqual(len(packet["runs"]), 10)
             refined = SDRFDocument.read(output / "refined.sdrf.tsv")
             self.assertEqual(refined.columns[-1], "factor value[condition]")
             putative_indices = refined.indices(PUTATIVE_MODIFICATION_COLUMN)

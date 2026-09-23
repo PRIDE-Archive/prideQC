@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prideqc.org/schema/llm-refinement-packet-v1.schema.json",
+  "title": "prideQC LLM SDRF refinement evidence packet v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "packet_scope",
+    "project_accession",
+    "provenance",
+    "sdrf",
+    "runs",
+    "experiment_groups",
+    "decision_candidates",
+    "llm_contract",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "prideqc-llm-refinement-packet-v1"
+    },
+    "packet_scope": {
+      "const": "accession-sdrf"
+    },
+    "project_accession": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provenance": {
+      "type": "object"
+    },
+    "sdrf": {
+      "type": "object",
+      "required": [
+        "source_name",
+        "sha256",
+        "row_count",
+        "target_columns"
+      ],
+      "properties": {
+        "source_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "row_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "target_columns": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "runs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "experiment_group",
+          "sdrf_rows",
+          "sdrf_data_files",
+          "original_values",
+          "tolerance_evidence",
+          "source_artifacts"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "experiment_group": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sdrf_rows": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 2
+            }
+          },
+          "sdrf_data_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "original_values": {
+            "type": "object"
+          },
+          "tolerance_evidence": {
+            "type": "object"
+          },
+          "source_artifacts": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "experiment_groups": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "group_id",
+          "member_runs",
+          "target_sdrf_rows",
+          "summary",
+          "decision_ids"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "member_runs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "target_sdrf_rows": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 2
+            }
+          },
+          "summary": {
+            "type": "object"
+          },
+          "decision_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "decision_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "decision_id",
+          "decision_type",
+          "experiment_group",
+          "target_field",
+          "write_semantics",
+          "target_rows",
+          "target_runs",
+          "original",
+          "candidate_values",
+          "allowed_values",
+          "allowed_decisions",
+          "evidence"
+        ],
+        "properties": {
+          "decision_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decision_type": {
+            "enum": [
+              "mass_tolerance",
+              "modification"
+            ]
+          },
+          "experiment_group": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target_field": {
+            "type": "string",
+            "minLength": 1
+          },
+          "write_semantics": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target_rows": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "integer",
+              "minimum": 2
+            }
+          },
+          "target_runs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "original": {
+            "type": "object"
+          },
+          "allowed_values": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "allowed_decisions": {
+            "const": [
+              "accept",
+              "reject",
+              "abstain"
+            ]
+          },
+          "evidence": {
+            "type": "object"
+          },
+          "evidence_semantics": {
+            "type": "object"
+          },
+          "candidate_values": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "llm_contract": {
+      "type": "object"
+    },
+    "limitations": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}
