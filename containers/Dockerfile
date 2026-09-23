@@ -5,7 +5,7 @@ ARG RUST_IMAGE=rust:1.98.1-slim-bookworm
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.11
 ARG DOTNET_IMAGE=mcr.microsoft.com/dotnet/runtime:8.0.29-bookworm-slim
 ARG PMULTIQC_GIT_URL=https://github.com/singjc/pmultiqc.git
-ARG PMULTIQC_GIT_REF=6c1dcc4bdfdb29e3f59160988deefa48f52e8b67
+ARG PMULTIQC_GIT_REF=0da83d02d84e74672219eaca982db37cf02ded09
 
 FROM ${UV_IMAGE} AS uv-bin
 
@@ -152,7 +152,7 @@ ARG RUST_IMAGE=rust:1.98.1-slim-bookworm
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.11
 ARG DOTNET_IMAGE=mcr.microsoft.com/dotnet/runtime:8.0.29-bookworm-slim
 ARG PMULTIQC_GIT_URL=https://github.com/singjc/pmultiqc.git
-ARG PMULTIQC_GIT_REF=6c1dcc4bdfdb29e3f59160988deefa48f52e8b67
+ARG PMULTIQC_GIT_REF=0da83d02d84e74672219eaca982db37cf02ded09
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates libgcc-s1 libgomp1 libgssapi-krb5-2 libicu72 libssl3 libstdc++6 procps tzdata zlib1g && \
