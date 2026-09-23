@@ -29,6 +29,23 @@ class ContainerReportingTests(unittest.TestCase):
         self.assertIn("command -v ps >/dev/null", text)
         self.assertIn("ps aux >/dev/null", text)
 
+    @staticmethod
+    def accession_report_script() -> str:
+        path = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "slurm"
+            / "prideqc_accession_report.sbatch"
+        )
+        return path.read_text(encoding="utf-8")
+
+    def test_accession_report_uses_strict_reporting_environment(self) -> None:
+        text = self.accession_report_script()
+        self.assertIn("/opt/pmultiqc/.venv/bin/multiqc", text)
+        self.assertIn("--strict", text)
+        self.assertIn("--interactive", text)
+        self.assertIn('--title "$PXD — mzQC Quality Control"', text)
+
 
 if __name__ == "__main__":
     unittest.main()

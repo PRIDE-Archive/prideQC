@@ -101,7 +101,7 @@ printf '%s\n' "${MZQC_FILES[@]}" > "$LOCAL_REPORT/mzqc-files.txt"
 
 echo "==> Reporting software provenance"
 "$CONTAINER_BIN" exec "$LOCAL_SIF" prideqc --version
-"$CONTAINER_BIN" exec "$LOCAL_SIF" multiqc --version
+"$CONTAINER_BIN" exec "$LOCAL_SIF" /opt/pmultiqc/.venv/bin/multiqc --version
 "$CONTAINER_BIN" exec "$LOCAL_SIF" cat /opt/prideqc/build-info.txt
 
 echo "==> Aggregate mzQC for $PXD"
@@ -112,9 +112,12 @@ set +e
     --env "TMPDIR=/work/tmp" \
     --env "XDG_CACHE_HOME=/work/cache" \
     "$LOCAL_SIF" \
-    multiqc \
+    /opt/pmultiqc/.venv/bin/multiqc \
       --module mzqc \
+      --strict \
+      --interactive \
       --force \
+      --title "$PXD — mzQC Quality Control" \
       --filename multiqc_report.html \
       --outdir /work/report \
       /input \

@@ -13,7 +13,7 @@ RUST_IMAGE="${PRIDEQC_RUST_IMAGE:-rust:1.98.1-slim-bookworm}"
 UV_IMAGE="${PRIDEQC_UV_IMAGE:-ghcr.io/astral-sh/uv:0.12.11}"
 DOTNET_IMAGE="${PRIDEQC_DOTNET_IMAGE:-mcr.microsoft.com/dotnet/runtime:8.0.29-bookworm-slim}"
 PMULTIQC_GIT_URL="${PRIDEQC_PMULTIQC_GIT_URL:-https://github.com/singjc/pmultiqc.git}"
-PMULTIQC_GIT_REF="${PRIDEQC_PMULTIQC_GIT_REF:-c5f0ab880e48243709cb03cb5f847a1313ccec72}"
+PMULTIQC_GIT_REF="${PRIDEQC_PMULTIQC_GIT_REF:-6c1dcc4bdfdb29e3f59160988deefa48f52e8b67}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
