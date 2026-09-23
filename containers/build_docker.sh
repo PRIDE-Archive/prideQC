@@ -24,7 +24,7 @@ test -f pyproject.toml
 test -f uv.lock
 test -f containers/pyopenms.requirements.txt
 
-EXPECTED_PYOPENMS_REQUIREMENT="pyopenms @ https://pypi.openms.de/packages/pyopenms-3.6.0.dev20260910-cp312-cp312-manylinux_2_34_x86_64.whl#sha256=9c7cbb35f3a9557c1988b99a8ec51ef3ac2bc961fd818844e4cfc645ad73a7d6"
+EXPECTED_PYOPENMS_REQUIREMENT="pyopenms @ https://github.com/PRIDE-Archive/prideQC/releases/download/vendor-pyopenms-3.6.0.dev20260910/pyopenms-3.6.0.dev20260910-cp312-cp312-manylinux_2_34_x86_64.whl#sha256=9c7cbb35f3a9557c1988b99a8ec51ef3ac2bc961fd818844e4cfc645ad73a7d6"
 [[ "$(cat containers/pyopenms.requirements.txt)" == "$EXPECTED_PYOPENMS_REQUIREMENT" ]] || {
     echo "containers/pyopenms.requirements.txt must contain the approved pyOpenMS wheel and SHA-256 exactly" >&2
     exit 2

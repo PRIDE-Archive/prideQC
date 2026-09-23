@@ -27,11 +27,13 @@ Python is fixed to CPython 3.12 because the required OpenMS development wheel is
 CPython-3.12/linux-amd64 specific. The Docker build uses the committed `uv.lock`
 for the rest of the environment but deliberately omits the locked stable
 `pyopenms` package. `containers/pyopenms.requirements.txt` is a second, tiny
-hash-locked input containing exactly this required wheel:
+hash-locked input containing exactly this required wheel, mirrored as a PRIDE-controlled GitHub Release asset so an upstream nightly cleanup cannot break a reproducible build:
 
 ```
-https://pypi.openms.de/packages/pyopenms-3.6.0.dev20260910-cp312-cp312-manylinux_2_34_x86_64.whl#sha256=9c7cbb35f3a9557c1988b99a8ec51ef3ac2bc961fd818844e4cfc645ad73a7d6
+https://github.com/PRIDE-Archive/prideQC/releases/download/vendor-pyopenms-3.6.0.dev20260910/pyopenms-3.6.0.dev20260910-cp312-cp312-manylinux_2_34_x86_64.whl#sha256=9c7cbb35f3a9557c1988b99a8ec51ef3ac2bc961fd818844e4cfc645ad73a7d6
 ```
+
+The Docker build downloads and SHA-256 verifies this wheel before copying the prideQC source tree. This keeps the large binary in an independently cacheable layer; source-only prideQC changes do not need to fetch it again. The release asset must be byte-identical to the previously validated OpenMS nightly wheel.
 
 The build fails unless the resulting environment exposes both reader classes
 that current prideQC actually calls: `ThermoRawFile` and `BrukerTimsFile`. The

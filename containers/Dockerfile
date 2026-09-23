@@ -48,13 +48,48 @@ COPY containers/pyopenms.requirements.txt /tmp/pyopenms.requirements.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project --no-install-package pyopenms --no-editable
 
+# Freeze the validated pyOpenMS vendor-reader wheel before project source is
+# copied. The requirement points at a PRIDE-controlled GitHub Release mirror
+# and keeps the original wheel SHA-256. Downloading it into the image here
+# means ordinary prideQC source edits do not re-fetch the large wheel.
+RUN python - <<'PY'
+from hashlib import sha256
+from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import urlopen
+import re
+
+requirement = Path("/tmp/pyopenms.requirements.txt").read_text(encoding="utf-8").strip()
+match = re.fullmatch(r"pyopenms @ (https://[^#]+)#sha256=([0-9a-f]{64})", requirement)
+if match is None:
+    raise SystemExit("invalid pinned pyOpenMS requirement")
+url, expected = match.groups()
+filename = Path(urlparse(url).path).name
+if not filename.endswith(".whl"):
+    raise SystemExit(f"pyOpenMS URL is not a wheel: {url}")
+out_dir = Path("/opt/prideqc/wheels")
+out_dir.mkdir(parents=True, exist_ok=True)
+out_path = out_dir / filename
+hasher = sha256()
+with urlopen(url) as response, out_path.open("wb") as handle:
+    while chunk := response.read(1024 * 1024):
+        hasher.update(chunk)
+        handle.write(chunk)
+actual = hasher.hexdigest()
+if actual != expected:
+    out_path.unlink(missing_ok=True)
+    raise SystemExit(f"pyOpenMS wheel SHA-256 mismatch: expected {expected}, got {actual}")
+print(f"Pinned pyOpenMS wheel: {out_path} sha256={actual}")
+PY
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /opt/prideqc/.venv/bin/python --no-deps /opt/prideqc/wheels/*.whl && \
+    /opt/prideqc/.venv/bin/python -c \
+      "import importlib.metadata as m, pyopenms as oms; v=m.version('pyopenms'); print('pyOpenMS', v); assert v == '3.6.0.dev20260910'; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"
+
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-package pyopenms --no-editable && \
-    uv pip install --python /opt/prideqc/.venv/bin/python --no-deps --require-hashes \
-        -r /tmp/pyopenms.requirements.txt && \
-    /opt/prideqc/.venv/bin/python -c \
-      "import importlib.metadata as m, pyopenms as oms; v=m.version('pyopenms'); print('pyOpenMS', v); assert v == '3.6.0.dev20260910'; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')" && \
+    uv pip install --python /opt/prideqc/.venv/bin/python --no-deps /opt/prideqc/wheels/*.whl && \
     /opt/prideqc/.venv/bin/prideqc --version
 
 # Keep reporting isolated from the scientific runtime. The current pmultiqc
@@ -95,8 +130,9 @@ RUN set -eux; \
 FROM python-builder AS quality
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --group dev --no-install-package pyopenms --no-editable && \
-    uv pip install --python /opt/prideqc/.venv/bin/python --no-deps --require-hashes \
-        -r /tmp/pyopenms.requirements.txt && \
+    uv pip install --python /opt/prideqc/.venv/bin/python --no-deps /opt/prideqc/wheels/*.whl && \
+    /opt/prideqc/.venv/bin/python -c \
+      "import pyopenms as oms; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')" && \
     /opt/prideqc/.venv/bin/python -m compileall -q src tests && \
     PRIDE_QC_REQUIRE_INTEGRATION=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /opt/prideqc/.venv/bin/python -m unittest discover -s tests -v && \
     /opt/prideqc/.venv/bin/ruff check . && \
@@ -119,7 +155,7 @@ ARG PMULTIQC_GIT_URL=https://github.com/singjc/pmultiqc.git
 ARG PMULTIQC_GIT_REF=21ca6ee4b9abb399725d4fc65cff13ada21e4b0d
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates libgcc-s1 libgomp1 libgssapi-krb5-2 libicu72 libssl3 libstdc++6 procps tzdata zlib1g && \
+    apt-get install -y --no-install-recommends ca-certificates libgcc-s1 libgomp1 libgssapi-krb5-2 libicu72 libssl3 libstdc++6 tzdata zlib1g && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /opt/prideqc/bin /data /results /cache /work && \
     chmod 1777 /data /results /cache /work
@@ -180,8 +216,6 @@ RUN set -eux; \
     } > /opt/prideqc/build-info.txt; \
     rm -f /tmp/rustc-version.txt /tmp/cargo-version.txt; \
     dotnet --info >/dev/null; \
-    command -v ps >/dev/null; \
-    ps aux >/dev/null; \
     prideqc --version; \
     python -c "import pyopenms as oms; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"; \
     /opt/pmultiqc/.venv/bin/multiqc --version; \
