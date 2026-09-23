@@ -116,6 +116,14 @@ class RefinementPacketTests(unittest.TestCase):
                 for run in packet["runs"]
             )
         )
+        self.assertEqual(len(packet["ptm_context"]), 2)
+        self.assertTrue(all(not family["actionable"] for family in packet["ptm_context"]))
+        self.assertTrue(
+            all(
+                group["actionable_ptm_review_family_count"] == 1
+                for group in packet["experiment_groups"]
+            )
+        )
 
     def test_packet_contains_ptm_candidate_evidence_and_probability_guard(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -127,7 +135,9 @@ class RefinementPacketTests(unittest.TestCase):
             if item["decision_type"] == "modification"
         ]
         self.assertEqual(len(ptms), 2)
+        self.assertEqual(len(packet["ptm_context"]), 2)
         for item in ptms:
+            self.assertEqual(item["evidence"]["review_gate"], "strict-cohort-ptm-review-family")
             self.assertEqual(
                 item["candidate_values"], ["NT=Methylation;AC=UniMod:34"]
             )
@@ -143,7 +153,7 @@ class RefinementPacketTests(unittest.TestCase):
             )
 
 
-    def test_packet_retains_mass_ambiguous_candidate_set_for_adjudication(self) -> None:
+    def test_packet_keeps_mass_ambiguous_family_as_non_actionable_context(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             results = [
@@ -178,17 +188,103 @@ class RefinementPacketTests(unittest.TestCase):
                 prideqc_version=__version__,
             )
 
-        ptms = [
+        ptm_decisions = [
             item
             for item in packet["decision_candidates"]
             if item["decision_type"] == "modification"
         ]
-        self.assertEqual(len(ptms), 1)
-        self.assertEqual(len(ptms[0]["candidate_values"]), 2)
-        self.assertTrue(ptms[0]["evidence"]["mass_identity_ambiguous"])
+        self.assertEqual(ptm_decisions, [])
+        self.assertEqual(len(packet["ptm_context"]), 1)
+        context = packet["ptm_context"][0]
+        self.assertFalse(context["actionable"])
+        self.assertTrue(context["mass_identity_ambiguous"])
+        self.assertEqual(len(context["candidate_values"]), 2)
         self.assertEqual(
-            {option["accession"] for option in ptms[0]["evidence"]["candidate_options"]},
+            {option["accession"] for option in context["candidate_options"]},
             {"UniMod:21", "UniMod:99913"},
+        )
+
+    def test_broad_ptm_context_does_not_expand_actionable_decisions(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            results = [
+                _result(
+                    f"run-{index}.raw",
+                    mass_shift=14.0155 + index * 1e-5,
+                    candidates=[("UniMod:34", "Methylation")],
+                )
+                for index in range(10)
+            ]
+            extra_families = [
+                (79.9663, [("UniMod:21", "Phosphorylation"), ("UniMod:99913", "Alt")]),
+                (
+                    57.0215,
+                    [
+                        ("UniMod:4", "Iodoacetamide derivative"),
+                        ("UniMod:1263", "Addition of Glycine"),
+                    ],
+                ),
+                (42.0103, [("UniMod:1", "Acetylation"), ("UniMod:52", "Guanidination")]),
+            ]
+            for index, result in enumerate(results):
+                annotation = next(
+                    item
+                    for item in result.annotations
+                    if item.field == "putative_modification_mass_shifts"
+                )
+                assert isinstance(annotation.value, list)
+                for mass, candidates in extra_families:
+                    rows = [
+                        {
+                            "unimod_accession": accession,
+                            "name": name,
+                            "candidate_category": "biological-ptm",
+                        }
+                        for accession, name in candidates
+                    ]
+                    annotation.value.append(
+                        {
+                            "delta_mass_da": mass + index * 1e-5,
+                            "pair_support": 120,
+                            "unique_spectrum_support": 80,
+                            "classification": "putative-ptm",
+                            "confidence": "high-support",
+                            "unimod_candidates": rows,
+                            "diagnostic_unimod_candidates": rows,
+                        }
+                    )
+
+            sdrf_path = root / "PXDTEST.sdrf.tsv"
+            sdrf_path.write_text(
+                "comment[data file]\tcomment[modification parameters]\n"
+                + "".join(
+                    f"run-{index}.raw\tNT=Oxidation;AC=UniMod:35\n"
+                    for index in range(10)
+                ),
+                encoding="utf-8",
+            )
+            document = SDRFDocument.read(sdrf_path)
+            synthesis = synthesize_cohort(results, project_accession="PXDTEST")
+            self.assertEqual(len(synthesis.ptm_review_families), 1)
+            packet = build_llm_refinement_packet(
+                document,
+                results,
+                synthesis,
+                project_accession="PXDTEST",
+                sdrf_path=sdrf_path,
+                prideqc_version=__version__,
+            )
+
+        ptm_decisions = [
+            item
+            for item in packet["decision_candidates"]
+            if item["decision_type"] == "modification"
+        ]
+        self.assertEqual(len(packet["ptm_context"]), 4)
+        self.assertEqual(len(ptm_decisions), 1)
+        self.assertEqual(
+            ptm_decisions[0]["candidate_values"],
+            ["NT=Methylation;AC=UniMod:34"],
         )
 
     def test_packet_preserves_repeated_original_modification_context(self) -> None:

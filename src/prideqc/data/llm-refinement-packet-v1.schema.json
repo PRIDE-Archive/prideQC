@@ -11,6 +11,7 @@
     "sdrf",
     "runs",
     "experiment_groups",
+    "ptm_context",
     "decision_candidates",
     "llm_contract",
     "limitations"
@@ -148,6 +149,84 @@
             "items": {
               "type": "string"
             }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "ptm_context": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "experiment_group",
+          "observed_delta_mass_da",
+          "supporting_runs",
+          "group_runs",
+          "run_prevalence",
+          "high_support_run_fraction",
+          "recurrent_family_probability",
+          "mass_identity_ambiguous",
+          "candidate_values",
+          "candidate_options",
+          "actionable"
+        ],
+        "properties": {
+          "experiment_group": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observed_delta_mass_da": {
+            "type": "number"
+          },
+          "supporting_runs": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "group_runs": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "run_prevalence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "high_support_run_fraction": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "recurrent_family_probability": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "median_pair_support": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "mass_identity_ambiguous": {
+            "type": "boolean"
+          },
+          "candidate_values": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "candidate_options": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "actionable": {
+            "const": false
           }
         },
         "additionalProperties": true

@@ -446,7 +446,42 @@ def _packet_ptm_families(
     return output
 
 
-def _ptm_decision(
+def _compact_ptm_context_family(family: Mapping[str, Any]) -> dict[str, Any]:
+    """Return non-actionable recurrent-family context without per-run payload expansion."""
+    options = list(family.get("candidate_options") or [])
+    candidate_values = [
+        CVTerm(str(option["accession"]), str(option["name"])).sdrf_value()
+        for option in options
+    ]
+    return {
+        "experiment_group": family.get("experiment_group"),
+        "observed_delta_mass_da": family.get("median_mass_da"),
+        "supporting_runs": family.get("family_runs"),
+        "group_runs": family.get("group_runs"),
+        "run_prevalence": family.get("run_prevalence"),
+        "high_support_run_fraction": family.get("high_support_run_fraction"),
+        "recurrent_family_probability": family.get("recurrent_family_probability"),
+        "median_pair_support": family.get("median_pair_support"),
+        "mass_identity_ambiguous": family.get("mass_identity_ambiguous"),
+        "candidate_values": candidate_values,
+        "candidate_options": [
+            {
+                "accession": option.get("accession"),
+                "name": option.get("name"),
+                "category": option.get("category"),
+                "supporting_runs": option.get("supporting_runs"),
+                "family_runs": option.get("family_runs"),
+                "candidate_run_fraction": option.get("candidate_run_fraction"),
+                "median_residual_da": option.get("median_residual_da"),
+                "semantic_evidence": option.get("semantic_evidence"),
+            }
+            for option in options
+        ],
+        "actionable": False,
+    }
+
+
+def _review_ptm_decision(
     *,
     family: Mapping[str, Any],
     members: Sequence[str],
@@ -454,13 +489,25 @@ def _ptm_decision(
     rows_by_result: Mapping[int, Sequence[int]],
     document: SDRFDocument,
 ) -> dict[str, Any]:
+    """Build an actionable PTM decision only from the strict cohort review layer."""
     label = str(family.get("experiment_group") or "")
+    accession = str(family.get("unimod_accession") or "")
+    name = str(family.get("unimod_name") or "")
     family_mass = float(family.get("median_mass_da") or 0.0)
-    options = list(family.get("candidate_options") or [])
-    allowed_values = [
-        CVTerm(str(option["accession"]), str(option["name"])).sdrf_value()
-        for option in options
-    ]
+    candidate_value = CVTerm(accession, name).sdrf_value()
+    per_run_support: list[dict[str, Any]] = []
+    for run_name in sorted(members, key=str.casefold):
+        result = by_name.get(run_name)
+        if result is None:
+            continue
+        matches = _matching_ptm_support(
+            result,
+            accession=accession,
+            family_mass_da=family_mass,
+        )
+        if matches:
+            per_run_support.append({"run_id": run_name, "observations": matches})
+
     target_rows = _group_rows(members, by_name, rows_by_result)
     return {
         "decision_id": f"{label}:modification-family:{family_mass:.6f}",
@@ -471,8 +518,8 @@ def _ptm_decision(
         "target_rows": target_rows,
         "target_runs": sorted(members, key=str.casefold),
         "original": _column_context(document, target_rows, MODIFICATION_COLUMN),
-        "candidate_values": allowed_values,
-        "allowed_values": allowed_values,
+        "candidate_values": [candidate_value],
+        "allowed_values": [candidate_value],
         "allowed_decisions": list(ALLOWED_DECISIONS),
         "evidence": {
             "observed_delta_mass_da": family.get("median_mass_da"),
@@ -480,11 +527,25 @@ def _ptm_decision(
             "group_runs": family.get("group_runs"),
             "run_prevalence": family.get("run_prevalence"),
             "high_support_run_fraction": family.get("high_support_run_fraction"),
-            "recurrent_family_probability": family.get("recurrent_family_probability"),
+            "candidate_run_fraction": family.get("candidate_run_fraction"),
+            "recurrent_family_probability": family.get("raw_prevalence_probability"),
             "median_pair_support": family.get("median_pair_support"),
             "mass_identity_ambiguous": family.get("mass_identity_ambiguous"),
-            "candidate_options": options,
-            "per_run_support": list(family.get("per_run_support") or []),
+            "candidate_options": [
+                {
+                    "accession": accession,
+                    "name": name,
+                    "semantic_evidence": {
+                        "status": family.get("semantic_evidence_status"),
+                        "sources": list(family.get("semantic_evidence_sources") or []),
+                        "notes": list(family.get("semantic_evidence_notes") or []),
+                    },
+                }
+            ],
+            "semantic_evidence_status": family.get("semantic_evidence_status"),
+            "sdrf_status": family.get("sdrf_status"),
+            "per_run_support": per_run_support,
+            "review_gate": "strict-cohort-ptm-review-family",
         },
         "evidence_semantics": {
             "recurrent_family_probability_is_identity_probability": False,
@@ -538,6 +599,7 @@ def build_llm_refinement_packet(
         )
 
     decisions: list[dict[str, Any]] = []
+    ptm_context: list[dict[str, Any]] = []
     group_entries: list[dict[str, Any]] = []
     for label in sorted(synthesis.groups, key=str.casefold):
         summary = synthesis.groups[label]
@@ -577,8 +639,18 @@ def build_llm_refinement_packet(
             project_accession=project_accession,
             semantic_evidence=semantic_evidence,
         )
-        for family in group_ptms:
-            ptm = _ptm_decision(
+        ptm_context.extend(_compact_ptm_context_family(family) for family in group_ptms)
+
+        review_families = sorted(
+            (
+                family
+                for family in synthesis.ptm_review_families
+                if str(family.get("experiment_group") or "") == label
+            ),
+            key=lambda family: float(family.get("median_mass_da") or 0.0),
+        )
+        for family in review_families:
+            ptm = _review_ptm_decision(
                 family=family,
                 members=members,
                 by_name=by_name,
@@ -599,6 +671,8 @@ def build_llm_refinement_packet(
                     if key not in {"ptm_review_families", "sdrf_eligible_ptms", "members"}
                 },
                 "decision_ids": decision_ids,
+                "ptm_context_family_count": len(group_ptms),
+                "actionable_ptm_review_family_count": len(review_families),
             }
         )
 
@@ -633,6 +707,7 @@ def build_llm_refinement_packet(
         },
         "runs": run_entries,
         "experiment_groups": group_entries,
+        "ptm_context": ptm_context,
         "decision_candidates": decisions,
         "llm_contract": {
             "allowed_decisions": list(ALLOWED_DECISIONS),
@@ -643,8 +718,9 @@ def build_llm_refinement_packet(
         },
         "limitations": {
             "ptm_candidate_scope": (
-                "strict recurrent mass families with one or more supplied non-decoy "
-                "ontology candidates; ambiguity is retained for LLM/human adjudication"
+                "actionable modification decisions come only from strict cohort PTM review "
+                "families; broader recurrent mass-compatible families are non-actionable "
+                "ptm_context"
             ),
             "full_mzqc_documents_embedded": False,
         },
@@ -660,13 +736,20 @@ def validate_llm_refinement_packet(packet: Mapping[str, Any]) -> None:
         raise ValueError("LLM refinement packet must be accession scoped")
     runs = packet.get("runs")
     groups = packet.get("experiment_groups")
+    ptm_context = packet.get("ptm_context")
     decisions = packet.get("decision_candidates")
     if (
         not isinstance(runs, list)
         or not isinstance(groups, list)
+        or not isinstance(ptm_context, list)
         or not isinstance(decisions, list)
     ):
-        raise ValueError("LLM refinement packet runs/groups/decisions must be arrays")
+        raise ValueError(
+            "LLM refinement packet runs/groups/PTM context/decisions must be arrays"
+        )
+    for family in ptm_context:
+        if not isinstance(family, dict) or family.get("actionable") is not False:
+            raise ValueError("PTM context families must be explicit non-actionable objects")
     run_ids = [str(item.get("run_id") or "") for item in runs if isinstance(item, dict)]
     if not run_ids or any(not value for value in run_ids) or len(set(run_ids)) != len(run_ids):
         raise ValueError("LLM refinement packet must contain unique non-empty run IDs")

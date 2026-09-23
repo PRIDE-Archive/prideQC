@@ -248,9 +248,11 @@ This mode preserves `original.sdrf.tsv`, writes `cohort-refinement.json`, and re
 every SDRF proposal in `sdrf-changes.tsv` plus the human-readable
 `sdrf-refinement.log.txt`. It also writes one accession-level
 `llm-refinement-packet.json` containing compact per-run precursor/fragment tolerance
-evidence, inferred experiment groups, original SDRF values, and constrained PTM
-candidates for later LLM/human adjudication. The packet is deterministic, contains all
-SDRF-mapped runs, and does not itself call an LLM or mutate the SDRF. Existing
+evidence, inferred experiment groups, original SDRF values, and PTM evidence for later
+LLM/human adjudication. Broad recurrent mass-compatible PTM families are retained only
+as non-actionable `ptm_context`; only the stricter cohort PTM review families become
+`decision_candidates`. The packet is deterministic, contains all SDRF-mapped runs, and
+does not itself call an LLM or mutate the SDRF. Existing
 modification parameters are never replaced: a new
 confidence-gated PTM uses an empty repeated `comment[modification parameters]` slot or
 adds another repeated column. Automatic PTM writing is deliberately strict: a 0.02-Da
