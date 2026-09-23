@@ -155,8 +155,10 @@ ARG PMULTIQC_GIT_URL=https://github.com/singjc/pmultiqc.git
 ARG PMULTIQC_GIT_REF=21ca6ee4b9abb399725d4fc65cff13ada21e4b0d
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates libgcc-s1 libgomp1 libgssapi-krb5-2 libicu72 libssl3 libstdc++6 tzdata zlib1g && \
+    apt-get install -y --no-install-recommends ca-certificates libgcc-s1 libgomp1 libgssapi-krb5-2 libicu72 libssl3 libstdc++6 procps tzdata zlib1g && \
     rm -rf /var/lib/apt/lists/* && \
+    command -v ps >/dev/null && \
+    ps aux >/dev/null && \
     mkdir -p /opt/prideqc/bin /data /results /cache /work && \
     chmod 1777 /data /results /cache /work
 
