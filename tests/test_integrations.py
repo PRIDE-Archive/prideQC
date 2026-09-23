@@ -377,7 +377,20 @@ class PrideTests(unittest.TestCase):
             self.assertTrue(manifest["success"])
             self.assertEqual(client.download_file_by_name.call_count, 1)
             self.assertEqual(manifest["acquisition"]["accession"], "PXD008644")
-            self.assertTrue((root / "qc/run.mzML.mzQC").exists())
+            mzqc_path = root / "qc/run.mzML.mzQC"
+            self.assertTrue(mzqc_path.exists())
+            mzqc = json.loads(mzqc_path.read_text())
+            properties = mzqc["mzQC"]["runQualities"][0]["metadata"]["inputFiles"][0][
+                "fileProperties"
+            ]
+            self.assertIn(
+                {
+                    "accession": "MS:1001919",
+                    "name": "ProteomeXchange accession number",
+                    "value": "PXD008644",
+                },
+                properties,
+            )
             self.assertIn(
                 "Orbitrap Fusion", (root / "qc/refined.sdrf.tsv").read_text()
             )

@@ -744,6 +744,22 @@ class SerializationTests(unittest.TestCase):
         self.assertTrue(data["creationDate"].endswith("+00:00"))
 
     @unittest.skipUnless(importlib.util.find_spec("jsonschema"), "jsonschema not installed")
+    def test_mzqc_serializes_proteomexchange_accession_in_input_file_metadata(self):
+        result = analyze()
+        result.project_accession = "pxd041271"
+
+        run = MzQCWriter().build(result, Path("local.obo"))["mzQC"]["runQualities"][0]
+        properties = run["metadata"]["inputFiles"][0]["fileProperties"]
+
+        self.assertIn(
+            {
+                "accession": "MS:1001919",
+                "name": "ProteomeXchange accession number",
+                "value": "PXD041271",
+            },
+            properties,
+        )
+
     def test_official_mzqc_schema_with_format_checks(self):
         import jsonschema
 

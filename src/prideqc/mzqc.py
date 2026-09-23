@@ -451,6 +451,13 @@ class MzQCWriter:
         if result.source_path:
             properties.append({"accession": "QCPRIDE:SOURCEFILE", "name": "original vendor file",
                                "value": str(result.source_path)})
+        project_accession = (result.project_accession or "").strip().upper()
+        if project_accession.startswith("PXD"):
+            properties.append({
+                "accession": "MS:1001919",
+                "name": "ProteomeXchange accession number",
+                "value": project_accession,
+            })
         provenance_path = result.source_path or result.input_path
         input_file: dict[str, Any] = {
             "name": provenance_path.name, "location": provenance_path.resolve().as_uri(),

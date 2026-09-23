@@ -100,6 +100,7 @@ class AnalysisResult:
     engine_version: str
     elapsed_seconds: float
     source_path: Path | None = None
+    project_accession: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)

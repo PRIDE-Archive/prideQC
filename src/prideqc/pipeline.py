@@ -290,9 +290,16 @@ class Workflow:
             username=username,
             password=password,
         )
-        manifest = self.run(paths, output, sdrf=sdrf, aliases=aliases)
+        normalized_accession = accession.strip().upper()
+        manifest = self.run(
+            paths,
+            output,
+            sdrf=sdrf,
+            aliases=aliases,
+            project_accession=normalized_accession,
+        )
         manifest["acquisition"] = {
-            "accession": accession.strip().upper(),
+            "accession": normalized_accession,
             "manifest": str(download / "download-manifest.json"),
         }
         write_json(output / "manifest.json", manifest)
@@ -305,6 +312,7 @@ class Workflow:
         *,
         sdrf: Path | None = None,
         aliases: dict[str, str] | None = None,
+        project_accession: str | None = None,
     ) -> dict[str, Any]:
         inputs = [Path(path).resolve(strict=True) for path in paths]
         if not inputs:
@@ -370,6 +378,8 @@ class Workflow:
             for outcome in stream:
                 if outcome.result is not None:
                     try:
+                        if project_accession:
+                            outcome.result.project_accession = project_accession.strip().upper()
                         prefix = output / outcome.source.name
                         # Appending, not replacing, avoids .mzML/.gz stem collisions.
                         MzQCWriter().write(outcome.result, Path(f"{prefix}.mzQC"))
