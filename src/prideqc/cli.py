@@ -422,6 +422,9 @@ def _llm(arguments: argparse.Namespace) -> int:
             raise ValueError("LLM timeouts must be positive")
         output = arguments.output or arguments.request.with_name("llm-refinement-decisions.json")
         audit_output = arguments.audit_output or arguments.request.with_name("llm-model-run.json")
+        def report_progress(index: int, total: int, decision_id: str) -> None:
+            print(f"Adjudicating {index}/{total}: {decision_id}")
+
         adapter = LocalLlamaCppAdapter(
             cache_dir=arguments.cache_dir,
             server_path=arguments.server_path,
@@ -429,6 +432,7 @@ def _llm(arguments: argparse.Namespace) -> int:
             startup_timeout=arguments.startup_timeout,
             request_timeout=arguments.request_timeout,
             context_size=arguments.context_size,
+            progress=report_progress,
         )
         result = adapter.adjudicate(request)
         write_json(output, result.decisions)

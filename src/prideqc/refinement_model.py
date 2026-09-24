@@ -13,7 +13,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -108,7 +108,7 @@ def build_llama_chat_payload(
         "temperature": 0.0,
         "top_p": 1.0,
         "stream": False,
-        "max_tokens": 4096,
+        "max_tokens": 768,
         "chat_template_kwargs": {"enable_thinking": False},
         "response_format": {
             "type": "json_object",
@@ -255,6 +255,7 @@ class LocalLlamaCppAdapter:
         startup_timeout: float = 180.0,
         request_timeout: float = 300.0,
         context_size: int = 8192,
+        progress: Callable[[int, int, str], None] | None = None,
     ) -> None:
         self.cache_dir = cache_dir
         self.server_path = server_path
@@ -262,6 +263,17 @@ class LocalLlamaCppAdapter:
         self.startup_timeout = startup_timeout
         self.request_timeout = request_timeout
         self.context_size = context_size
+        self.progress = progress
+
+    @staticmethod
+    def _single_decision_request(
+        request: Mapping[str, Any],
+        decision: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        single = dict(request)
+        single["decisions"] = [dict(decision)]
+        validate_llm_adjudication_request(single)
+        return single
 
     def adjudicate(self, request: Mapping[str, Any]) -> ModelRunResult:
         validate_llm_adjudication_request(request)
@@ -271,8 +283,11 @@ class LocalLlamaCppAdapter:
             raise RuntimeError(f"llama-server not found: {server}")
         if not model.is_file():
             raise RuntimeError(f"GGUF model not found: {model}")
-        payload = build_llama_chat_payload(request, model_name=model.name)
+        decisions_in = request["decisions"]
+        assert isinstance(decisions_in, list)
         log_root = (self.cache_dir or default_cache_dir()).expanduser().resolve()
+        decision_outputs: list[dict[str, Any]] = []
+        transport_responses: list[dict[str, Any]] = []
         with _LocalServer(
             server,
             model,
@@ -280,23 +295,51 @@ class LocalLlamaCppAdapter:
             context_size=self.context_size,
             log_path=log_root / "llama-server.log",
         ) as local:
-            raw = _json_request(
-                f"{local.base_url}/v1/chat/completions",
-                payload,
-                timeout=self.request_timeout,
-            )
-        decisions = _extract_decision_response(raw)
+            total = len(decisions_in)
+            for index, decision in enumerate(decisions_in, start=1):
+                assert isinstance(decision, Mapping)
+                decision_id = str(decision["decision_id"])
+                if self.progress is not None:
+                    self.progress(index, total, decision_id)
+                single_request = self._single_decision_request(request, decision)
+                payload = build_llama_chat_payload(single_request, model_name=model.name)
+                raw = _json_request(
+                    f"{local.base_url}/v1/chat/completions",
+                    payload,
+                    timeout=self.request_timeout,
+                )
+                single_response = _extract_decision_response(raw)
+                validate_llm_refinement_decisions(single_response, single_request)
+                raw_decisions = single_response["decisions"]
+                assert isinstance(raw_decisions, list) and len(raw_decisions) == 1
+                output = raw_decisions[0]
+                assert isinstance(output, dict)
+                decision_outputs.append(output)
+                transport_responses.append(
+                    {
+                        "decision_id": decision_id,
+                        "response": raw,
+                    }
+                )
+        decisions = {
+            "schema_version": "prideqc-llm-refinement-decision-v1",
+            "request_id": request["request_id"],
+            "project_accession": request.get("project_accession"),
+            "decisions": decision_outputs,
+        }
         validate_llm_refinement_decisions(decisions, request)
         managed_runtime = self.server_path is None
         managed_model = self.model_path is None
         audit: dict[str, Any] = {
             "schema_version": "prideqc-llm-model-run-v1",
             "adapter": "local-llama.cpp",
+            "inference_mode": "one-decision-per-call",
             "runtime": {
                 "project": "ggml-org/llama.cpp" if managed_runtime else None,
                 "build": DEFAULT_LLAMA_BUILD if managed_runtime else None,
                 "server": str(server),
                 "managed": managed_runtime,
+                "context_size": self.context_size,
             },
             "model": {
                 "repository": DEFAULT_MODEL_REPOSITORY if managed_model else None,
@@ -308,6 +351,6 @@ class LocalLlamaCppAdapter:
             },
             "prompt_version": SYSTEM_PROMPT_VERSION,
             "request_id": request["request_id"],
-            "transport_response": raw,
+            "decision_calls": transport_responses,
         }
         return ModelRunResult(decisions=decisions, audit=audit)

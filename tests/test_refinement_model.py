@@ -145,6 +145,89 @@ class RefinementModelTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "exact supplied candidate"):
                     adapter.adjudicate(request)
 
+    def test_local_adapter_splits_accession_request_into_one_decision_calls(self) -> None:
+        request = self._request()
+        second = copy.deepcopy(request["decisions"][0])  # type: ignore[index]
+        second["decision_id"] = "Experiment group 1:fragment-mass-tolerance"
+        second["target_field"] = "comment[fragment mass tolerance]"
+        second["candidate_values"] = ["11 ppm"]
+        request["decisions"].append(second)  # type: ignore[union-attr]
+
+        class FakeServer:
+            base_url = "http://127.0.0.1:12345"
+
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            def __enter__(self) -> FakeServer:
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                pass
+
+        seen_prompt_decisions: list[list[str]] = []
+
+        def fake_json_request(
+            url: str,
+            payload: dict[str, object] | None,
+            timeout: float,
+        ) -> dict[str, object]:
+            self.assertIsNotNone(payload)
+            assert payload is not None
+            messages = payload["messages"]
+            assert isinstance(messages, list)
+            user_message = messages[1]
+            assert isinstance(user_message, dict)
+            single_request = json.loads(str(user_message["content"]))
+            prompt_decisions = single_request["decisions"]
+            self.assertEqual(len(prompt_decisions), 1)
+            decision = prompt_decisions[0]
+            decision_id = decision["decision_id"]
+            seen_prompt_decisions.append([decision_id])
+            selected = decision["candidate_values"][0]
+            response = {
+                "schema_version": "prideqc-llm-refinement-decision-v1",
+                "request_id": request["request_id"],
+                "project_accession": "PXDTEST",
+                "decisions": [
+                    {
+                        "decision_id": decision_id,
+                        "decision": "accept",
+                        "selected_value": selected,
+                        "reason": "The supplied evidence supports this candidate.",
+                    }
+                ],
+            }
+            return {"choices": [{"message": {"content": json.dumps(response)}}]}
+
+        progress: list[tuple[int, int, str]] = []
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            server = root / "llama-server"
+            model = root / "model.gguf"
+            server.touch()
+            model.touch()
+            adapter = LocalLlamaCppAdapter(
+                server_path=server,
+                model_path=model,
+                progress=lambda index, total, decision_id: progress.append(
+                    (index, total, decision_id)
+                ),
+            )
+            with (
+                patch("prideqc.refinement_model._LocalServer", FakeServer),
+                patch("prideqc.refinement_model._json_request", side_effect=fake_json_request),
+            ):
+                result = adapter.adjudicate(request)
+
+        self.assertEqual(len(result.decisions["decisions"]), 2)
+        self.assertEqual(len(seen_prompt_decisions), 2)
+        self.assertTrue(all(len(ids) == 1 for ids in seen_prompt_decisions))
+        self.assertEqual(result.audit["inference_mode"], "one-decision-per-call")
+        self.assertEqual(len(result.audit["decision_calls"]), 2)
+        self.assertEqual([item[:2] for item in progress], [(1, 2), (2, 2)])
+
+
 
 if __name__ == "__main__":
     unittest.main()
