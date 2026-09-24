@@ -252,7 +252,7 @@ def parser() -> argparse.ArgumentParser:
     llm_adjudicate.add_argument("--server-path", type=Path)
     llm_adjudicate.add_argument("--model-path", type=Path)
     llm_adjudicate.add_argument("--startup-timeout", type=float, default=180.0)
-    llm_adjudicate.add_argument("--request-timeout", type=float, default=300.0)
+    llm_adjudicate.add_argument("--request-timeout", type=float, default=900.0)
     llm_adjudicate.add_argument("--context-size", type=int, default=8192)
 
     fetch = commands.add_parser("fetch", help="Download an explicit PRIDE selection using pridepy")

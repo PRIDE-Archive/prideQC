@@ -83,6 +83,18 @@ def _response_schema() -> dict[str, Any]:
     return payload
 
 
+def _model_input(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the minimal scientific view needed for one constrained decision."""
+    decisions = request["decisions"]
+    if not isinstance(decisions, list) or len(decisions) != 1:
+        raise ValueError("Local model input must contain exactly one decision")
+    return {
+        "request_id": request["request_id"],
+        "project_accession": request.get("project_accession"),
+        "decision": decisions[0],
+    }
+
+
 def build_llama_chat_payload(
     request: Mapping[str, Any],
     *,
@@ -90,6 +102,7 @@ def build_llama_chat_payload(
 ) -> dict[str, Any]:
     """Build the deterministic llama.cpp chat-completion payload."""
     validate_llm_adjudication_request(request)
+    model_input = _model_input(request)
     return {
         "model": model_name,
         "messages": [
@@ -97,8 +110,7 @@ def build_llama_chat_payload(
             {
                 "role": "user",
                 "content": json.dumps(
-                    request,
-                    sort_keys=True,
+                    model_input,
                     separators=(",", ":"),
                     ensure_ascii=False,
                     allow_nan=False,
@@ -108,7 +120,8 @@ def build_llama_chat_payload(
         "temperature": 0.0,
         "top_p": 1.0,
         "stream": False,
-        "max_tokens": 768,
+        "max_tokens": 384,
+        "cache_prompt": True,
         "chat_template_kwargs": {"enable_thinking": False},
         "response_format": {
             "type": "json_object",
@@ -253,7 +266,7 @@ class LocalLlamaCppAdapter:
         server_path: Path | None = None,
         model_path: Path | None = None,
         startup_timeout: float = 180.0,
-        request_timeout: float = 300.0,
+        request_timeout: float = 900.0,
         context_size: int = 8192,
         progress: Callable[[int, int, str], None] | None = None,
     ) -> None:
@@ -303,11 +316,13 @@ class LocalLlamaCppAdapter:
                     self.progress(index, total, decision_id)
                 single_request = self._single_decision_request(request, decision)
                 payload = build_llama_chat_payload(single_request, model_name=model.name)
+                started = time.monotonic()
                 raw = _json_request(
                     f"{local.base_url}/v1/chat/completions",
                     payload,
                     timeout=self.request_timeout,
                 )
+                elapsed_seconds = time.monotonic() - started
                 single_response = _extract_decision_response(raw)
                 validate_llm_refinement_decisions(single_response, single_request)
                 raw_decisions = single_response["decisions"]
@@ -318,6 +333,7 @@ class LocalLlamaCppAdapter:
                 transport_responses.append(
                     {
                         "decision_id": decision_id,
+                        "elapsed_seconds": round(elapsed_seconds, 3),
                         "response": raw,
                     }
                 )

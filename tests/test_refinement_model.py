@@ -80,7 +80,17 @@ class RefinementModelTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first["temperature"], 0.0)
         self.assertFalse(first["stream"])
+        self.assertEqual(first["max_tokens"], 384)
+        self.assertTrue(first["cache_prompt"])
         self.assertFalse(first["chat_template_kwargs"]["enable_thinking"])
+        model_input = json.loads(first["messages"][1]["content"])
+        self.assertEqual(
+            set(model_input),
+            {"request_id", "project_accession", "decision"},
+        )
+        self.assertNotIn("source_packet", model_input)
+        self.assertNotIn("sdrf", model_input)
+        self.assertNotIn("contract", model_input)
         self.assertEqual(first["response_format"]["type"], "json_object")
         self.assertEqual(
             first["response_format"]["schema"]["properties"]["decisions"]["type"],
@@ -178,10 +188,12 @@ class RefinementModelTests(unittest.TestCase):
             assert isinstance(messages, list)
             user_message = messages[1]
             assert isinstance(user_message, dict)
-            single_request = json.loads(str(user_message["content"]))
-            prompt_decisions = single_request["decisions"]
-            self.assertEqual(len(prompt_decisions), 1)
-            decision = prompt_decisions[0]
+            model_input = json.loads(str(user_message["content"]))
+            self.assertEqual(
+                set(model_input),
+                {"request_id", "project_accession", "decision"},
+            )
+            decision = model_input["decision"]
             decision_id = decision["decision_id"]
             seen_prompt_decisions.append([decision_id])
             selected = decision["candidate_values"][0]
@@ -225,6 +237,9 @@ class RefinementModelTests(unittest.TestCase):
         self.assertTrue(all(len(ids) == 1 for ids in seen_prompt_decisions))
         self.assertEqual(result.audit["inference_mode"], "one-decision-per-call")
         self.assertEqual(len(result.audit["decision_calls"]), 2)
+        self.assertTrue(
+            all("elapsed_seconds" in call for call in result.audit["decision_calls"])
+        )
         self.assertEqual([item[:2] for item in progress], [(1, 2), (2, 2)])
 
 
