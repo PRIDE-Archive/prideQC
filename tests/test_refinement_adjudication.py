@@ -26,8 +26,12 @@ class RefinementAdjudicationTests(unittest.TestCase):
             "schema_version": "prideqc-llm-refinement-packet-v1",
             "packet_scope": "accession-sdrf",
             "project_accession": "PXDTEST",
-            "provenance": {"prideqc_version": "0.2.0"},
+            "provenance": {
+                "prideqc_version": "0.2.0",
+                "input_mode": "sdrf-backed",
+            },
             "sdrf": {
+                "available": True,
                 "source_name": "PXDTEST.sdrf.tsv",
                 "sha256": "a" * 64,
                 "row_count": 2,
@@ -111,6 +115,7 @@ class RefinementAdjudicationTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(first["schema_version"], REQUEST_SCHEMA_VERSION)
         self.assertRegex(first["request_id"], r"^sha256:[0-9a-f]{64}$")
+        self.assertEqual(first["input_mode"], "sdrf-backed")
         self.assertEqual(len(first["decisions"]), 2)
         tolerance = next(
             item for item in first["decisions"] if item["decision_type"] == "mass_tolerance"

@@ -21,8 +21,12 @@ class RefinementModelTests(unittest.TestCase):
             "schema_version": "prideqc-llm-refinement-packet-v1",
             "packet_scope": "accession-sdrf",
             "project_accession": "PXDTEST",
-            "provenance": {"prideqc_version": "0.2.0"},
+            "provenance": {
+                "prideqc_version": "0.2.0",
+                "input_mode": "sdrf-backed",
+            },
             "sdrf": {
+                "available": True,
                 "source_name": "PXDTEST.sdrf.tsv",
                 "sha256": "a" * 64,
                 "row_count": 1,
@@ -63,6 +67,7 @@ class RefinementModelTests(unittest.TestCase):
             "schema_version": "prideqc-llm-refinement-decision-v1",
             "request_id": request["request_id"],
             "project_accession": "PXDTEST",
+            "input_mode": request.get("input_mode"),
             "decisions": [
                 {
                     "decision_id": decision["decision_id"],  # type: ignore[index]
@@ -91,6 +96,7 @@ class RefinementModelTests(unittest.TestCase):
         self.assertNotIn("source_packet", model_input)
         self.assertNotIn("sdrf", model_input)
         self.assertNotIn("contract", model_input)
+        self.assertEqual(request["input_mode"], "sdrf-backed")
         self.assertEqual(first["response_format"]["type"], "json_object")
         self.assertEqual(
             first["response_format"]["schema"]["properties"]["decisions"]["type"],
@@ -260,11 +266,136 @@ class RefinementModelTests(unittest.TestCase):
         request_mock.assert_not_called()
         self.assertEqual(result.decisions["decisions"][0]["decision"], "reject")
         self.assertEqual(result.audit["decision_counts"]["policy_resolved"], 1)
+        self.assertEqual(result.audit["decision_counts"]["policy_reject"], 1)
+        self.assertEqual(result.audit["decision_counts"]["policy_accept"], 0)
+        self.assertEqual(result.audit["decision_counts"]["policy_abstain"], 0)
         self.assertEqual(result.audit["decision_counts"]["model_called"], 0)
+        self.assertEqual(result.audit["input_mode"], "sdrf-backed")
+        self.assertEqual(result.decisions["input_mode"], "sdrf-backed")
         self.assertFalse(result.audit["runtime"]["invoked"])
         self.assertEqual(
             result.audit["policy_decisions"][0]["rule"],
             "tolerance-preserve-reported-value",
+        )
+
+
+    def test_no_original_sdrf_high_confidence_ptm_is_policy_accepted_with_provenance(self) -> None:
+        observations = []
+        for index in range(4):
+            observations.append(
+                {
+                    "run_id": f"run-{index}.raw",
+                    "observations": [
+                        {
+                            "delta_mass_da": 14.0155,
+                            "confidence": "high-support",
+                            "match_tolerance_da": 0.02,
+                            "candidate_options": [
+                                {
+                                    "accession": "UniMod:34",
+                                    "name": "Methylation",
+                                    "category": "biological-ptm",
+                                    "residual_da": 0.001,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+        packet: dict[str, object] = {
+            "schema_version": "prideqc-llm-refinement-packet-v1",
+            "packet_scope": "accession-sdrf",
+            "project_accession": "PXDTEST",
+            "provenance": {
+                "prideqc_version": "0.2.0",
+                "input_mode": "no-original-sdrf",
+            },
+            "sdrf": {
+                "available": False,
+                "source_name": None,
+                "sha256": None,
+                "row_count": 0,
+                "target_columns": {},
+            },
+            "runs": [
+                {
+                    "run_id": f"run-{index}.raw",
+                    "experiment_group": "Experiment group 1",
+                }
+                for index in range(4)
+            ],
+            "experiment_groups": [
+                {
+                    "group_id": "Experiment group 1",
+                    "decision_ids": ["Experiment group 1:modification-family:14.015500"],
+                }
+            ],
+            "ptm_context": [],
+            "decision_candidates": [
+                {
+                    "decision_id": "Experiment group 1:modification-family:14.015500",
+                    "decision_type": "modification",
+                    "experiment_group": "Experiment group 1",
+                    "target_field": "comment[modification parameters]",
+                    "write_semantics": "evidence_only_no_original_sdrf",
+                    "target_rows": [],
+                    "target_runs": [f"run-{index}.raw" for index in range(4)],
+                    "original": {
+                        "status": "unavailable",
+                        "reason": "no-original-sdrf",
+                        "column_present": False,
+                        "column_count": 0,
+                        "rows": [],
+                    },
+                    "candidate_values": ["NT=Methylation;AC=UniMod:34"],
+                    "allowed_values": ["NT=Methylation;AC=UniMod:34"],
+                    "allowed_decisions": ["accept", "reject", "abstain"],
+                    "evidence": {
+                        "supporting_runs": 4,
+                        "group_runs": 4,
+                        "run_prevalence": 1.0,
+                        "high_support_run_fraction": 1.0,
+                        "candidate_run_fraction": 1.0,
+                        "recurrent_family_probability": 0.99999,
+                        "mass_identity_ambiguous": False,
+                        "candidate_options": [
+                            {
+                                "accession": "UniMod:34",
+                                "name": "Methylation",
+                                "semantic_evidence": {
+                                    "status": "not-evaluated",
+                                    "sources": [],
+                                    "notes": [],
+                                },
+                            }
+                        ],
+                        "semantic_evidence_status": "not-evaluated",
+                        "per_run_support": observations,
+                    },
+                }
+            ],
+            "llm_contract": {},
+            "limitations": {},
+        }
+        request = build_llm_adjudication_request(packet)
+        self.assertEqual(request["input_mode"], "no-original-sdrf")
+        adapter = LocalLlamaCppAdapter(
+            server_path=Path("/definitely/missing/llama-server"),
+            model_path=Path("/definitely/missing/model.gguf"),
+        )
+        with patch("prideqc.refinement_model._json_request") as request_mock:
+            result = adapter.adjudicate(request)
+
+        request_mock.assert_not_called()
+        self.assertEqual(result.decisions["input_mode"], "no-original-sdrf")
+        self.assertEqual(result.audit["input_mode"], "no-original-sdrf")
+        self.assertEqual(result.audit["decision_counts"]["policy_accept"], 1)
+        self.assertEqual(result.audit["decision_counts"]["policy_resolved"], 1)
+        self.assertEqual(result.audit["decision_counts"]["model_called"], 0)
+        self.assertEqual(result.decisions["decisions"][0]["decision"], "accept")
+        self.assertEqual(
+            result.audit["policy_decisions"][0]["rule"],
+            "ptm-high-confidence-raw-identity",
         )
 
 

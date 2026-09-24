@@ -23,6 +23,18 @@ REQUEST_SCHEMA_VERSION = "prideqc-llm-adjudication-request-v1"
 RESPONSE_SCHEMA_VERSION = "prideqc-llm-refinement-decision-v1"
 REQUEST_SCOPE = "accession-sdrf"
 PTM_CONTEXT_MASS_TOLERANCE_DA = 0.02
+INPUT_MODES = ("sdrf-backed", "no-original-sdrf")
+
+
+def _packet_input_mode(packet: Mapping[str, Any]) -> str:
+    provenance = _as_mapping(packet.get("provenance"))
+    value = str(provenance.get("input_mode") or "").strip()
+    if value in INPUT_MODES:
+        return value
+    # Backward-compatible inference for already-persisted v1 packets created
+    # before input_mode provenance was added. Newly built packets always set it.
+    sdrf = _as_mapping(packet.get("sdrf"))
+    return "sdrf-backed" if sdrf.get("available") is True else "no-original-sdrf"
 
 
 def _canonical_sha256(value: Mapping[str, Any]) -> str:
@@ -116,6 +128,7 @@ def build_llm_adjudication_request(packet: Mapping[str, Any]) -> dict[str, Any]:
         "request_scope": REQUEST_SCOPE,
         "request_id": f"sha256:{source_hash}",
         "project_accession": packet.get("project_accession"),
+        "input_mode": _packet_input_mode(packet),
         "source_packet": {
             "schema_version": packet.get("schema_version"),
             "sha256": source_hash,
@@ -150,6 +163,9 @@ def validate_llm_adjudication_request(request: Mapping[str, Any]) -> None:
         raise ValueError("Unexpected LLM adjudication request schema version")
     if request.get("request_scope") != REQUEST_SCOPE:
         raise ValueError("LLM adjudication request must be accession scoped")
+    input_mode = request.get("input_mode")
+    if input_mode is not None and input_mode not in INPUT_MODES:
+        raise ValueError("LLM adjudication request has invalid input mode")
     request_id = str(request.get("request_id") or "")
     source = _as_mapping(request.get("source_packet"))
     source_hash = str(source.get("sha256") or "")
@@ -209,6 +225,9 @@ def validate_llm_refinement_decisions(
         raise ValueError("LLM refinement decisions do not match the adjudication request")
     if response.get("project_accession") != request.get("project_accession"):
         raise ValueError("LLM refinement decisions project accession mismatch")
+    response_input_mode = response.get("input_mode")
+    if response_input_mode is not None and response_input_mode != request.get("input_mode"):
+        raise ValueError("LLM refinement decisions input mode mismatch")
 
     expected = _request_decision_lookup(request)
     raw_decisions = response.get("decisions")
@@ -267,6 +286,7 @@ def empty_llm_refinement_response(request: Mapping[str, Any]) -> dict[str, Any]:
         "schema_version": RESPONSE_SCHEMA_VERSION,
         "request_id": request["request_id"],
         "project_accession": request.get("project_accession"),
+        "input_mode": request.get("input_mode"),
         "decisions": decisions,
     }
     validate_llm_refinement_decisions(response, request)

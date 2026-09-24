@@ -341,6 +341,8 @@ class RefinementPacketTests(unittest.TestCase):
             )
             jsonschema.validate(request, request_schema)
 
+        self.assertEqual(packet["provenance"]["input_mode"], "no-original-sdrf")
+        self.assertEqual(request["input_mode"], "no-original-sdrf")
         self.assertFalse(packet["sdrf"]["available"])
         self.assertIsNone(packet["sdrf"]["source_name"])
         self.assertIsNone(packet["sdrf"]["sha256"])

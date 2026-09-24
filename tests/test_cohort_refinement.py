@@ -530,10 +530,26 @@ class CohortRefinementTests(unittest.TestCase):
             request = json.loads(
                 (output / "llm-adjudication-request.json").read_text(encoding="utf-8")
             )
+            self.assertEqual(packet["provenance"]["input_mode"], "no-original-sdrf")
+            self.assertEqual(request["input_mode"], "no-original-sdrf")
             self.assertFalse(packet["sdrf"]["available"])
             self.assertTrue(request["decisions"])
             self.assertTrue(all(item["target_rows"] == [] for item in request["decisions"]))
             validator.validate.assert_not_called()
+
+    def test_no_original_sdrf_requires_unambiguous_project_accession(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            results_root = root / "results"
+            results_root.mkdir()
+            result = _result("run.raw", precursor=8.0, fragment=20.0)
+            (results_root / "run.raw.summary.json").write_text(
+                json.dumps(result.to_dict()), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ValueError, "requires one unambiguous"):
+                Workflow(WorkflowOptions(refine_sdrf_qc=True)).refine_existing_sdrf(
+                    results_root, root / "out", sdrf=None
+                )
 
     def test_existing_results_refinement_combines_file_array_summaries(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

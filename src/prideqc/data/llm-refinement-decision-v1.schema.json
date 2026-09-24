@@ -20,6 +20,9 @@
     "project_accession": {
       "type": ["string", "null"]
     },
+    "input_mode": {
+      "enum": ["sdrf-backed", "no-original-sdrf"]
+    },
     "decisions": {
       "type": "array",
       "items": {

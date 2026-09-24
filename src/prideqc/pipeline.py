@@ -722,6 +722,12 @@ class Workflow:
         if resolved_sdrf is not None:
             extra_paths = (*extra_paths, resolved_sdrf)
         project_accession = self._cohort_project_accession(results, extra_paths=extra_paths)
+        if resolved_sdrf is None and project_accession is None:
+            raise ValueError(
+                "No-original-SDRF adjudication requires one unambiguous "
+                "ProteomeXchange project accession from --project-accession, the summaries, "
+                "or the result path."
+            )
 
         output.mkdir(parents=True, exist_ok=True)
         document: SDRFDocument | None = None

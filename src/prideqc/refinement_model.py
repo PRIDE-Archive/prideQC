@@ -363,6 +363,7 @@ class LocalLlamaCppAdapter:
             "schema_version": "prideqc-llm-refinement-decision-v1",
             "request_id": request["request_id"],
             "project_accession": request.get("project_accession"),
+            "input_mode": request.get("input_mode"),
             "decisions": decision_outputs,
         }
         validate_llm_refinement_decisions(decisions, request)
@@ -374,10 +375,33 @@ class LocalLlamaCppAdapter:
             "inference_mode": "policy-gated-one-decision-per-call",
             "policy_version": PRE_ADJUDICATION_POLICY_VERSION,
             "policy": pre_adjudication_policy_metadata(),
+            "input_mode": request.get("input_mode"),
+            "project_accession": request.get("project_accession"),
             "decision_counts": {
                 "total": len(decisions_in),
+                "policy_accept": sum(
+                    item.get("decision") == "accept" for item in policy_audit
+                ),
+                "policy_reject": sum(
+                    item.get("decision") == "reject" for item in policy_audit
+                ),
+                "policy_abstain": sum(
+                    item.get("decision") == "abstain" for item in policy_audit
+                ),
                 "policy_resolved": len(policy_audit),
                 "model_called": len(transport_responses),
+                "model_accept": sum(
+                    resolved[str(item["decision_id"])].get("decision") == "accept"
+                    for item in pending
+                ),
+                "model_reject": sum(
+                    resolved[str(item["decision_id"])].get("decision") == "reject"
+                    for item in pending
+                ),
+                "model_abstain": sum(
+                    resolved[str(item["decision_id"])].get("decision") == "abstain"
+                    for item in pending
+                ),
             },
             "policy_decisions": policy_audit,
             "runtime": {

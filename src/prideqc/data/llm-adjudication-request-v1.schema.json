@@ -27,6 +27,9 @@
     "project_accession": {
       "type": ["string", "null"]
     },
+    "input_mode": {
+      "enum": ["sdrf-backed", "no-original-sdrf"]
+    },
     "source_packet": {
       "type": "object",
       "required": ["schema_version", "sha256", "prideqc_version"],

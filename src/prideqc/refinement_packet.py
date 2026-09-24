@@ -759,6 +759,17 @@ def validate_llm_refinement_packet(packet: Mapping[str, Any]) -> None:
         raise ValueError("Unexpected LLM refinement packet schema version")
     if packet.get("packet_scope") != PACKET_SCOPE:
         raise ValueError("LLM refinement packet must be accession scoped")
+    provenance = packet.get("provenance")
+    sdrf = packet.get("sdrf")
+    if not isinstance(provenance, Mapping) or not isinstance(sdrf, Mapping):
+        raise ValueError("LLM refinement packet provenance/SDRF metadata must be objects")
+    input_mode = provenance.get("input_mode")
+    if input_mode is not None:
+        if input_mode not in {"sdrf-backed", "no-original-sdrf"}:
+            raise ValueError("LLM refinement packet has invalid input mode")
+        expected_mode = "sdrf-backed" if sdrf.get("available") is True else "no-original-sdrf"
+        if input_mode != expected_mode:
+            raise ValueError("LLM refinement packet input mode/SDRF availability mismatch")
     runs = packet.get("runs")
     groups = packet.get("experiment_groups")
     ptm_context = packet.get("ptm_context")
@@ -786,6 +797,14 @@ def validate_llm_refinement_packet(packet: Mapping[str, Any]) -> None:
         if not decision_id or decision_id in decision_ids:
             raise ValueError("LLM refinement decision IDs must be unique and non-empty")
         decision_ids.add(decision_id)
+        if input_mode == "no-original-sdrf":
+            if item.get("target_rows") not in ([], None):
+                raise ValueError("No-original-SDRF decisions cannot target SDRF rows")
+            if item.get("write_semantics") != "evidence_only_no_original_sdrf":
+                raise ValueError("No-original-SDRF decisions must be evidence-only")
+            original = item.get("original")
+            if not isinstance(original, Mapping) or original.get("status") != "unavailable":
+                raise ValueError("No-original-SDRF decision original metadata must be unavailable")
         allowed = item.get("allowed_decisions")
         if allowed != list(ALLOWED_DECISIONS):
             raise ValueError(f"Unexpected allowed decisions for {decision_id}")
