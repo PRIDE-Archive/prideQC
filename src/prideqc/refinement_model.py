@@ -32,8 +32,13 @@ from prideqc.refinement_adjudication import (
     validate_llm_adjudication_request,
     validate_llm_refinement_decisions,
 )
+from prideqc.refinement_policy import (
+    PRE_ADJUDICATION_POLICY_VERSION,
+    pre_adjudication_policy_metadata,
+    resolve_pre_adjudication_policy,
+)
 
-SYSTEM_PROMPT_VERSION = "prideqc-sdrf-adjudicator-v1"
+SYSTEM_PROMPT_VERSION = "prideqc-sdrf-adjudicator-v2"
 
 _SYSTEM_PROMPT = """You are the constrained scientific metadata adjudicator for prideQC.
 You are not discovering new values. You must adjudicate only the candidates supplied in
@@ -52,9 +57,11 @@ cohort evidence consistently supports the proposed candidate. Preserve an alread
 plausible reported value unless the supplied evidence clearly establishes inconsistency.
 
 For PTMs, recurrent mass-family probability is recurrence/prevalence evidence, not
-chemical-identity probability and not proof that the modification was searched in the
-original analysis. If chemical identity, search-parameter semantics, or independent
-study/sample-preparation support is insufficient, abstain. When uncertain, abstain.
+chemical-identity probability. A deterministic prideQC policy gate has already resolved
+high-confidence RAW identities and obvious abstentions before you see a decision. Missing
+modification parameters in the original SDRF are not evidence against a PTM. For the
+remaining borderline cases, use the supplied study/sample-preparation evidence and abstain
+when identity support is still insufficient.
 
 Return only JSON matching the supplied response schema. Keep each reason concise and
 scientifically specific. Do not include hidden reasoning or chain-of-thought.
@@ -290,53 +297,68 @@ class LocalLlamaCppAdapter:
 
     def adjudicate(self, request: Mapping[str, Any]) -> ModelRunResult:
         validate_llm_adjudication_request(request)
-        server = self.server_path or managed_server_path(self.cache_dir)
-        model = self.model_path or managed_model_path(self.cache_dir)
-        if not server.is_file():
-            raise RuntimeError(f"llama-server not found: {server}")
-        if not model.is_file():
-            raise RuntimeError(f"GGUF model not found: {model}")
         decisions_in = request["decisions"]
         assert isinstance(decisions_in, list)
-        log_root = (self.cache_dir or default_cache_dir()).expanduser().resolve()
-        decision_outputs: list[dict[str, Any]] = []
+
+        resolved: dict[str, dict[str, Any]] = {}
+        policy_audit: list[dict[str, Any]] = []
+        pending: list[Mapping[str, Any]] = []
+        for decision in decisions_in:
+            assert isinstance(decision, Mapping)
+            resolution = resolve_pre_adjudication_policy(decision)
+            if resolution is None:
+                pending.append(decision)
+                continue
+            resolved[resolution.decision_id] = resolution.response_item()
+            policy_audit.append(resolution.audit_item())
+
         transport_responses: list[dict[str, Any]] = []
-        with _LocalServer(
-            server,
-            model,
-            startup_timeout=self.startup_timeout,
-            context_size=self.context_size,
-            log_path=log_root / "llama-server.log",
-        ) as local:
-            total = len(decisions_in)
-            for index, decision in enumerate(decisions_in, start=1):
-                assert isinstance(decision, Mapping)
-                decision_id = str(decision["decision_id"])
-                if self.progress is not None:
-                    self.progress(index, total, decision_id)
-                single_request = self._single_decision_request(request, decision)
-                payload = build_llama_chat_payload(single_request, model_name=model.name)
-                started = time.monotonic()
-                raw = _json_request(
-                    f"{local.base_url}/v1/chat/completions",
-                    payload,
-                    timeout=self.request_timeout,
-                )
-                elapsed_seconds = time.monotonic() - started
-                single_response = _extract_decision_response(raw)
-                validate_llm_refinement_decisions(single_response, single_request)
-                raw_decisions = single_response["decisions"]
-                assert isinstance(raw_decisions, list) and len(raw_decisions) == 1
-                output = raw_decisions[0]
-                assert isinstance(output, dict)
-                decision_outputs.append(output)
-                transport_responses.append(
-                    {
-                        "decision_id": decision_id,
-                        "elapsed_seconds": round(elapsed_seconds, 3),
-                        "response": raw,
-                    }
-                )
+        server = self.server_path or managed_server_path(self.cache_dir)
+        model = self.model_path or managed_model_path(self.cache_dir)
+        log_root = (self.cache_dir or default_cache_dir()).expanduser().resolve()
+
+        if pending:
+            if not server.is_file():
+                raise RuntimeError(f"llama-server not found: {server}")
+            if not model.is_file():
+                raise RuntimeError(f"GGUF model not found: {model}")
+            with _LocalServer(
+                server,
+                model,
+                startup_timeout=self.startup_timeout,
+                context_size=self.context_size,
+                log_path=log_root / "llama-server.log",
+            ) as local:
+                total = len(pending)
+                for index, decision in enumerate(pending, start=1):
+                    decision_id = str(decision["decision_id"])
+                    if self.progress is not None:
+                        self.progress(index, total, decision_id)
+                    single_request = self._single_decision_request(request, decision)
+                    payload = build_llama_chat_payload(single_request, model_name=model.name)
+                    started = time.monotonic()
+                    raw = _json_request(
+                        f"{local.base_url}/v1/chat/completions",
+                        payload,
+                        timeout=self.request_timeout,
+                    )
+                    elapsed_seconds = time.monotonic() - started
+                    single_response = _extract_decision_response(raw)
+                    validate_llm_refinement_decisions(single_response, single_request)
+                    raw_decisions = single_response["decisions"]
+                    assert isinstance(raw_decisions, list) and len(raw_decisions) == 1
+                    output = raw_decisions[0]
+                    assert isinstance(output, dict)
+                    resolved[decision_id] = output
+                    transport_responses.append(
+                        {
+                            "decision_id": decision_id,
+                            "elapsed_seconds": round(elapsed_seconds, 3),
+                            "response": raw,
+                        }
+                    )
+
+        decision_outputs = [resolved[str(item["decision_id"])] for item in decisions_in]
         decisions = {
             "schema_version": "prideqc-llm-refinement-decision-v1",
             "request_id": request["request_id"],
@@ -349,13 +371,22 @@ class LocalLlamaCppAdapter:
         audit: dict[str, Any] = {
             "schema_version": "prideqc-llm-model-run-v1",
             "adapter": "local-llama.cpp",
-            "inference_mode": "one-decision-per-call",
+            "inference_mode": "policy-gated-one-decision-per-call",
+            "policy_version": PRE_ADJUDICATION_POLICY_VERSION,
+            "policy": pre_adjudication_policy_metadata(),
+            "decision_counts": {
+                "total": len(decisions_in),
+                "policy_resolved": len(policy_audit),
+                "model_called": len(transport_responses),
+            },
+            "policy_decisions": policy_audit,
             "runtime": {
                 "project": "ggml-org/llama.cpp" if managed_runtime else None,
                 "build": DEFAULT_LLAMA_BUILD if managed_runtime else None,
                 "server": str(server),
                 "managed": managed_runtime,
                 "context_size": self.context_size,
+                "invoked": bool(pending),
             },
             "model": {
                 "repository": DEFAULT_MODEL_REPOSITORY if managed_model else None,
@@ -364,6 +395,7 @@ class LocalLlamaCppAdapter:
                 "path": str(model),
                 "managed": managed_model,
                 "thinking_enabled": False,
+                "invoked": bool(pending),
             },
             "prompt_version": SYSTEM_PROMPT_VERSION,
             "request_id": request["request_id"],

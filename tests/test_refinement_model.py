@@ -235,13 +235,37 @@ class RefinementModelTests(unittest.TestCase):
         self.assertEqual(len(result.decisions["decisions"]), 2)
         self.assertEqual(len(seen_prompt_decisions), 2)
         self.assertTrue(all(len(ids) == 1 for ids in seen_prompt_decisions))
-        self.assertEqual(result.audit["inference_mode"], "one-decision-per-call")
+        self.assertEqual(
+            result.audit["inference_mode"], "policy-gated-one-decision-per-call"
+        )
         self.assertEqual(len(result.audit["decision_calls"]), 2)
         self.assertTrue(
             all("elapsed_seconds" in call for call in result.audit["decision_calls"])
         )
         self.assertEqual([item[:2] for item in progress], [(1, 2), (2, 2)])
 
+
+    def test_policy_gate_can_resolve_without_starting_llama_server(self) -> None:
+        request = self._request()
+        decision = request["decisions"][0]  # type: ignore[index]
+        decision["original"] = {"rows": [{"row": 2, "values": ["20 ppm"]}]}
+
+        adapter = LocalLlamaCppAdapter(
+            server_path=Path("/definitely/missing/llama-server"),
+            model_path=Path("/definitely/missing/model.gguf"),
+        )
+        with patch("prideqc.refinement_model._json_request") as request_mock:
+            result = adapter.adjudicate(request)
+
+        request_mock.assert_not_called()
+        self.assertEqual(result.decisions["decisions"][0]["decision"], "reject")
+        self.assertEqual(result.audit["decision_counts"]["policy_resolved"], 1)
+        self.assertEqual(result.audit["decision_counts"]["model_called"], 0)
+        self.assertFalse(result.audit["runtime"]["invoked"])
+        self.assertEqual(
+            result.audit["policy_decisions"][0]["rule"],
+            "tolerance-preserve-reported-value",
+        )
 
 
 if __name__ == "__main__":

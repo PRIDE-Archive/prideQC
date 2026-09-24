@@ -308,13 +308,24 @@ uv run prideqc llm adjudicate \
   --request results/refined/llm-adjudication-request.json
 ```
 
-The command starts `llama-server` only on `127.0.0.1`, disables Qwen thinking mode for
-the initial reference policy, requests schema-constrained JSON, stops the server after the
-request, and writes `llm-refinement-decisions.json` plus `llm-model-run.json`. The latter
-keeps runtime/model/prompt provenance and the raw transport response for audit. Every
-model decision is revalidated by prideQC: all requested decision IDs must be covered once,
-`accept` must use an exact supplied candidate, and `reject`/`abstain` cannot provide a new
-value. Invalid output is rejected rather than repaired silently.
+Before invoking a model, prideQC applies deterministic scientific policy gates. Existing
+parseable search tolerances are preserved when a RAW-derived precision estimate differs;
+measured precision alone does not establish that the original search tolerance was wrong.
+For PTMs, missing modification metadata is neutral rather than negative evidence. A PTM
+may be accepted without publication support when the RAW evidence itself establishes one
+non-ambiguous biological UniMod identity with near-complete cohort recurrence,
+high-support observations across runs, and tight mass agreement. Ambiguous or weaker
+mass-only PTMs are abstained deterministically; semantically supported borderline cases
+remain eligible for LLM adjudication.
+
+When unresolved decisions remain, the command starts `llama-server` only on `127.0.0.1`,
+disables Qwen thinking mode for the initial reference policy, adjudicates one decision per
+call, stops the server after the request, and writes `llm-refinement-decisions.json` plus
+`llm-model-run.json`. The latter records policy-gate outcomes plus runtime/model/prompt
+provenance and raw model responses. Every final decision is revalidated by prideQC: all
+requested decision IDs must be covered once, `accept` must use an exact supplied candidate,
+and `reject`/`abstain` cannot provide a new value. Invalid output is rejected rather than
+repaired silently.
 
 `--server-path` and `--model-path` permit an advanced user to test a custom local
 llama.cpp runtime or GGUF without changing the scientific packet/adjudication contract.

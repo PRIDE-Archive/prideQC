@@ -437,6 +437,14 @@ def _llm(arguments: argparse.Namespace) -> int:
         result = adapter.adjudicate(request)
         write_json(output, result.decisions)
         write_json(audit_output, result.audit)
+        counts = result.audit.get("decision_counts", {})
+        if isinstance(counts, dict):
+            print(
+                "Adjudication summary: "
+                f"policy-resolved={counts.get('policy_resolved', 0)} "
+                f"model-called={counts.get('model_called', 0)} "
+                f"total={counts.get('total', 0)}"
+            )
         print(f"Validated LLM decisions: {output}")
         print(f"LLM audit: {audit_output}")
         return 0
