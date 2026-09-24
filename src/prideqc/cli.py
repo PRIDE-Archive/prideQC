@@ -396,7 +396,9 @@ def _llm(arguments: argparse.Namespace) -> int:
     if arguments.llm_command == "setup":
         from prideqc.local_llm import setup_local_llm
 
-        status = setup_local_llm(arguments.cache_dir, force=arguments.force)
+        status = setup_local_llm(
+            arguments.cache_dir, force=arguments.force, show_progress=True
+        )
         print(json.dumps(status, indent=2, sort_keys=True))
         return 0
     if arguments.llm_command == "status":

@@ -18,6 +18,7 @@ import sys
 import tarfile
 import urllib.request
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -31,7 +32,7 @@ DEFAULT_MODEL_SIZE = 2_497_280_256
 DEFAULT_MODEL_LICENSE = "Apache-2.0"
 DEFAULT_MODEL_URL = (
     "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/"
-    f"{DEFAULT_MODEL_REVISION}/{DEFAULT_MODEL_FILE}?download=true"
+    f"{DEFAULT_MODEL_REVISION}/{DEFAULT_MODEL_FILE}"
 )
 CACHE_ENVIRONMENT_VARIABLE = "PRIDEQC_LLM_CACHE"
 
@@ -198,52 +199,20 @@ def _parse_content_range(value: str | None) -> tuple[int, int, int] | None:
 
 
 def _stream_download(url: str, output: BinaryIO) -> int:
-    """Stream one object, following bounded HTTP partial-content responses.
-
-    Hugging Face's Xet-backed resolve endpoint can return a large GGUF as a sequence
-    of HTTP 206 responses. urllib follows the redirect but does not automatically
-    fetch the remaining byte ranges, so explicitly continue from Content-Range.
-    """
-    count = 0
-    remote_size: int | None = None
-    while True:
-        headers = {
+    """Stream one ordinary HTTP object into ``output``."""
+    request = urllib.request.Request(
+        url,
+        headers={
             "User-Agent": "prideQC-local-llm",
             "Accept-Encoding": "identity",
-        }
-        if count:
-            headers["Range"] = f"bytes={count}-"
-        request = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(request, timeout=120) as response:
-            status = getattr(response, "status", None)
-            content_range = _parse_content_range(response.headers.get("Content-Range"))
-            if content_range is not None:
-                start, _end, total = content_range
-                if start != count:
-                    raise RuntimeError(
-                        "Unexpected HTTP Content-Range while downloading local LLM asset: "
-                        f"expected byte {count}, received {start}"
-                    )
-                if remote_size is not None and total != remote_size:
-                    raise RuntimeError(
-                        "Remote size changed while downloading local LLM asset: "
-                        f"{remote_size} != {total}"
-                    )
-                remote_size = total
-            elif count and status == 200:
-                raise RuntimeError(
-                    "Server ignored HTTP Range while resuming local LLM asset download"
-                )
-
-            before = count
-            while chunk := response.read(1024 * 1024):
-                output.write(chunk)
-                count += len(chunk)
-
-        if count == before:
-            raise RuntimeError("Local LLM asset download made no progress")
-        if remote_size is None or count >= remote_size:
-            return count
+        },
+    )
+    count = 0
+    with urllib.request.urlopen(request, timeout=120) as response:
+        while chunk := response.read(1024 * 1024):
+            output.write(chunk)
+            count += len(chunk)
+    return count
 
 
 def _download_verified(
@@ -253,7 +222,7 @@ def _download_verified(
     *,
     expected_size: int | None = None,
 ) -> Path:
-    """Download atomically and require the pinned checksum before installation."""
+    """Download a normal-sized asset atomically and verify its checksum."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(destination.name + ".part")
     temporary.unlink(missing_ok=True)
@@ -275,6 +244,121 @@ def _download_verified(
         raise
     return destination
 
+
+def _download_verified_ranges(
+    url: str,
+    destination: Path,
+    sha256: str,
+    *,
+    expected_size: int,
+    chunk_size: int = 64 * 1024 * 1024,
+    progress: Callable[[int, int], None] | None = None,
+) -> Path:
+    """Download a large Hub file with explicit bounded HTTP ranges and resume support.
+
+    Hugging Face's ``resolve`` endpoint accepts standard byte-range requests for the
+    legacy-compatible download path even when the repository is Xet-backed.  Requesting
+    bounded chunks avoids relying on redirect/CDN partial-response behaviour and leaves
+    the ``.part`` file in place after transport failures so a later setup can resume.
+    Integrity is still enforced over the complete file before installation.
+    """
+    if expected_size <= 0:
+        raise ValueError("expected_size must be positive")
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + ".part")
+    if temporary.exists() and temporary.stat().st_size > expected_size:
+        temporary.unlink()
+
+    current = temporary.stat().st_size if temporary.exists() else 0
+    if current == expected_size:
+        observed = _sha256(temporary)
+        if observed == sha256:
+            temporary.replace(destination)
+            if progress is not None:
+                progress(expected_size, expected_size)
+            return destination
+        temporary.unlink()
+        current = 0
+
+    mode = "ab" if current else "wb"
+    try:
+        with temporary.open(mode) as handle:
+            while current < expected_size:
+                requested_end = min(current + chunk_size - 1, expected_size - 1)
+                request = urllib.request.Request(
+                    url,
+                    headers={
+                        "User-Agent": "prideQC-local-llm",
+                        "Accept-Encoding": "identity",
+                        "Range": f"bytes={current}-{requested_end}",
+                    },
+                )
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    status = getattr(response, "status", None)
+                    content_range = _parse_content_range(response.headers.get("Content-Range"))
+                    if status != 206 or content_range is None:
+                        raise RuntimeError(
+                            "Hugging Face did not honor the requested byte range for the "
+                            "local LLM model download"
+                        )
+                    start, end, total = content_range
+                    if start != current or end != requested_end or total != expected_size:
+                        raise RuntimeError(
+                            "Unexpected Content-Range while downloading local LLM model: "
+                            f"requested bytes={current}-{requested_end}, received "
+                            f"bytes={start}-{end}/{total}"
+                        )
+
+                    segment_size = 0
+                    while chunk := response.read(1024 * 1024):
+                        handle.write(chunk)
+                        segment_size += len(chunk)
+                    expected_segment_size = end - start + 1
+                    if segment_size != expected_segment_size:
+                        raise RuntimeError(
+                            "Incomplete byte range while downloading local LLM model: "
+                            f"received {segment_size} != {expected_segment_size} bytes"
+                        )
+                    handle.flush()
+                    current += segment_size
+                    if progress is not None:
+                        progress(current, expected_size)
+    except Exception:
+        # Keep a valid prefix so the next setup invocation can resume rather than
+        # re-downloading multiple gigabytes. Final integrity is always checked below.
+        raise
+
+    if temporary.stat().st_size != expected_size:
+        raise RuntimeError(
+            f"Downloaded size mismatch for {destination.name}: "
+            f"{temporary.stat().st_size} != {expected_size}"
+        )
+    observed = _sha256(temporary)
+    if observed != sha256:
+        temporary.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"SHA-256 mismatch for {destination.name}: {observed} != {sha256}"
+        )
+    temporary.replace(destination)
+    return destination
+
+
+def _model_progress(downloaded: int, total: int) -> None:
+    percent = downloaded * 100.0 / total
+    downloaded_gib = downloaded / (1024**3)
+    total_gib = total / (1024**3)
+    print(
+        f"\rDownloading {DEFAULT_MODEL_FILE}: "
+        f"{downloaded_gib:.2f}/{total_gib:.2f} GiB ({percent:5.1f}%)",
+        end="",
+        file=sys.stderr,
+        flush=True,
+    )
+    if downloaded >= total:
+        print(file=sys.stderr)
 
 def _safe_member_path(root: Path, name: str) -> Path:
     root_resolved = root.resolve()
@@ -387,7 +471,12 @@ def local_llm_status(cache_dir: Path | None = None) -> dict[str, Any]:
     }
 
 
-def setup_local_llm(cache_dir: Path | None = None, *, force: bool = False) -> dict[str, Any]:
+def setup_local_llm(
+    cache_dir: Path | None = None,
+    *,
+    force: bool = False,
+    show_progress: bool = False,
+) -> dict[str, Any]:
     """Install the pinned CPU llama.cpp runtime and default Qwen GGUF model."""
     asset = runtime_asset()
     paths = _paths(cache_dir)
@@ -411,11 +500,12 @@ def setup_local_llm(cache_dir: Path | None = None, *, force: bool = False) -> di
     if model_ready and not force:
         model_ready = _sha256(model) == DEFAULT_MODEL_SHA256
     if force or not model_ready:
-        _download_verified(
+        _download_verified_ranges(
             DEFAULT_MODEL_URL,
             model,
             DEFAULT_MODEL_SHA256,
             expected_size=DEFAULT_MODEL_SIZE,
+            progress=_model_progress if show_progress else None,
         )
 
     manifest = {

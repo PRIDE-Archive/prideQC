@@ -67,8 +67,9 @@ class LocalLLMTests(unittest.TestCase):
             self.assertFalse(destination.with_name("artifact.bin.part").exists())
 
 
-    def test_stream_download_follows_http_partial_content_ranges(self) -> None:
+    def test_large_model_download_uses_bounded_ranges_and_resumes(self) -> None:
         payload = b"abcdefghijklmnopqrstuvwxyz"
+        digest = hashlib.sha256(payload).hexdigest()
 
         class FakeHeaders(dict[str, str]):
             pass
@@ -91,30 +92,81 @@ class LocalLLMTests(unittest.TestCase):
             self.assertEqual(timeout, 120)
             range_header = request.get_header("Range")  # type: ignore[attr-defined]
             requests.append(range_header)
-            if range_header is None:
-                return FakeResponse(
-                    payload[:10],
-                    content_range=f"bytes 0-9/{len(payload)}",
-                )
-            if range_header == "bytes=10-":
-                return FakeResponse(
-                    payload[10:20],
-                    content_range=f"bytes 10-19/{len(payload)}",
-                )
-            if range_header == "bytes=20-":
-                return FakeResponse(
-                    payload[20:],
-                    content_range=f"bytes 20-25/{len(payload)}",
-                )
-            raise AssertionError(range_header)
+            assert range_header is not None
+            byte_range = range_header.removeprefix("bytes=")
+            start_text, end_text = byte_range.split("-", 1)
+            start = int(start_text)
+            end = int(end_text)
+            return FakeResponse(
+                payload[start : end + 1],
+                content_range=f"bytes {start}-{end}/{len(payload)}",
+            )
 
-        output = io.BytesIO()
-        with patch("prideqc.local_llm.urllib.request.urlopen", side_effect=urlopen):
-            size = local_llm._stream_download("https://example.invalid/model", output)
+        with tempfile.TemporaryDirectory() as folder:
+            destination = Path(folder) / "model.gguf"
+            part = destination.with_name("model.gguf.part")
+            part.write_bytes(payload[:10])
+            progress: list[tuple[int, int]] = []
+            with patch("prideqc.local_llm.urllib.request.urlopen", side_effect=urlopen):
+                result = local_llm._download_verified_ranges(
+                    "https://example.invalid/model",
+                    destination,
+                    digest,
+                    expected_size=len(payload),
+                    chunk_size=8,
+                    progress=lambda current, total: progress.append((current, total)),
+                )
 
-        self.assertEqual(size, len(payload))
-        self.assertEqual(output.getvalue(), payload)
-        self.assertEqual(requests, [None, "bytes=10-", "bytes=20-"])
+            self.assertEqual(result.read_bytes(), payload)
+            self.assertFalse(part.exists())
+            self.assertEqual(requests, ["bytes=10-17", "bytes=18-25"])
+            self.assertEqual(progress[-1], (len(payload), len(payload)))
+
+    def test_large_model_transport_failure_keeps_partial_for_resume(self) -> None:
+        payload = b"0123456789abcdefghij"
+
+        class FakeHeaders(dict[str, str]):
+            pass
+
+        class FakeResponse(io.BytesIO):
+            def __init__(self, data: bytes, *, content_range: str) -> None:
+                super().__init__(data)
+                self.status = 206
+                self.headers = FakeHeaders({"Content-Range": content_range})
+
+            def __enter__(self) -> FakeResponse:
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                self.close()
+
+        calls = 0
+
+        def urlopen(request: object, timeout: int) -> FakeResponse:
+            nonlocal calls
+            self.assertEqual(timeout, 120)
+            calls += 1
+            if calls == 2:
+                raise OSError("temporary network failure")
+            range_header = request.get_header("Range")  # type: ignore[attr-defined]
+            self.assertEqual(range_header, "bytes=0-9")
+            return FakeResponse(payload[:10], content_range=f"bytes 0-9/{len(payload)}")
+
+        with tempfile.TemporaryDirectory() as folder:
+            destination = Path(folder) / "model.gguf"
+            with patch("prideqc.local_llm.urllib.request.urlopen", side_effect=urlopen):
+                with self.assertRaisesRegex(OSError, "temporary network failure"):
+                    local_llm._download_verified_ranges(
+                        "https://example.invalid/model",
+                        destination,
+                        hashlib.sha256(payload).hexdigest(),
+                        expected_size=len(payload),
+                        chunk_size=10,
+                    )
+            self.assertEqual(
+                destination.with_name("model.gguf.part").read_bytes(),
+                payload[:10],
+            )
 
     def test_tar_extraction_rejects_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -154,9 +206,29 @@ class LocalLLMTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
+            def ranged_download(
+                _url: str,
+                destination: Path,
+                _sha256: str,
+                *,
+                expected_size: int,
+                chunk_size: int = 64 * 1024 * 1024,
+                progress: object = None,
+            ) -> Path:
+                self.assertEqual(expected_size, len(model_data))
+                self.assertGreater(chunk_size, 0)
+                self.assertIsNone(progress)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(model_data)
+                return destination
+
             with (
                 patch("prideqc.local_llm.runtime_asset", return_value=asset),
                 patch("prideqc.local_llm._stream_download", side_effect=stream),
+                patch(
+                    "prideqc.local_llm._download_verified_ranges",
+                    side_effect=ranged_download,
+                ),
                 patch.object(local_llm, "DEFAULT_MODEL_SIZE", len(model_data)),
                 patch.object(
                     local_llm,
