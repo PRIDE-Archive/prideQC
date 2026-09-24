@@ -162,10 +162,18 @@ def _matching_ptm_support(
 
 
 def _column_context(
-    document: SDRFDocument,
+    document: SDRFDocument | None,
     row_numbers: Sequence[int],
     column: str,
 ) -> dict[str, Any]:
+    if document is None:
+        return {
+            "status": "unavailable",
+            "reason": "no-original-sdrf",
+            "column_present": False,
+            "column_count": 0,
+            "rows": [],
+        }
     indices = document.indices(column)
     rows: list[dict[str, Any]] = []
     for row_number in row_numbers:
@@ -224,7 +232,7 @@ def _group_tolerance_decision(
     decision_suffix: str,
     by_name: Mapping[str, AnalysisResult],
     rows_by_result: Mapping[int, Sequence[int]],
-    document: SDRFDocument,
+    document: SDRFDocument | None,
 ) -> dict[str, Any] | None:
     annotations: list[Annotation] = []
     for name in members:
@@ -253,7 +261,11 @@ def _group_tolerance_decision(
         "decision_type": "mass_tolerance",
         "experiment_group": label,
         "target_field": target_column,
-        "write_semantics": "fill_or_replace_canonical_value",
+        "write_semantics": (
+            "fill_or_replace_canonical_value"
+            if document is not None
+            else "evidence_only_no_original_sdrf"
+        ),
         "target_rows": target_rows,
         "target_runs": sorted(members, key=str.casefold),
         "original": _column_context(document, target_rows, target_column),
@@ -487,7 +499,7 @@ def _review_ptm_decision(
     members: Sequence[str],
     by_name: Mapping[str, AnalysisResult],
     rows_by_result: Mapping[int, Sequence[int]],
-    document: SDRFDocument,
+    document: SDRFDocument | None,
 ) -> dict[str, Any]:
     """Build an actionable PTM decision only from the strict cohort review layer."""
     label = str(family.get("experiment_group") or "")
@@ -514,7 +526,11 @@ def _review_ptm_decision(
         "decision_type": "modification",
         "experiment_group": label,
         "target_field": MODIFICATION_COLUMN,
-        "write_semantics": "append_one_allowed_canonical_value_if_accepted_and_missing",
+        "write_semantics": (
+            "append_one_allowed_canonical_value_if_accepted_and_missing"
+            if document is not None
+            else "evidence_only_no_original_sdrf"
+        ),
         "target_rows": target_rows,
         "target_runs": sorted(members, key=str.casefold),
         "original": _column_context(document, target_rows, MODIFICATION_COLUMN),
@@ -556,12 +572,12 @@ def _review_ptm_decision(
 
 
 def build_llm_refinement_packet(
-    document: SDRFDocument,
+    document: SDRFDocument | None,
     results: Sequence[AnalysisResult],
     synthesis: CohortSynthesis,
     *,
     project_accession: str | None,
-    sdrf_path: Path,
+    sdrf_path: Path | None,
     prideqc_version: str,
     aliases: dict[str, str] | None = None,
     source_artifacts: Mapping[str, Mapping[str, str]] | None = None,
@@ -569,7 +585,11 @@ def build_llm_refinement_packet(
 ) -> dict[str, Any]:
     """Build one deterministic evidence packet for one accession-level SDRF."""
     ordered_results = sorted(results, key=lambda item: item.input_path.name.casefold())
-    rows_by_result, data_files_by_result = _row_mapping(document, ordered_results, aliases)
+    if document is None:
+        rows_by_result: dict[int, list[int]] = {id(result): [] for result in ordered_results}
+        data_files_by_result: dict[int, list[str]] = {id(result): [] for result in ordered_results}
+    else:
+        rows_by_result, data_files_by_result = _row_mapping(document, ordered_results, aliases)
     by_name = {result.input_path.name: result for result in ordered_results}
     artifact_lookup = {
         name.casefold(): dict(values) for name, values in (source_artifacts or {}).items()
@@ -585,6 +605,7 @@ def build_llm_refinement_packet(
                 "experiment_group": synthesis.assignments.get(run_name),
                 "sdrf_rows": rows,
                 "sdrf_data_files": list(data_files_by_result.get(id(result), ())),
+                "source_data_files": [run_name],
                 "original_values": {
                     PRECURSOR_COLUMN: _column_context(document, rows, PRECURSOR_COLUMN),
                     FRAGMENT_COLUMN: _column_context(document, rows, FRAGMENT_COLUMN),
@@ -685,23 +706,25 @@ def build_llm_refinement_packet(
             "prideqc_version": prideqc_version,
             "cohort_grouping_evidence": list(synthesis.evidence),
             "decision_policy": "candidate-generation-only; no LLM adjudication performed",
+            "input_mode": "sdrf-backed" if document is not None else "no-original-sdrf",
         },
         "sdrf": {
-            "source_name": sdrf_path.name,
-            "sha256": _sha256(sdrf_path),
-            "row_count": len(document.rows),
+            "available": document is not None and sdrf_path is not None,
+            "source_name": sdrf_path.name if sdrf_path is not None else None,
+            "sha256": _sha256(sdrf_path) if sdrf_path is not None else None,
+            "row_count": len(document.rows) if document is not None else 0,
             "target_columns": {
                 PRECURSOR_COLUMN: {
-                    "present": bool(document.indices(PRECURSOR_COLUMN)),
-                    "count": len(document.indices(PRECURSOR_COLUMN)),
+                    "present": bool(document.indices(PRECURSOR_COLUMN)) if document else False,
+                    "count": len(document.indices(PRECURSOR_COLUMN)) if document else 0,
                 },
                 FRAGMENT_COLUMN: {
-                    "present": bool(document.indices(FRAGMENT_COLUMN)),
-                    "count": len(document.indices(FRAGMENT_COLUMN)),
+                    "present": bool(document.indices(FRAGMENT_COLUMN)) if document else False,
+                    "count": len(document.indices(FRAGMENT_COLUMN)) if document else 0,
                 },
                 MODIFICATION_COLUMN: {
-                    "present": bool(document.indices(MODIFICATION_COLUMN)),
-                    "count": len(document.indices(MODIFICATION_COLUMN)),
+                    "present": bool(document.indices(MODIFICATION_COLUMN)) if document else False,
+                    "count": len(document.indices(MODIFICATION_COLUMN)) if document else 0,
                 },
             },
         },
@@ -723,6 +746,8 @@ def build_llm_refinement_packet(
                 "ptm_context"
             ),
             "full_mzqc_documents_embedded": False,
+            "original_sdrf_available": document is not None,
+            "sdrf_writeback_supported": document is not None,
         },
     }
     return packet

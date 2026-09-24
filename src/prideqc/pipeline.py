@@ -654,21 +654,21 @@ class Workflow:
         results_root: Path | str,
         output_directory: Path | str,
         *,
-        sdrf: Path,
+        sdrf: Path | None,
         aliases: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Refine one SDRF from previously generated per-file summary artifacts.
+        """Synthesize cohort evidence from previously generated per-file summaries.
 
-        This is the accession-level companion to the Slurm one-file-per-task
-        workflow: all successful ``*.summary.json`` files are loaded first, then
-        experiment groups, shared tolerances and strict recurrent PTM families
-        are synthesized once across the whole cohort.
+        With an input SDRF, this retains the historical refinement behavior. With
+        ``sdrf=None``, prideQC runs in explicit no-original-SDRF mode: cohort evidence,
+        the LLM packet and adjudication request are produced, but no SDRF validation,
+        mutation or write-back artifacts are created.
         """
         import json
 
         root = Path(results_root).resolve()
         output = Path(output_directory).resolve()
-        sdrf = Path(sdrf).resolve(strict=True)
+        resolved_sdrf = Path(sdrf).resolve(strict=True) if sdrf is not None else None
         if not root.is_dir():
             raise ValueError(f"Results root is not a directory: {root}")
         if output == root or root.is_relative_to(output):
@@ -676,6 +676,8 @@ class Workflow:
                 "Refinement output cannot equal or contain the results root. "
                 "A subdirectory below the results root is allowed."
             )
+        if aliases and resolved_sdrf is None:
+            raise ValueError("File aliases require an input SDRF.")
         if output.exists() and not output.is_dir():
             raise FileExistsError(f"Output path is not a directory: {output}")
         if output.exists() and any(output.iterdir()):
@@ -716,21 +718,27 @@ class Workflow:
                 "Duplicate analyzed input basenames found below results root; "
                 "select one accession/run set."
             )
-        project_accession = self._cohort_project_accession(
-            results, extra_paths=(*summary_paths, sdrf)
-        )
+        extra_paths: tuple[Path, ...] = tuple(summary_paths)
+        if resolved_sdrf is not None:
+            extra_paths = (*extra_paths, resolved_sdrf)
+        project_accession = self._cohort_project_accession(results, extra_paths=extra_paths)
 
-        input_validation = self.validator.validate(sdrf)
-        document = SDRFDocument.read(sdrf)
         output.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(sdrf, output / "original.sdrf.tsv")
+        document: SDRFDocument | None = None
+        input_validation = None
+        if resolved_sdrf is not None:
+            input_validation = self.validator.validate(resolved_sdrf)
+            document = SDRFDocument.read(resolved_sdrf)
+            shutil.copyfile(resolved_sdrf, output / "original.sdrf.tsv")
+            cohort_results, missing = document.resolve_results(results, aliases)
+            if missing:
+                raise ValueError(
+                    "Cohort SDRF refinement requires complete analyzed coverage; missing: "
+                    + ", ".join(missing)
+                )
+        else:
+            cohort_results = results
 
-        cohort_results, missing = document.resolve_results(results, aliases)
-        if missing:
-            raise ValueError(
-                "Cohort SDRF refinement requires complete analyzed coverage; missing: "
-                + ", ".join(missing)
-            )
         semantic_evidence = self._ptm_semantic_evidence()
         synthesis = synthesize_cohort(
             cohort_results,
@@ -743,7 +751,7 @@ class Workflow:
             cohort_results,
             synthesis,
             project_accession=project_accession,
-            sdrf_path=sdrf,
+            sdrf_path=resolved_sdrf,
             prideqc_version=__version__,
             aliases=aliases,
             source_artifacts=packet_artifacts,
@@ -754,49 +762,63 @@ class Workflow:
         adjudication_request = build_llm_adjudication_request(packet)
         validate_llm_adjudication_request(adjudication_request)
         write_json(output / "llm-adjudication-request.json", adjudication_request)
-        changes = document.annotate(
-            cohort_results,
-            aliases,
-            include_inferred=False,
-            overwrite=False,
-            include_inferred_fields=COHORT_SDRF_FIELDS,
-            overwrite_fields=COHORT_OVERWRITE_FIELDS,
-            append_columns=frozenset(
-                {
-                    "comment[modification parameters]",
-                    PUTATIVE_MODIFICATION_COLUMN,
-                }
-            ),
-        )
-        document.write(output / "refined.sdrf.tsv")
-        self._write_sdrf_change_outputs(changes, output, synthesis.to_dict())
-        refined_validation = self.validator.validate(output / "refined.sdrf.tsv")
-        validation = {
-            "input": input_validation.to_dict(),
-            "refined": refined_validation.to_dict(),
-        }
-        write_json(output / "sdrf-validation.json", validation)
+
+        refined_validation = None
+        if document is not None and resolved_sdrf is not None:
+            changes = document.annotate(
+                cohort_results,
+                aliases,
+                include_inferred=False,
+                overwrite=False,
+                include_inferred_fields=COHORT_SDRF_FIELDS,
+                overwrite_fields=COHORT_OVERWRITE_FIELDS,
+                append_columns=frozenset(
+                    {
+                        "comment[modification parameters]",
+                        PUTATIVE_MODIFICATION_COLUMN,
+                    }
+                ),
+            )
+            document.write(output / "refined.sdrf.tsv")
+            self._write_sdrf_change_outputs(changes, output, synthesis.to_dict())
+            refined_validation = self.validator.validate(output / "refined.sdrf.tsv")
+            validation = {
+                "input": input_validation.to_dict() if input_validation is not None else None,
+                "refined": refined_validation.to_dict(),
+            }
+            write_json(output / "sdrf-validation.json", validation)
+
         manifest = {
             "prideqc_version": __version__,
-            "mode": "existing-results-sdrf-refinement",
+            "mode": (
+                "existing-results-sdrf-refinement"
+                if resolved_sdrf is not None
+                else "existing-results-no-original-sdrf-adjudication"
+            ),
+            "input_mode": "sdrf-backed" if resolved_sdrf is not None else "no-original-sdrf",
             "results_root": str(root),
             "summary_files": [str(path) for path in summary_paths],
             "summary_count": len(cohort_results),
             "discovered_summary_count": len(summary_paths),
             "project_accession": project_accession,
             "ptm_study_evidence": self.options.ptm_study_evidence,
-            "original_sdrf": "original.sdrf.tsv",
-            "refined_sdrf": "refined.sdrf.tsv",
+            "original_sdrf": "original.sdrf.tsv" if resolved_sdrf is not None else None,
+            "refined_sdrf": "refined.sdrf.tsv" if resolved_sdrf is not None else None,
+            "sdrf_writeback_supported": resolved_sdrf is not None,
             "cohort_refinement": "cohort-refinement.json",
             "llm_refinement_packet": "llm-refinement-packet.json",
             "llm_adjudication_request": "llm-adjudication-request.json",
-            "sdrf_changes": "sdrf-changes.tsv",
-            "sdrf_refinement_log": "sdrf-refinement.log.txt",
+            "sdrf_changes": "sdrf-changes.tsv" if resolved_sdrf is not None else None,
+            "sdrf_refinement_log": (
+                "sdrf-refinement.log.txt" if resolved_sdrf is not None else None
+            ),
             "experiment_groups": len(synthesis.groups),
             "sdrf_eligible_ptm_families": len(synthesis.ptm_families),
             "ptm_review_families": len(synthesis.ptm_review_families),
-            "putative_ptm_families_written": len(synthesis.ptm_review_families),
-            "success": refined_validation.valid,
+            "putative_ptm_families_written": (
+                len(synthesis.ptm_review_families) if resolved_sdrf is not None else 0
+            ),
+            "success": refined_validation.valid if refined_validation is not None else True,
         }
         write_json(output / "manifest.json", manifest)
         return manifest

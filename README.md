@@ -350,7 +350,22 @@ uv run prideqc refine-sdrf-qc \
 
 The command reconstructs the per-file evidence from `*.summary.json`, requires complete
 coverage of the SDRF data files, performs one accession-level cohort synthesis, writes
-the refined SDRF, and validates it before reporting success. `--project-accession` is
+the refined SDRF, and validates it before reporting success. For historical/benchmark
+accessions where no trusted original SDRF exists, use explicit evidence-only mode:
+
+```bash
+uv run prideqc refine-sdrf-qc \
+  --results-root results/<run>/<PXD> \
+  --no-original-sdrf \
+  --project-accession <PXD> \
+  -o results/<run>/<PXD>/adjudication
+```
+
+This mode never fabricates an SDRF. It writes cohort evidence, the refinement packet,
+and the adjudication request with original SDRF context marked unavailable and empty
+target-row mappings. SDRF validation, change logs, and original/refined SDRF write-back
+artifacts are intentionally omitted. It is intended for evidence benchmarking and later
+human/model adjudication only. `--project-accession` is
 optional when the accession is already serialized in the summaries or can be recovered
 unambiguously from the result/SDRF paths; it is useful for older result trees. Omit
 `--ptm-study-evidence` when no independent semantic evidence is available: recurrent PTM

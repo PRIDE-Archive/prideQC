@@ -482,6 +482,59 @@ class CohortRefinementTests(unittest.TestCase):
             self.assertIn("unimod=UniMod:34", log)
             self.assertIn("sdrf_status=hold-semantic-not-supported", log)
 
+
+    def test_existing_results_support_no_original_sdrf_adjudication_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            results_root = root / "results" / "PXD041271"
+            results_root.mkdir(parents=True)
+            for index in range(4):
+                result = _result(
+                    f"run-{index}.raw",
+                    precursor=8.0 + index * 0.1,
+                    fragment=20.0 + index * 0.1,
+                    mass_shift=14.0155 + index * 1e-5,
+                    candidates=[("UniMod:34", "Methylation")],
+                )
+                result.project_accession = "PXD041271"
+                task = results_root / f"task-{index}"
+                task.mkdir()
+                (task / f"run-{index}.raw.summary.json").write_text(
+                    json.dumps(result.to_dict()), encoding="utf-8"
+                )
+            validator = MagicMock()
+            output = root / "manifest-only"
+            manifest = Workflow(
+                WorkflowOptions(refine_sdrf_qc=True), validator=validator
+            ).refine_existing_sdrf(results_root, output, sdrf=None)
+
+            self.assertTrue(manifest["success"])
+            self.assertEqual(manifest["input_mode"], "no-original-sdrf")
+            self.assertEqual(
+                manifest["mode"], "existing-results-no-original-sdrf-adjudication"
+            )
+            self.assertEqual(manifest["summary_count"], 4)
+            self.assertEqual(manifest["project_accession"], "PXD041271")
+            self.assertFalse(manifest["sdrf_writeback_supported"])
+            self.assertIsNone(manifest["original_sdrf"])
+            self.assertIsNone(manifest["refined_sdrf"])
+            self.assertFalse((output / "original.sdrf.tsv").exists())
+            self.assertFalse((output / "refined.sdrf.tsv").exists())
+            self.assertFalse((output / "sdrf-validation.json").exists())
+            self.assertTrue((output / "cohort-refinement.json").exists())
+            self.assertTrue((output / "llm-refinement-packet.json").exists())
+            self.assertTrue((output / "llm-adjudication-request.json").exists())
+            packet = json.loads(
+                (output / "llm-refinement-packet.json").read_text(encoding="utf-8")
+            )
+            request = json.loads(
+                (output / "llm-adjudication-request.json").read_text(encoding="utf-8")
+            )
+            self.assertFalse(packet["sdrf"]["available"])
+            self.assertTrue(request["decisions"])
+            self.assertTrue(all(item["target_rows"] == [] for item in request["decisions"]))
+            validator.validate.assert_not_called()
+
     def test_existing_results_refinement_combines_file_array_summaries(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

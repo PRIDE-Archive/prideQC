@@ -180,7 +180,15 @@ def parser() -> argparse.ArgumentParser:
         type=Path,
         help="Directory containing one accession/run set of *.summary.json artifacts",
     )
-    refine.add_argument("--sdrf", required=True, type=Path)
+    refine.add_argument("--sdrf", type=Path)
+    refine.add_argument(
+        "--no-original-sdrf",
+        action="store_true",
+        help=(
+            "Build cohort evidence/adjudication artifacts without an original SDRF; "
+            "no SDRF validation or write-back artifacts are produced"
+        ),
+    )
     refine.add_argument(
         "-o",
         "--output-dir",
@@ -359,6 +367,10 @@ def _analyze(arguments: argparse.Namespace) -> int:
 def _refine_sdrf_qc(arguments: argparse.Namespace) -> int:
     from prideqc.pipeline import Workflow, WorkflowOptions
 
+    if bool(arguments.sdrf) == bool(arguments.no_original_sdrf):
+        raise ValueError(
+            "Provide exactly one of --sdrf or --no-original-sdrf for refine-sdrf-qc."
+        )
     aliases = None
     if arguments.file_map:
         aliases = json.loads(arguments.file_map.read_text(encoding="utf-8"))
@@ -384,8 +396,9 @@ def _refine_sdrf_qc(arguments: argparse.Namespace) -> int:
         sdrf=arguments.sdrf,
         aliases=aliases,
     )
+    verb = "Refined" if manifest["sdrf_writeback_supported"] else "Synthesized"
     print(
-        f"Refined {manifest['summary_count']} files into "
+        f"{verb} {manifest['summary_count']} files into "
         f"{manifest['experiment_groups']} experiment group(s). "
         f"Results: {arguments.output_dir}"
     )

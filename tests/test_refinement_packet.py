@@ -11,6 +11,10 @@ import jsonschema
 
 from prideqc import __version__
 from prideqc.cohort import synthesize_cohort
+from prideqc.refinement_adjudication import (
+    build_llm_adjudication_request,
+    validate_llm_adjudication_request,
+)
 from prideqc.refinement_packet import (
     PACKET_SCHEMA_VERSION,
     build_llm_refinement_packet,
@@ -299,6 +303,65 @@ class RefinementPacketTests(unittest.TestCase):
                 "NT=Oxidation;AC=UniMod:35",
                 "NT=Carbamidomethyl;AC=UniMod:4",
             ],
+        )
+
+
+    def test_packet_supports_no_original_sdrf_mode(self) -> None:
+        with tempfile.TemporaryDirectory():
+            results = [
+                _result(
+                    f"run-{index}.raw",
+                    mass_shift=14.0155 + index * 1e-5,
+                    candidates=[("UniMod:34", "Methylation")],
+                )
+                for index in range(4)
+            ]
+            synthesis = synthesize_cohort(results, project_accession="PXDTEST")
+            packet = build_llm_refinement_packet(
+                None,
+                results,
+                synthesis,
+                project_accession="PXDTEST",
+                sdrf_path=None,
+                prideqc_version=__version__,
+            )
+            validate_llm_refinement_packet(packet)
+            packet_schema = json.loads(
+                Path("src/prideqc/data/llm-refinement-packet-v1.schema.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            jsonschema.validate(packet, packet_schema)
+            request = build_llm_adjudication_request(packet)
+            validate_llm_adjudication_request(request)
+            request_schema = json.loads(
+                Path("src/prideqc/data/llm-adjudication-request-v1.schema.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            jsonschema.validate(request, request_schema)
+
+        self.assertFalse(packet["sdrf"]["available"])
+        self.assertIsNone(packet["sdrf"]["source_name"])
+        self.assertIsNone(packet["sdrf"]["sha256"])
+        self.assertEqual(packet["sdrf"]["row_count"], 0)
+        self.assertFalse(packet["limitations"]["original_sdrf_available"])
+        self.assertFalse(packet["limitations"]["sdrf_writeback_supported"])
+        self.assertTrue(all(run["sdrf_rows"] == [] for run in packet["runs"]))
+        self.assertTrue(all(run["sdrf_data_files"] == [] for run in packet["runs"]))
+        self.assertTrue(
+            all(
+                context["status"] == "unavailable"
+                for run in packet["runs"]
+                for context in run["original_values"].values()
+            )
+        )
+        self.assertTrue(all(item["target_rows"] == [] for item in request["decisions"]))
+        self.assertTrue(
+            all(
+                item["write_semantics"] == "evidence_only_no_original_sdrf"
+                for item in request["decisions"]
+            )
         )
 
     def test_packet_validates_against_packaged_json_schema_and_is_deterministic(self) -> None:
