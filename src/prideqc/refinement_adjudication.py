@@ -163,9 +163,6 @@ def validate_llm_adjudication_request(request: Mapping[str, Any]) -> None:
         raise ValueError("Unexpected LLM adjudication request schema version")
     if request.get("request_scope") != REQUEST_SCOPE:
         raise ValueError("LLM adjudication request must be accession scoped")
-    input_mode = request.get("input_mode")
-    if input_mode is not None and input_mode not in INPUT_MODES:
-        raise ValueError("LLM adjudication request has invalid input mode")
     request_id = str(request.get("request_id") or "")
     source = _as_mapping(request.get("source_packet"))
     source_hash = str(source.get("sha256") or "")
@@ -173,9 +170,12 @@ def validate_llm_adjudication_request(request: Mapping[str, Any]) -> None:
         raise ValueError("LLM adjudication request/source packet fingerprint mismatch")
     if source.get("schema_version") != PACKET_SCHEMA_VERSION:
         raise ValueError("LLM adjudication request references an unexpected packet schema")
+    input_mode = request.get("input_mode")
+    if input_mode is not None and input_mode not in INPUT_MODES:
+        raise ValueError("LLM adjudication request has invalid input mode")
     decisions = request.get("decisions")
-    if not isinstance(decisions, list) or not decisions:
-        raise ValueError("LLM adjudication request must contain actionable decisions")
+    if not isinstance(decisions, list):
+        raise ValueError("LLM adjudication request decisions must be an array")
     seen: set[str] = set()
     for item in decisions:
         if not isinstance(item, Mapping):

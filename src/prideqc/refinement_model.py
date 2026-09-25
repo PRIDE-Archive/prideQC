@@ -7,15 +7,19 @@ request and prideQC's exact candidate/decision validation before persistence.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import socket
 import subprocess
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Mapping
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import median
 from typing import Any, Protocol
 
 from prideqc.local_llm import (
@@ -38,7 +42,8 @@ from prideqc.refinement_policy import (
     resolve_pre_adjudication_policy,
 )
 
-SYSTEM_PROMPT_VERSION = "prideqc-sdrf-adjudicator-v2"
+SYSTEM_PROMPT_VERSION = "prideqc-sdrf-adjudicator-v3"
+MODEL_INPUT_PROJECTION_VERSION = "prideqc-model-input-v1"
 
 _SYSTEM_PROMPT = """You are the constrained scientific metadata adjudicator for prideQC.
 You are not discovering new values. You must adjudicate only the candidates supplied in
@@ -90,15 +95,213 @@ def _response_schema() -> dict[str, Any]:
     return payload
 
 
+def _as_mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _finite_number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    converted = float(value)
+    return converted if math.isfinite(converted) else None
+
+
+def _numeric_summary(values: Sequence[float]) -> dict[str, float | int | None]:
+    if not values:
+        return {
+            "count": 0,
+            "minimum": None,
+            "median": None,
+            "maximum": None,
+        }
+    ordered = sorted(float(value) for value in values)
+    return {
+        "count": len(ordered),
+        "minimum": ordered[0],
+        "median": float(median(ordered)),
+        "maximum": ordered[-1],
+    }
+
+
+def _compact_original(value: Any) -> dict[str, Any]:
+    """Bound original-SDRF context without losing distinct reported values."""
+    original = _as_mapping(value)
+    output: dict[str, Any] = {
+        key: original.get(key)
+        for key in ("status", "reason", "column_present", "column_count")
+        if key in original
+    }
+    rows = original.get("rows")
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+        output["row_count"] = 0
+        output["distinct_values"] = []
+        return output
+
+    distinct: set[str] = set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        values = row.get("values")
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            continue
+        for item in values:
+            if isinstance(item, str) and item.strip():
+                distinct.add(item.strip())
+
+    ordered = sorted(distinct, key=str.casefold)
+    output["row_count"] = len(rows)
+    output["distinct_values"] = ordered[:16]
+    output["distinct_values_truncated"] = max(0, len(ordered) - 16)
+    return output
+
+
+def _summarize_tolerance_runs(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return {"run_count": 0}
+
+    statuses: Counter[str] = Counter()
+    confidences: Counter[str] = Counter()
+    estimates: list[float] = []
+    supports: list[float] = []
+    totals: list[float] = []
+
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        statuses[str(item.get("status") or "unknown")] += 1
+        confidence = item.get("confidence")
+        if confidence is not None:
+            confidences[str(confidence)] += 1
+        estimate = _finite_number(item.get("value"))
+        support = _finite_number(item.get("support"))
+        total = _finite_number(item.get("total"))
+        if estimate is not None:
+            estimates.append(estimate)
+        if support is not None:
+            supports.append(support)
+        if total is not None:
+            totals.append(total)
+
+    return {
+        "run_count": len(value),
+        "status_counts": dict(sorted(statuses.items())),
+        "confidence_counts": dict(sorted(confidences.items())),
+        "estimate": _numeric_summary(estimates),
+        "support_sum": int(sum(supports)) if supports else 0,
+        "measurement_total_sum": int(sum(totals)) if totals else 0,
+    }
+
+
+def _summarize_ptm_runs(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return {"run_count": 0, "observation_count": 0}
+
+    pair_support: list[float] = []
+    similarities: list[float] = []
+    residuals: list[float] = []
+    classifications: Counter[str] = Counter()
+    confidences: Counter[str] = Counter()
+    observations = 0
+
+    for run in value:
+        if not isinstance(run, Mapping):
+            continue
+        raw_observations = run.get("observations")
+        if not isinstance(raw_observations, Sequence) or isinstance(
+            raw_observations, (str, bytes)
+        ):
+            continue
+        for observation in raw_observations:
+            if not isinstance(observation, Mapping):
+                continue
+            observations += 1
+            support = _finite_number(observation.get("pair_support"))
+            similarity = _finite_number(observation.get("median_spectral_similarity"))
+            residual = _finite_number(observation.get("residual_da"))
+            if support is not None:
+                pair_support.append(support)
+            if similarity is not None:
+                similarities.append(similarity)
+            if residual is not None:
+                residuals.append(abs(residual))
+            classification = observation.get("classification")
+            confidence = observation.get("confidence")
+            if classification is not None:
+                classifications[str(classification)] += 1
+            if confidence is not None:
+                confidences[str(confidence)] += 1
+
+    return {
+        "run_count": len(value),
+        "observation_count": observations,
+        "pair_support": _numeric_summary(pair_support),
+        "spectral_similarity": _numeric_summary(similarities),
+        "absolute_residual_da": _numeric_summary(residuals),
+        "classification_counts": dict(sorted(classifications.items())),
+        "confidence_counts": dict(sorted(confidences.items())),
+    }
+
+
+def _compact_evidence(decision: Mapping[str, Any]) -> dict[str, Any]:
+    evidence = _as_mapping(decision.get("evidence"))
+    output = {
+        str(key): value
+        for key, value in evidence.items()
+        if key not in {"per_run_estimates", "per_run_support"}
+    }
+    if "per_run_estimates" in evidence:
+        output["per_run_estimate_summary"] = _summarize_tolerance_runs(
+            evidence.get("per_run_estimates")
+        )
+    if "per_run_support" in evidence:
+        output["per_run_support_summary"] = _summarize_ptm_runs(
+            evidence.get("per_run_support")
+        )
+    return output
+
+
+def _compact_local_context(value: Any) -> dict[str, Any]:
+    context = _as_mapping(value)
+    raw_families = context.get("ptm_families")
+    if not isinstance(raw_families, Sequence) or isinstance(raw_families, (str, bytes)):
+        return {"ptm_families": [], "ptm_families_truncated": 0}
+    families = [dict(item) for item in raw_families if isinstance(item, Mapping)]
+    return {
+        "ptm_families": families[:4],
+        "ptm_families_truncated": max(0, len(families) - 4),
+    }
+
+
+def _compact_model_decision(decision: Mapping[str, Any]) -> dict[str, Any]:
+    """Project one full auditable decision into a bounded model-facing view."""
+    return {
+        "decision_id": decision.get("decision_id"),
+        "decision_type": decision.get("decision_type"),
+        "experiment_group": decision.get("experiment_group"),
+        "target_field": decision.get("target_field"),
+        "write_semantics": decision.get("write_semantics"),
+        "target_run_count": len(decision.get("target_runs") or []),
+        "target_row_count": len(decision.get("target_rows") or []),
+        "original": _compact_original(decision.get("original")),
+        "candidate_values": list(decision.get("candidate_values") or []),
+        "evidence": _compact_evidence(decision),
+        "evidence_semantics": dict(_as_mapping(decision.get("evidence_semantics"))),
+        "local_context": _compact_local_context(decision.get("local_context")),
+    }
+
+
 def _model_input(request: Mapping[str, Any]) -> dict[str, Any]:
-    """Return the minimal scientific view needed for one constrained decision."""
+    """Return the bounded scientific view needed for one constrained decision."""
     decisions = request["decisions"]
     if not isinstance(decisions, list) or len(decisions) != 1:
         raise ValueError("Local model input must contain exactly one decision")
+    decision = decisions[0]
+    if not isinstance(decision, Mapping):
+        raise ValueError("Local model decision must be a JSON object")
     return {
         "request_id": request["request_id"],
         "project_accession": request.get("project_accession"),
-        "decision": decisions[0],
+        "decision": _compact_model_decision(decision),
     }
 
 
@@ -350,10 +553,21 @@ class LocalLlamaCppAdapter:
                     output = raw_decisions[0]
                     assert isinstance(output, dict)
                     resolved[decision_id] = output
+                    model_input = _model_input(single_request)
+                    model_input_bytes = json.dumps(
+                        model_input,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                        allow_nan=False,
+                    ).encode("utf-8")
                     transport_responses.append(
                         {
                             "decision_id": decision_id,
                             "elapsed_seconds": round(elapsed_seconds, 3),
+                            "model_input_projection_version": MODEL_INPUT_PROJECTION_VERSION,
+                            "model_input_bytes": len(model_input_bytes),
+                            "model_input_sha256": hashlib.sha256(model_input_bytes).hexdigest(),
                             "response": raw,
                         }
                     )
@@ -422,6 +636,7 @@ class LocalLlamaCppAdapter:
                 "invoked": bool(pending),
             },
             "prompt_version": SYSTEM_PROMPT_VERSION,
+            "model_input_projection_version": MODEL_INPUT_PROJECTION_VERSION,
             "request_id": request["request_id"],
             "decision_calls": transport_responses,
         }
