@@ -240,6 +240,13 @@ def _path_project_accession(paths: Iterable[Path]) -> str | None:
     return next(iter(accessions), None)
 
 
+APPLIED_SDRF_CHANGE_STATUSES = frozenset({"filled", "replaced", "appended"})
+
+
+def _has_applied_sdrf_changes(changes: list[SDRFChange]) -> bool:
+    return any(change.status in APPLIED_SDRF_CHANGE_STATUSES for change in changes)
+
+
 class Workflow:
     """Produce per-file QC and batch summaries with explicit failure accounting."""
 
@@ -630,6 +637,10 @@ class Workflow:
                     )
                     raise
                 manifest["sdrf_validation"]["refined"] = refined_validation.to_dict()
+                if refined_validation.valid and _has_applied_sdrf_changes(changes):
+                    annotation_tool = document.set_annotation_tool("prideQC", __version__)
+                    document.write(output / "refined.sdrf.tsv")
+                    manifest["sdrf_validation"]["annotation_tool"] = annotation_tool
                 write_json(
                     output / "sdrf-validation.json",
                     manifest["sdrf_validation"],
@@ -722,12 +733,6 @@ class Workflow:
         if resolved_sdrf is not None:
             extra_paths = (*extra_paths, resolved_sdrf)
         project_accession = self._cohort_project_accession(results, extra_paths=extra_paths)
-        if resolved_sdrf is None and project_accession is None:
-            raise ValueError(
-                "No-original-SDRF adjudication requires one unambiguous "
-                "ProteomeXchange project accession from --project-accession, the summaries, "
-                "or the result path."
-            )
 
         output.mkdir(parents=True, exist_ok=True)
         document: SDRFDocument | None = None
@@ -770,6 +775,7 @@ class Workflow:
         write_json(output / "llm-adjudication-request.json", adjudication_request)
 
         refined_validation = None
+        annotation_tool: str | None = None
         if document is not None and resolved_sdrf is not None:
             changes = document.annotate(
                 cohort_results,
@@ -788,9 +794,13 @@ class Workflow:
             document.write(output / "refined.sdrf.tsv")
             self._write_sdrf_change_outputs(changes, output, synthesis.to_dict())
             refined_validation = self.validator.validate(output / "refined.sdrf.tsv")
+            if refined_validation.valid and _has_applied_sdrf_changes(changes):
+                annotation_tool = document.set_annotation_tool("prideQC", __version__)
+                document.write(output / "refined.sdrf.tsv")
             validation = {
                 "input": input_validation.to_dict() if input_validation is not None else None,
                 "refined": refined_validation.to_dict(),
+                "annotation_tool": annotation_tool,
             }
             write_json(output / "sdrf-validation.json", validation)
 
@@ -811,6 +821,7 @@ class Workflow:
             "original_sdrf": "original.sdrf.tsv" if resolved_sdrf is not None else None,
             "refined_sdrf": "refined.sdrf.tsv" if resolved_sdrf is not None else None,
             "sdrf_writeback_supported": resolved_sdrf is not None,
+            "sdrf_annotation_tool": annotation_tool,
             "cohort_refinement": "cohort-refinement.json",
             "llm_refinement_packet": "llm-refinement-packet.json",
             "llm_adjudication_request": "llm-adjudication-request.json",

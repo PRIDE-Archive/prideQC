@@ -153,6 +153,25 @@ class SDRFDocument:
             self.file_column += 1
         return index
 
+    def set_annotation_tool(self, tool: str, version: str) -> str:
+        """Set the single file-level SDRF annotation-tool provenance value."""
+        tool_name = tool.strip()
+        version_value = version.strip()
+        if not tool_name or not version_value:
+            raise ValueError("SDRF annotation tool name and version are required.")
+        if not version_value.startswith("v"):
+            version_value = f"v{version_value}"
+        value = f"{tool_name} {version_value}"
+        indices = self.indices("comment[sdrf annotation tool]")
+        if len(indices) > 1:
+            raise ValueError(
+                "SDRF must not contain repeated comment[sdrf annotation tool] columns."
+            )
+        index = indices[0] if indices else self._insert_column("comment[sdrf annotation tool]")
+        for row in self.rows:
+            row[index] = value
+        return value
+
     def annotate(
         self,
         results: Iterable[AnalysisResult],

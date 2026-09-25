@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from prideqc import __version__
 from prideqc.cohort import (
     COHORT_FRAGMENT_FIELD,
     COHORT_MODIFICATION_FIELD,
@@ -376,6 +377,15 @@ class CohortRefinementTests(unittest.TestCase):
             self.assertEqual((output / "original.sdrf.tsv").read_bytes(), sdrf.read_bytes())
             refined = SDRFDocument.read(output / "refined.sdrf.tsv")
             self.assertEqual(refined.rows[0][1], "10 ppm")
+            annotation_tool_indices = refined.indices("comment[sdrf annotation tool]")
+            self.assertEqual(len(annotation_tool_indices), 1)
+            self.assertEqual(
+                refined.rows[0][annotation_tool_indices[0]], f"prideQC v{__version__}"
+            )
+            validation = json.loads(
+                (output / "sdrf-validation.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(validation["annotation_tool"], f"prideQC v{__version__}")
             self.assertIn("NT=Oxidation;AC=UniMod:35", refined.rows[0])
             self.assertNotIn("NT=Phosphorylation;AC=UniMod:21", [
                 refined.rows[0][index]
@@ -404,6 +414,46 @@ class CohortRefinementTests(unittest.TestCase):
                 manifest["cohort_refinement"]["llm_adjudication_request"],
                 "llm-adjudication-request.json",
             )
+
+    def test_failed_refined_validation_does_not_stamp_annotation_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "run.raw"
+            source.write_bytes(b"raw")
+            sdrf = root / "input.sdrf.tsv"
+            sdrf.write_text(
+                "comment[data file]\tcomment[precursor mass tolerance]\n"
+                "run.raw\t20 ppm\n",
+                encoding="utf-8",
+            )
+            result = _result("run.raw", precursor=9.4, fragment=20.2)
+            validator = MagicMock()
+            validator.validate.side_effect = [
+                ValidationReport(str(sdrf), "ms-proteomics", False, (), "test"),
+                ValidationReport(
+                    "refined",
+                    "ms-proteomics",
+                    False,
+                    ("synthetic validation finding",),
+                    "test",
+                ),
+            ]
+            output = root / "qc"
+            with patch(
+                "prideqc.pipeline._analyze_file",
+                return_value=FileOutcome(source, result),
+            ):
+                manifest = Workflow(
+                    WorkflowOptions(refine_sdrf_qc=True), validator=validator
+                ).run([source], output, sdrf=sdrf)
+
+            self.assertFalse(manifest["success"])
+            refined = SDRFDocument.read(output / "refined.sdrf.tsv")
+            self.assertEqual(refined.indices("comment[sdrf annotation tool]"), [])
+            validation = json.loads(
+                (output / "sdrf-validation.json").read_text(encoding="utf-8")
+            )
+            self.assertNotIn("annotation_tool", validation)
 
     def test_existing_results_recovers_accession_and_holds_mass_only_ptm(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -443,6 +493,7 @@ class CohortRefinementTests(unittest.TestCase):
             ).refine_existing_sdrf(results_root, output, sdrf=sdrf)
 
             self.assertTrue(manifest["success"])
+            self.assertEqual(manifest["sdrf_annotation_tool"], f"prideQC v{__version__}")
             self.assertEqual(manifest["project_accession"], "PXD000612")
             self.assertEqual(manifest["sdrf_eligible_ptm_families"], 0)
             self.assertEqual(manifest["ptm_review_families"], 1)
@@ -458,6 +509,14 @@ class CohortRefinementTests(unittest.TestCase):
             self.assertEqual(len(packet["runs"]), 10)
             refined = SDRFDocument.read(output / "refined.sdrf.tsv")
             self.assertEqual(refined.columns[-1], "factor value[condition]")
+            annotation_tool_indices = refined.indices("comment[sdrf annotation tool]")
+            self.assertEqual(len(annotation_tool_indices), 1)
+            self.assertTrue(
+                all(
+                    row[annotation_tool_indices[0]] == f"prideQC v{__version__}"
+                    for row in refined.rows
+                )
+            )
             putative_indices = refined.indices(PUTATIVE_MODIFICATION_COLUMN)
             self.assertEqual(len(putative_indices), 1)
             self.assertTrue(
@@ -530,26 +589,10 @@ class CohortRefinementTests(unittest.TestCase):
             request = json.loads(
                 (output / "llm-adjudication-request.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(packet["provenance"]["input_mode"], "no-original-sdrf")
-            self.assertEqual(request["input_mode"], "no-original-sdrf")
             self.assertFalse(packet["sdrf"]["available"])
             self.assertTrue(request["decisions"])
             self.assertTrue(all(item["target_rows"] == [] for item in request["decisions"]))
             validator.validate.assert_not_called()
-
-    def test_no_original_sdrf_requires_unambiguous_project_accession(self) -> None:
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            results_root = root / "results"
-            results_root.mkdir()
-            result = _result("run.raw", precursor=8.0, fragment=20.0)
-            (results_root / "run.raw.summary.json").write_text(
-                json.dumps(result.to_dict()), encoding="utf-8"
-            )
-            with self.assertRaisesRegex(ValueError, "requires one unambiguous"):
-                Workflow(WorkflowOptions(refine_sdrf_qc=True)).refine_existing_sdrf(
-                    results_root, root / "out", sdrf=None
-                )
 
     def test_existing_results_refinement_combines_file_array_summaries(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

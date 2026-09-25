@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import numpy as np
 
+from prideqc import __version__
 from prideqc.annotations import DiagnosticIonCollector
 from prideqc.cli import main
 from prideqc.conversion import ExternalConverter
@@ -630,6 +631,25 @@ class AnnotationTests(unittest.TestCase):
 
 
 class SDRFTests(unittest.TestCase):
+    def test_annotation_tool_is_single_file_level_value_before_factors(self):
+        document = SDRFDocument(
+            ["comment[data file]", "factor value[condition]"],
+            [["run-1.raw", "control"], ["run-2.raw", "treated"]],
+        )
+
+        value = document.set_annotation_tool("prideQC", __version__)
+
+        self.assertEqual(value, f"prideQC v{__version__}")
+        indices = document.indices("comment[sdrf annotation tool]")
+        self.assertEqual(len(indices), 1)
+        self.assertLess(indices[0], document.indices("factor value[condition]")[0])
+        self.assertTrue(all(row[indices[0]] == value for row in document.rows))
+
+        updated = document.set_annotation_tool("prideQC", "v9.9.9")
+        self.assertEqual(updated, "prideQC v9.9.9")
+        self.assertEqual(len(document.indices("comment[sdrf annotation tool]")), 1)
+        self.assertTrue(all(row[indices[0]] == updated for row in document.rows))
+
     def test_not_applicable_is_preserved_as_an_existing_assertion(self):
         document = SDRFDocument(
             ["comment[data file]", "comment[instrument]"],
