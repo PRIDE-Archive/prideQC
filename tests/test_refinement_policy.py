@@ -77,34 +77,49 @@ class RefinementPolicyTests(unittest.TestCase):
             },
         }
 
-    def test_existing_reported_tolerance_is_preserved_when_candidate_differs(self) -> None:
-        resolution = resolve_pre_adjudication_policy(self._tolerance("20 ppm"))
-        self.assertIsNotNone(resolution)
-        assert resolution is not None
-        self.assertEqual(resolution.decision, "reject")
-        self.assertIsNone(resolution.selected_value)
-        self.assertEqual(resolution.rule, "tolerance-preserve-reported-value")
-
-    def test_missing_tolerance_remains_for_model_adjudication(self) -> None:
-        self.assertIsNone(resolve_pre_adjudication_policy(self._tolerance("not available")))
-
-    def test_high_confidence_ptm_is_accepted_even_when_original_is_missing(self) -> None:
-        resolution = resolve_pre_adjudication_policy(self._ptm())
+    def test_existing_reported_tolerance_matching_candidate_is_noop_accept(self) -> None:
+        resolution = resolve_pre_adjudication_policy(self._tolerance("8 ppm"))
         self.assertIsNotNone(resolution)
         assert resolution is not None
         self.assertEqual(resolution.decision, "accept")
-        self.assertEqual(resolution.selected_value, "NT=Methylation;AC=UniMod:34")
-        self.assertEqual(resolution.rule, "ptm-high-confidence-raw-identity")
-        self.assertEqual(resolution.metrics["strong_identity_run_fraction"], 1.0)
+        self.assertEqual(resolution.selected_value, "8 ppm")
+        self.assertEqual(resolution.rule, "tolerance-original-already-matches")
 
-    def test_mass_only_ptm_below_identity_gate_abstains_without_model(self) -> None:
-        decision = self._ptm()
-        decision["evidence"]["high_support_run_fraction"] = 0.8  # type: ignore[index]
-        resolution = resolve_pre_adjudication_policy(decision)
+    def test_existing_reported_tolerance_is_preserved_when_candidate_differs(self) -> None:
+            resolution = resolve_pre_adjudication_policy(self._tolerance("20 ppm"))
+            self.assertIsNotNone(resolution)
+            assert resolution is not None
+            self.assertEqual(resolution.decision, "reject")
+            self.assertIsNone(resolution.selected_value)
+            self.assertEqual(resolution.rule, "tolerance-preserve-reported-value")
+
+    def test_missing_tolerance_abstains_without_model_adjudication(self) -> None:
+        resolution = resolve_pre_adjudication_policy(self._tolerance("not available"))
         self.assertIsNotNone(resolution)
         assert resolution is not None
         self.assertEqual(resolution.decision, "abstain")
-        self.assertEqual(resolution.rule, "ptm-insufficient-identity-confidence")
+        self.assertIsNone(resolution.selected_value)
+        self.assertEqual(resolution.rule, "tolerance-original-missing-abstain")
+
+    def test_high_confidence_raw_only_ptm_abstains_when_original_is_missing(self) -> None:
+        resolution = resolve_pre_adjudication_policy(self._ptm())
+        self.assertIsNotNone(resolution)
+        assert resolution is not None
+        self.assertEqual(resolution.decision, "abstain")
+        self.assertIsNone(resolution.selected_value)
+        self.assertEqual(resolution.rule, "ptm-raw-evidence-only-abstain")
+        self.assertEqual(resolution.metrics["strong_identity_run_fraction"], 1.0)
+        self.assertTrue(resolution.metrics["raw_identity_gate_met"])
+
+    def test_mass_only_ptm_below_identity_gate_abstains_without_model(self) -> None:
+            decision = self._ptm()
+            decision["evidence"]["high_support_run_fraction"] = 0.8  # type: ignore[index]
+            resolution = resolve_pre_adjudication_policy(decision)
+            self.assertIsNotNone(resolution)
+            assert resolution is not None
+            self.assertEqual(resolution.decision, "abstain")
+            self.assertEqual(resolution.rule, "ptm-raw-evidence-only-abstain")
+            self.assertFalse(resolution.metrics["raw_identity_gate_met"])
 
     def test_semantically_supported_borderline_ptm_is_left_for_model(self) -> None:
         decision = self._ptm()
@@ -112,14 +127,25 @@ class RefinementPolicyTests(unittest.TestCase):
         decision["evidence"]["semantic_evidence_status"] = "supported"  # type: ignore[index]
         self.assertIsNone(resolve_pre_adjudication_policy(decision))
 
-    def test_ptm_mass_ambiguity_always_abstains(self) -> None:
+    def test_ptm_already_reported_is_noop_accept(self) -> None:
         decision = self._ptm()
-        decision["evidence"]["mass_identity_ambiguous"] = True  # type: ignore[index]
+        decision["original"] = {
+            "rows": [{"row": 2, "values": ["NT=Methylation;AC=UniMod:34"]}]
+        }
         resolution = resolve_pre_adjudication_policy(decision)
         self.assertIsNotNone(resolution)
         assert resolution is not None
-        self.assertEqual(resolution.decision, "abstain")
-        self.assertEqual(resolution.rule, "ptm-mass-identity-ambiguous")
+        self.assertEqual(resolution.decision, "accept")
+        self.assertEqual(resolution.rule, "ptm-original-already-reported")
+
+    def test_ptm_mass_ambiguity_always_abstains(self) -> None:
+            decision = self._ptm()
+            decision["evidence"]["mass_identity_ambiguous"] = True  # type: ignore[index]
+            resolution = resolve_pre_adjudication_policy(decision)
+            self.assertIsNotNone(resolution)
+            assert resolution is not None
+            self.assertEqual(resolution.decision, "abstain")
+            self.assertEqual(resolution.rule, "ptm-mass-identity-ambiguous")
 
     def test_high_confidence_requires_biological_ptm_classification(self) -> None:
         decision = self._ptm()

@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-PRE_ADJUDICATION_POLICY_VERSION = "prideqc-pre-adjudication-policy-v1"
+PRE_ADJUDICATION_POLICY_VERSION = "prideqc-pre-adjudication-policy-v2"
 
 _MISSING_VALUES = {
     "",
@@ -58,6 +58,9 @@ def pre_adjudication_policy_metadata() -> dict[str, Any]:
         },
         "missing_original_modification_is_negative_evidence": False,
         "raw_precision_alone_can_replace_reported_tolerance": False,
+        "raw_precision_alone_can_fill_missing_reported_tolerance": False,
+        "raw_ptm_identity_alone_can_fill_missing_modification": False,
+        "canonical_ptm_write_requires_original_or_semantic_support": True,
     }
 
 
@@ -150,7 +153,21 @@ def _tolerance_resolution(decision: Mapping[str, Any]) -> PolicyResolution | Non
     valid = [(value, item) for value, item in parsed if item is not None]
 
     if not meaningful:
-        return None
+        return PolicyResolution(
+            decision_id=decision_id,
+            decision="abstain",
+            selected_value=None,
+            reason=(
+                "The original SDRF does not contain a usable reported search tolerance. "
+                "The RAW-derived precision estimate is retained as QC/reanalysis evidence "
+                "but cannot establish the historical search setting for canonical SDRF metadata."
+            ),
+            rule="tolerance-original-missing-abstain",
+            metrics={
+                "original_values": original_values,
+                "candidate_value": candidate_value,
+            },
+        )
     if len(valid) != len(meaningful):
         return PolicyResolution(
             decision_id=decision_id,
@@ -401,20 +418,7 @@ def _ptm_resolution(decision: Mapping[str, Any]) -> PolicyResolution | None:
         and recurrence_probability >= _PTM_MIN_RECURRENCE_PROBABILITY
         and strong_run_fraction >= _PTM_MIN_STRONG_RUN_FRACTION
     )
-    if high_confidence_raw_identity:
-        return PolicyResolution(
-            decision_id=decision_id,
-            decision="accept",
-            selected_value=candidate_value,
-            reason=(
-                "The PTM has one non-ambiguous UniMod identity with near-complete recurrent "
-                "cohort support, high-support RAW evidence, consistent biological-PTM "
-                "classification, and tight mass agreement. Missing modification metadata in "
-                "the original SDRF is not treated as evidence against the PTM."
-            ),
-            rule="ptm-high-confidence-raw-identity",
-            metrics=metrics,
-        )
+    metrics["raw_identity_gate_met"] = high_confidence_raw_identity
 
     if semantic_status == "supported":
         return None
@@ -424,10 +428,12 @@ def _ptm_resolution(decision: Mapping[str, Any]) -> PolicyResolution | None:
         decision="abstain",
         selected_value=None,
         reason=(
-            "The PTM is recurrent and mass-compatible but does not meet prideQC's stricter "
-            "RAW-identity confidence gate, and no independent semantic support is available."
+            "RAW-derived recurrent mass evidence is retained as QC/reanalysis evidence but "
+            "cannot establish that this PTM was searched or reported in the experiment. "
+            "Independent semantic/search support is required before a missing PTM may be "
+            "promoted into canonical SDRF metadata."
         ),
-        rule="ptm-insufficient-identity-confidence",
+        rule="ptm-raw-evidence-only-abstain",
         metrics=metrics,
     )
 
