@@ -271,7 +271,7 @@ class RefinementModelTests(unittest.TestCase):
         self.assertFalse(result.audit["runtime"]["invoked"])
         self.assertEqual(
             result.audit["policy_decisions"][0]["rule"],
-            "tolerance-original-missing-abstain",
+            "tolerance-missing-insufficient-confidence",
         )
 
     def test_policy_gate_can_resolve_without_starting_llama_server(self) -> None:
@@ -419,7 +419,7 @@ class RefinementModelTests(unittest.TestCase):
             self.assertEqual(result.decisions["decisions"][0]["decision"], "abstain")
             self.assertEqual(
                 result.audit["policy_decisions"][0]["rule"],
-                "ptm-raw-evidence-only-abstain",
+                "ptm-parameter-scope-unverified",
             )
 
 

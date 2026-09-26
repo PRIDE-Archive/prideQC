@@ -1,9 +1,9 @@
-"""Deterministic scientific policy gates before LLM SDRF adjudication.
+"""Deterministic policy gates for confidence-gated SDRF reconstruction.
 
-The gates resolve cases where prideQC can enforce metadata semantics directly and leave
-only genuinely semantic/borderline cases for the model. Missing SDRF modification
-parameters are not evidence against a PTM: a sufficiently strong, unambiguous RAW-derived
-PTM identity may be accepted and later appended by the deterministic SDRF apply stage.
+RAW-derived evidence may reconstruct missing canonical metadata only when both the
+scientific confidence gate and the canonical parameter-scope gate are satisfied.
+Existing reported values remain authoritative unless an exact no-op match is observed.
+High-confidence PTM identity is model eligibility, not automatic canonical writeback.
 """
 
 from __future__ import annotations
@@ -12,9 +12,10 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from statistics import median
 from typing import Any
 
-PRE_ADJUDICATION_POLICY_VERSION = "prideqc-pre-adjudication-policy-v2"
+PRE_ADJUDICATION_POLICY_VERSION = "prideqc-pre-adjudication-policy-v3"
 
 _MISSING_VALUES = {
     "",
@@ -38,11 +39,28 @@ _PTM_MIN_RECURRENCE_PROBABILITY = 0.99
 _PTM_MIN_STRONG_RUN_FRACTION = 0.95
 _PTM_MAX_RESIDUAL_FRACTION_OF_MATCH_TOLERANCE = 0.25
 
+_TOLERANCE_MIN_SUPPORTING_RUNS = 3
+_TOLERANCE_MIN_COVERAGE = 0.80
+_TOLERANCE_MIN_HIGH_CONFIDENCE_FRACTION = 0.50
+_TOLERANCE_MAX_RELATIVE_MAD = 0.10
+_TOLERANCE_MAX_COMMON_MAX_TO_MEDIAN_RATIO = 1.50
+_VERIFIED_PARAMETER_SCOPES = frozenset({"accession-complete", "search-config-confirmed"})
+
 
 def pre_adjudication_policy_metadata() -> dict[str, Any]:
     """Return the frozen thresholds recorded in every adjudication audit."""
     return {
         "version": PRE_ADJUDICATION_POLICY_VERSION,
+        "tolerance_reconstruction": {
+            "minimum_supporting_runs": _TOLERANCE_MIN_SUPPORTING_RUNS,
+            "minimum_coverage": _TOLERANCE_MIN_COVERAGE,
+            "minimum_high_confidence_fraction": _TOLERANCE_MIN_HIGH_CONFIDENCE_FRACTION,
+            "maximum_relative_mad": _TOLERANCE_MAX_RELATIVE_MAD,
+            "maximum_common_max_to_median_ratio": (
+                _TOLERANCE_MAX_COMMON_MAX_TO_MEDIAN_RATIO
+            ),
+            "verified_parameter_scopes": sorted(_VERIFIED_PARAMETER_SCOPES),
+        },
         "ptm_high_confidence_raw_identity": {
             "minimum_supporting_runs": _PTM_MIN_SUPPORTING_RUNS,
             "minimum_run_prevalence": _PTM_MIN_RUN_PREVALENCE,
@@ -55,12 +73,12 @@ def pre_adjudication_policy_metadata() -> dict[str, Any]:
             ),
             "requires_non_ambiguous_identity": True,
             "requires_biological_ptm_classification": True,
+            "verified_parameter_scopes": sorted(_VERIFIED_PARAMETER_SCOPES),
         },
         "missing_original_modification_is_negative_evidence": False,
-        "raw_precision_alone_can_replace_reported_tolerance": False,
-        "raw_precision_alone_can_fill_missing_reported_tolerance": False,
-        "raw_ptm_identity_alone_can_fill_missing_modification": False,
-        "canonical_ptm_write_requires_original_or_semantic_support": True,
+        "raw_precision_can_fill_missing_reported_tolerance_when_confident": True,
+        "raw_ptm_identity_is_model_eligibility_not_automatic_acceptance": True,
+        "repository_summary_metadata_is_hard_negative_evidence": False,
     }
 
 
@@ -137,6 +155,75 @@ def _same_tolerance(left: tuple[float, str], right: tuple[float, str]) -> bool:
     return math.isclose(left[0], right[0], rel_tol=1e-9, abs_tol=1e-12)
 
 
+def _tolerance_confidence(decision: Mapping[str, Any]) -> tuple[bool, dict[str, Any]]:
+    evidence = _as_mapping(decision.get("evidence"))
+    raw_runs = evidence.get("per_run_estimates")
+    if not isinstance(raw_runs, Sequence) or isinstance(raw_runs, (str, bytes)):
+        raw_runs = []
+    estimates: list[float] = []
+    confidences: list[str] = []
+    units: set[str] = set()
+    regimes: set[str] = set()
+    for item in raw_runs:
+        if not isinstance(item, Mapping) or item.get("status") != "available":
+            continue
+        value = _finite_float(item.get("value"))
+        if value is None or value <= 0:
+            continue
+        estimates.append(value)
+        confidence = str(item.get("confidence") or "").strip().casefold()
+        if confidence:
+            confidences.append(confidence)
+        unit = str(item.get("unit") or "").strip().casefold()
+        if unit:
+            units.add(unit)
+        regime = str(item.get("resolution_regime") or "").strip().casefold()
+        if regime:
+            regimes.add(regime)
+    supporting_runs = len(estimates)
+    group_runs = _finite_float(evidence.get("group_runs"))
+    coverage = (supporting_runs / group_runs) if group_runs and group_runs > 0 else 0.0
+    high_fraction = (
+        sum(1 for item in confidences if item == "high") / supporting_runs
+        if supporting_runs
+        else 0.0
+    )
+    center = median(estimates) if estimates else None
+    relative_mad: float | None = None
+    if center is not None and center > 0:
+        relative_mad = median(abs(value - center) for value in estimates) / center
+    common_max = _finite_float(evidence.get("group_common_max"))
+    max_to_median: float | None = None
+    if common_max is not None and center is not None and center > 0:
+        max_to_median = common_max / center
+    units_consistent = len(units) <= 1
+    regimes_consistent = len(regimes) <= 1
+    metrics = {
+        "supporting_runs": supporting_runs,
+        "group_runs": int(group_runs) if group_runs is not None else None,
+        "coverage": coverage,
+        "high_confidence_fraction": high_fraction,
+        "relative_mad": relative_mad,
+        "common_max_to_median_ratio": max_to_median,
+        "units_consistent": units_consistent,
+        "resolution_regimes_consistent": regimes_consistent,
+        "parameter_scope_status": str(decision.get("parameter_scope_status") or "legacy-unverified"),
+    }
+    passed = (
+        supporting_runs >= _TOLERANCE_MIN_SUPPORTING_RUNS
+        and coverage >= _TOLERANCE_MIN_COVERAGE
+        and high_fraction >= _TOLERANCE_MIN_HIGH_CONFIDENCE_FRACTION
+        and relative_mad is not None
+        and relative_mad <= _TOLERANCE_MAX_RELATIVE_MAD
+        and max_to_median is not None
+        and max_to_median <= _TOLERANCE_MAX_COMMON_MAX_TO_MEDIAN_RATIO
+        and units_consistent
+        and regimes_consistent
+        and metrics["parameter_scope_status"] in _VERIFIED_PARAMETER_SCOPES
+    )
+    return passed, metrics
+
+
 def _tolerance_resolution(decision: Mapping[str, Any]) -> PolicyResolution | None:
     decision_id = str(decision.get("decision_id") or "")
     candidates = decision.get("candidate_values")
@@ -153,20 +240,30 @@ def _tolerance_resolution(decision: Mapping[str, Any]) -> PolicyResolution | Non
     valid = [(value, item) for value, item in parsed if item is not None]
 
     if not meaningful:
+        confident, metrics = _tolerance_confidence(decision)
+        metrics.update({"original_values": original_values, "candidate_value": candidate_value})
+        if confident:
+            return PolicyResolution(
+                decision_id=decision_id,
+                decision="accept",
+                selected_value=candidate_value,
+                reason=(
+                    "The original SDRF tolerance is missing and prideQC's cohort estimate "
+                    "passes the frozen stability and parameter-scope confidence gate."
+                ),
+                rule="tolerance-missing-high-confidence-reconstruction",
+                metrics=metrics,
+            )
         return PolicyResolution(
             decision_id=decision_id,
             decision="abstain",
             selected_value=None,
             reason=(
-                "The original SDRF does not contain a usable reported search tolerance. "
-                "The RAW-derived precision estimate is retained as QC/reanalysis evidence "
-                "but cannot establish the historical search setting for canonical SDRF metadata."
+                "The original SDRF tolerance is missing, but the prideQC estimate does not "
+                "meet the frozen confidence and verified-scope requirements for writeback."
             ),
-            rule="tolerance-original-missing-abstain",
-            metrics={
-                "original_values": original_values,
-                "candidate_value": candidate_value,
-            },
+            rule="tolerance-missing-insufficient-confidence",
+            metrics=metrics,
         )
     if len(valid) != len(meaningful):
         return PolicyResolution(
@@ -369,18 +466,9 @@ def _ptm_resolution(decision: Mapping[str, Any]) -> PolicyResolution | None:
     accession, name = identity
 
     semantic_status = str(evidence.get("semantic_evidence_status") or "not-evaluated")
-    if semantic_status in {"conflicting", "mixed"}:
-        return PolicyResolution(
-            decision_id=decision_id,
-            decision="abstain",
-            selected_value=None,
-            reason=(
-                "Independent study evidence is conflicting for this PTM identity, so prideQC "
-                "keeps the candidate out of canonical SDRF metadata."
-            ),
-            rule="ptm-semantic-evidence-conflicting",
-            metrics={"semantic_evidence_status": semantic_status},
-        )
+    # Repository/project-level semantic metadata is contextual evidence, not a
+    # deterministic veto. Direct deposited search evidence is surfaced to the constrained
+    # model and can support reject/abstain there.
 
     supporting_runs = _finite_float(evidence.get("supporting_runs"))
     run_prevalence = _finite_float(evidence.get("run_prevalence"))
@@ -419,8 +507,24 @@ def _ptm_resolution(decision: Mapping[str, Any]) -> PolicyResolution | None:
         and strong_run_fraction >= _PTM_MIN_STRONG_RUN_FRACTION
     )
     metrics["raw_identity_gate_met"] = high_confidence_raw_identity
+    scope_status = str(decision.get("parameter_scope_status") or "legacy-unverified")
+    metrics["parameter_scope_status"] = scope_status
+    scope_verified = scope_status in _VERIFIED_PARAMETER_SCOPES
 
-    if semantic_status == "supported":
+    if not scope_verified:
+        return PolicyResolution(
+            decision_id=decision_id,
+            decision="abstain",
+            selected_value=None,
+            reason=(
+                "The PTM evidence may be strong, but the canonical search-parameter scope "
+                "is not verified; prideQC will not write a subset-of-rows search parameter."
+            ),
+            rule="ptm-parameter-scope-unverified",
+            metrics=metrics,
+        )
+
+    if high_confidence_raw_identity or semantic_status == "supported":
         return None
 
     return PolicyResolution(
@@ -428,12 +532,10 @@ def _ptm_resolution(decision: Mapping[str, Any]) -> PolicyResolution | None:
         decision="abstain",
         selected_value=None,
         reason=(
-            "RAW-derived recurrent mass evidence is retained as QC/reanalysis evidence but "
-            "cannot establish that this PTM was searched or reported in the experiment. "
-            "Independent semantic/search support is required before a missing PTM may be "
-            "promoted into canonical SDRF metadata."
+            "The PTM candidate lacks either the frozen high-confidence RAW identity gate "
+            "or independent supporting evidence required for constrained adjudication."
         ),
-        rule="ptm-raw-evidence-only-abstain",
+        rule="ptm-insufficient-identity-confidence",
         metrics=metrics,
     )
 

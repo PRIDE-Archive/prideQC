@@ -31,10 +31,11 @@ def _packet_input_mode(packet: Mapping[str, Any]) -> str:
     value = str(provenance.get("input_mode") or "").strip()
     if value in INPUT_MODES:
         return value
-    # Backward-compatible inference for already-persisted v1 packets created
-    # before input_mode provenance was added. Newly built packets always set it.
+    # Backward-compatible inference for already-persisted packets created before
+    # explicit input_mode provenance. Newly generated packets always set it.
     sdrf = _as_mapping(packet.get("sdrf"))
     return "sdrf-backed" if sdrf.get("available") is True else "no-original-sdrf"
+
 
 
 def _canonical_sha256(value: Mapping[str, Any]) -> str:
@@ -108,6 +109,27 @@ def _request_decision(
             "ptm_families": _ptm_local_context(packet, decision),
         },
     }
+    scope_keys = (
+        "evidence_runs",
+        "parameter_scope_runs",
+        "parameter_scope_rows",
+        "parameter_scope_status",
+        "parameter_scope_basis",
+    )
+    if any(key in decision for key in scope_keys):
+        if not all(key in decision for key in scope_keys):
+            raise ValueError(
+                f"Decision {decision.get('decision_id')} has an incomplete parameter-scope contract"
+            )
+        output.update(
+            {
+                "evidence_runs": list(decision.get("evidence_runs") or []),
+                "parameter_scope_runs": list(decision.get("parameter_scope_runs") or []),
+                "parameter_scope_rows": list(decision.get("parameter_scope_rows") or []),
+                "parameter_scope_status": str(decision.get("parameter_scope_status") or ""),
+                "parameter_scope_basis": str(decision.get("parameter_scope_basis") or ""),
+            }
+        )
     return output
 
 
@@ -189,6 +211,30 @@ def validate_llm_adjudication_request(request: Mapping[str, Any]) -> None:
             raise ValueError(f"Decision {decision_id} must contain candidate values")
         if any(not isinstance(value, str) or not value for value in candidates):
             raise ValueError(f"Decision {decision_id} candidate values must be strings")
+        evidence_runs = item.get("evidence_runs")
+        scope_runs = item.get("parameter_scope_runs")
+        scope_rows = item.get("parameter_scope_rows")
+        if evidence_runs is not None or scope_runs is not None or scope_rows is not None:
+            if not isinstance(evidence_runs, list) or not evidence_runs:
+                raise ValueError(f"Decision {decision_id} must identify evidence runs")
+            if not isinstance(scope_runs, list) or not scope_runs:
+                raise ValueError(f"Decision {decision_id} must identify parameter-scope runs")
+            if item.get("target_runs") != scope_runs:
+                raise ValueError(
+                    f"Decision {decision_id} target runs must equal parameter-scope runs"
+                )
+            if not set(evidence_runs).issubset(set(scope_runs)):
+                raise ValueError(
+                    f"Decision {decision_id} evidence runs must be within parameter scope"
+                )
+            if not isinstance(scope_rows, list) or item.get("target_rows") != scope_rows:
+                raise ValueError(
+                    f"Decision {decision_id} target rows must equal parameter-scope rows"
+                )
+            if not str(item.get("parameter_scope_status") or ""):
+                raise ValueError(
+                    f"Decision {decision_id} must identify parameter-scope status"
+                )
         local_context = _as_mapping(item.get("local_context"))
         ptm_families = local_context.get("ptm_families")
         if not isinstance(ptm_families, list):

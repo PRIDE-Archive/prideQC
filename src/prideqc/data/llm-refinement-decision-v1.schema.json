@@ -18,10 +18,16 @@
       "pattern": "^sha256:[0-9a-f]{64}$"
     },
     "project_accession": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "input_mode": {
-      "enum": ["sdrf-backed", "no-original-sdrf"]
+      "enum": [
+        "sdrf-backed",
+        "no-original-sdrf"
+      ]
     },
     "decisions": {
       "type": "array",
@@ -34,12 +40,22 @@
           "reason"
         ],
         "properties": {
-          "decision_id": {"type": "string", "minLength": 1},
+          "decision_id": {
+            "type": "string",
+            "minLength": 1
+          },
           "decision": {
-            "enum": ["accept", "reject", "abstain"]
+            "enum": [
+              "accept",
+              "reject",
+              "abstain"
+            ]
           },
           "selected_value": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "reason": {
             "type": "string",

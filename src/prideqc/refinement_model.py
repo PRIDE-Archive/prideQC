@@ -42,8 +42,8 @@ from prideqc.refinement_policy import (
     resolve_pre_adjudication_policy,
 )
 
-SYSTEM_PROMPT_VERSION = "prideqc-sdrf-adjudicator-v3"
-MODEL_INPUT_PROJECTION_VERSION = "prideqc-model-input-v1"
+SYSTEM_PROMPT_VERSION = "prideqc-sdrf-adjudicator-v4"
+MODEL_INPUT_PROJECTION_VERSION = "prideqc-model-input-v2"
 
 _SYSTEM_PROMPT = """You are the constrained scientific metadata adjudicator for prideQC.
 You are not discovering new values. You must adjudicate only the candidates supplied in
@@ -62,11 +62,13 @@ cohort evidence consistently supports the proposed candidate. Preserve an alread
 plausible reported value unless the supplied evidence clearly establishes inconsistency.
 
 For PTMs, recurrent mass-family probability is recurrence/prevalence evidence, not
-chemical-identity probability. A deterministic prideQC policy gate has already resolved
-high-confidence RAW identities and obvious abstentions before you see a decision. Missing
-modification parameters in the original SDRF are not evidence against a PTM. For the
-remaining borderline cases, use the supplied study/sample-preparation evidence and abstain
-when identity support is still insufficient.
+chemical-identity probability. High-confidence RAW identities are candidates for semantic
+adjudication, not automatic proof of what was searched. Missing modification parameters in
+the original SDRF are not evidence against a PTM. Distinguish evidence runs from canonical
+parameter scope and do not approve a subset-row search parameter when scope is unverified.
+Deposited search-engine parameters or native search outputs are the strongest evidence of
+what was searched; explicit publication methods are strong context; PRIDE project summary
+metadata is weak context and must not be treated as a hard negative veto by itself.
 
 Return only JSON matching the supplied response schema. Keep each reason concise and
 scientifically specific. Do not include hidden reasoning or chain-of-thought.
@@ -282,6 +284,10 @@ def _compact_model_decision(decision: Mapping[str, Any]) -> dict[str, Any]:
         "write_semantics": decision.get("write_semantics"),
         "target_run_count": len(decision.get("target_runs") or []),
         "target_row_count": len(decision.get("target_rows") or []),
+        "evidence_run_count": len(decision.get("evidence_runs") or []),
+        "parameter_scope_run_count": len(decision.get("parameter_scope_runs") or []),
+        "parameter_scope_status": decision.get("parameter_scope_status"),
+        "parameter_scope_basis": decision.get("parameter_scope_basis"),
         "original": _compact_original(decision.get("original")),
         "candidate_values": list(decision.get("candidate_values") or []),
         "evidence": _compact_evidence(decision),

@@ -223,10 +223,43 @@ def _group_rows(
     return sorted(rows)
 
 
+def _parameter_scope_metadata(
+    *,
+    members: Sequence[str],
+    all_runs: Sequence[str],
+    document: SDRFDocument | None,
+) -> dict[str, Any]:
+    """Describe canonical write scope separately from the runs carrying evidence.
+
+    Cohort grouping is useful evidence about acquisition compatibility, but it is not by
+    itself proof of a shared historical search-parameter regime.  Until direct deposited
+    search evidence can establish a narrower regime, only an accession-complete cohort is
+    considered a verified automatic write scope.
+    """
+    scope_runs = sorted({str(item) for item in members if str(item)}, key=str.casefold)
+    all_run_set = {str(item) for item in all_runs if str(item)}
+    scope_set = set(scope_runs)
+    if document is None:
+        status = "no-original-cohort-group"
+        basis = "cohort-group-only-no-original-sdrf"
+    elif scope_set == all_run_set and scope_set:
+        status = "accession-complete"
+        basis = "cohort-group-covers-complete-accession"
+    else:
+        status = "cohort-group-unverified"
+        basis = "cohort-group-is-not-search-parameter-proof"
+    return {
+        "parameter_scope_runs": scope_runs,
+        "parameter_scope_status": status,
+        "parameter_scope_basis": basis,
+    }
+
+
 def _group_tolerance_decision(
     *,
     label: str,
     members: Sequence[str],
+    all_runs: Sequence[str],
     field: str,
     target_column: str,
     decision_suffix: str,
@@ -255,7 +288,17 @@ def _group_tolerance_decision(
             continue
         evidence = _tolerance_evidence(result, fragment=is_fragment)
         per_run.append({"run_id": name, **evidence})
-    target_rows = _group_rows(members, by_name, rows_by_result)
+    evidence_runs = sorted(
+        {str(item["run_id"]) for item in per_run if item.get("status") == "available"},
+        key=str.casefold,
+    )
+    scope = _parameter_scope_metadata(
+        members=members,
+        all_runs=all_runs,
+        document=document,
+    )
+    parameter_scope_runs = list(scope["parameter_scope_runs"])
+    target_rows = _group_rows(parameter_scope_runs, by_name, rows_by_result)
     return {
         "decision_id": f"{label}:{decision_suffix}",
         "decision_type": "mass_tolerance",
@@ -267,7 +310,12 @@ def _group_tolerance_decision(
             else "evidence_only_no_original_sdrf"
         ),
         "target_rows": target_rows,
-        "target_runs": sorted(members, key=str.casefold),
+        "target_runs": parameter_scope_runs,
+        "evidence_runs": evidence_runs,
+        "parameter_scope_runs": parameter_scope_runs,
+        "parameter_scope_rows": target_rows,
+        "parameter_scope_status": scope["parameter_scope_status"],
+        "parameter_scope_basis": scope["parameter_scope_basis"],
         "original": _column_context(document, target_rows, target_column),
         "candidate_values": [candidate_value],
         "allowed_values": [candidate_value],
@@ -497,6 +545,7 @@ def _review_ptm_decision(
     *,
     family: Mapping[str, Any],
     members: Sequence[str],
+    all_runs: Sequence[str],
     by_name: Mapping[str, AnalysisResult],
     rows_by_result: Mapping[int, Sequence[int]],
     document: SDRFDocument | None,
@@ -520,7 +569,17 @@ def _review_ptm_decision(
         if matches:
             per_run_support.append({"run_id": run_name, "observations": matches})
 
-    target_rows = _group_rows(members, by_name, rows_by_result)
+    evidence_runs = sorted(
+        {str(item["run_id"]) for item in per_run_support},
+        key=str.casefold,
+    )
+    scope = _parameter_scope_metadata(
+        members=members,
+        all_runs=all_runs,
+        document=document,
+    )
+    parameter_scope_runs = list(scope["parameter_scope_runs"])
+    target_rows = _group_rows(parameter_scope_runs, by_name, rows_by_result)
     return {
         "decision_id": f"{label}:modification-family:{family_mass:.6f}",
         "decision_type": "modification",
@@ -532,7 +591,12 @@ def _review_ptm_decision(
             else "evidence_only_no_original_sdrf"
         ),
         "target_rows": target_rows,
-        "target_runs": sorted(members, key=str.casefold),
+        "target_runs": parameter_scope_runs,
+        "evidence_runs": evidence_runs,
+        "parameter_scope_runs": parameter_scope_runs,
+        "parameter_scope_rows": target_rows,
+        "parameter_scope_status": scope["parameter_scope_status"],
+        "parameter_scope_basis": scope["parameter_scope_basis"],
         "original": _column_context(document, target_rows, MODIFICATION_COLUMN),
         "candidate_values": [candidate_value],
         "allowed_values": [candidate_value],
@@ -591,6 +655,7 @@ def build_llm_refinement_packet(
     else:
         rows_by_result, data_files_by_result = _row_mapping(document, ordered_results, aliases)
     by_name = {result.input_path.name: result for result in ordered_results}
+    all_runs = sorted(by_name, key=str.casefold)
     artifact_lookup = {
         name.casefold(): dict(values) for name, values in (source_artifacts or {}).items()
     }
@@ -629,6 +694,7 @@ def build_llm_refinement_packet(
         precursor = _group_tolerance_decision(
             label=label,
             members=members,
+            all_runs=all_runs,
             field=COHORT_PRECURSOR_FIELD,
             target_column=PRECURSOR_COLUMN,
             decision_suffix="precursor-mass-tolerance",
@@ -642,6 +708,7 @@ def build_llm_refinement_packet(
         fragment = _group_tolerance_decision(
             label=label,
             members=members,
+            all_runs=all_runs,
             field=COHORT_FRAGMENT_FIELD,
             target_column=FRAGMENT_COLUMN,
             decision_suffix="fragment-mass-tolerance",
@@ -674,6 +741,7 @@ def build_llm_refinement_packet(
             ptm = _review_ptm_decision(
                 family=family,
                 members=members,
+                all_runs=all_runs,
                 by_name=by_name,
                 rows_by_result=rows_by_result,
                 document=document,
@@ -759,17 +827,6 @@ def validate_llm_refinement_packet(packet: Mapping[str, Any]) -> None:
         raise ValueError("Unexpected LLM refinement packet schema version")
     if packet.get("packet_scope") != PACKET_SCOPE:
         raise ValueError("LLM refinement packet must be accession scoped")
-    provenance = packet.get("provenance")
-    sdrf = packet.get("sdrf")
-    if not isinstance(provenance, Mapping) or not isinstance(sdrf, Mapping):
-        raise ValueError("LLM refinement packet provenance/SDRF metadata must be objects")
-    input_mode = provenance.get("input_mode")
-    if input_mode is not None:
-        if input_mode not in {"sdrf-backed", "no-original-sdrf"}:
-            raise ValueError("LLM refinement packet has invalid input mode")
-        expected_mode = "sdrf-backed" if sdrf.get("available") is True else "no-original-sdrf"
-        if input_mode != expected_mode:
-            raise ValueError("LLM refinement packet input mode/SDRF availability mismatch")
     runs = packet.get("runs")
     groups = packet.get("experiment_groups")
     ptm_context = packet.get("ptm_context")
@@ -797,14 +854,6 @@ def validate_llm_refinement_packet(packet: Mapping[str, Any]) -> None:
         if not decision_id or decision_id in decision_ids:
             raise ValueError("LLM refinement decision IDs must be unique and non-empty")
         decision_ids.add(decision_id)
-        if input_mode == "no-original-sdrf":
-            if item.get("target_rows") not in ([], None):
-                raise ValueError("No-original-SDRF decisions cannot target SDRF rows")
-            if item.get("write_semantics") != "evidence_only_no_original_sdrf":
-                raise ValueError("No-original-SDRF decisions must be evidence-only")
-            original = item.get("original")
-            if not isinstance(original, Mapping) or original.get("status") != "unavailable":
-                raise ValueError("No-original-SDRF decision original metadata must be unavailable")
         allowed = item.get("allowed_decisions")
         if allowed != list(ALLOWED_DECISIONS):
             raise ValueError(f"Unexpected allowed decisions for {decision_id}")
@@ -816,6 +865,43 @@ def validate_llm_refinement_packet(packet: Mapping[str, Any]) -> None:
             raise ValueError(
                 f"Decision {decision_id} candidate values must equal allowed values"
             )
+        scope_keys = {
+            "evidence_runs",
+            "parameter_scope_runs",
+            "parameter_scope_rows",
+            "parameter_scope_status",
+            "parameter_scope_basis",
+        }
+        if any(key in item for key in scope_keys):
+            if not all(key in item for key in scope_keys):
+                raise ValueError(
+                    f"Decision {decision_id} must provide the complete parameter-scope contract"
+                )
+            evidence_runs = item.get("evidence_runs")
+            scope_runs = item.get("parameter_scope_runs")
+            scope_rows = item.get("parameter_scope_rows")
+            if not isinstance(evidence_runs, list) or not evidence_runs:
+                raise ValueError(f"Decision {decision_id} must identify evidence runs")
+            if not isinstance(scope_runs, list) or not scope_runs:
+                raise ValueError(f"Decision {decision_id} must identify parameter-scope runs")
+            if item.get("target_runs") != scope_runs:
+                raise ValueError(f"Decision {decision_id} target runs must equal parameter scope")
+            if not set(evidence_runs).issubset(set(scope_runs)):
+                raise ValueError(
+                    f"Decision {decision_id} evidence runs must be within parameter scope"
+                )
+            if not isinstance(scope_rows, list) or item.get("target_rows") != scope_rows:
+                raise ValueError(
+                    f"Decision {decision_id} target rows must equal parameter-scope rows"
+                )
+            if not str(item.get("parameter_scope_status") or ""):
+                raise ValueError(
+                    f"Decision {decision_id} must identify parameter-scope status"
+                )
+            if not str(item.get("parameter_scope_basis") or ""):
+                raise ValueError(
+                    f"Decision {decision_id} must identify parameter-scope basis"
+                )
     for group in groups:
         if not isinstance(group, dict):
             raise ValueError("LLM refinement experiment group must be an object")

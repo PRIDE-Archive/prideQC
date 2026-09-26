@@ -4,24 +4,51 @@ import copy
 import unittest
 from typing import Any, cast
 
-from prideqc.refinement_policy import resolve_pre_adjudication_policy
+from prideqc.refinement_policy import (
+    pre_adjudication_policy_metadata,
+    resolve_pre_adjudication_policy,
+)
 
 
 class RefinementPolicyTests(unittest.TestCase):
-    def _tolerance(self, original: str) -> dict[str, object]:
+    def _tolerance(
+        self,
+        original: str,
+        *,
+        scope_status: str = "accession-complete",
+    ) -> dict[str, object]:
+        estimates = [7.8, 8.0, 7.9, 8.0]
         return {
             "decision_id": "Experiment group 1:precursor-mass-tolerance",
             "decision_type": "mass_tolerance",
             "candidate_values": ["8 ppm"],
+            "parameter_scope_status": scope_status,
             "original": {"rows": [{"row": 2, "values": [original]}]},
             "evidence": {
-                "group_median": 7.2,
-                "group_common_max": 7.8,
+                "group_median": 7.95,
+                "group_common_max": 8.0,
+                "supporting_runs": 4,
+                "group_runs": 4,
                 "selection_policy": "maximum-supported-per-run-estimate-rounded-up",
+                "per_run_estimates": [
+                    {
+                        "run_id": f"run-{index}.raw",
+                        "status": "available",
+                        "value": value,
+                        "unit": "ppm",
+                        "confidence": "high" if index < 3 else "moderate",
+                        "resolution_regime": "high-resolution",
+                    }
+                    for index, value in enumerate(estimates)
+                ],
             },
         }
 
-    def _ptm(self) -> dict[str, object]:
+    def _ptm(
+        self,
+        *,
+        scope_status: str = "accession-complete",
+    ) -> dict[str, object]:
         observations = []
         for index in range(10):
             observations.append(
@@ -52,6 +79,7 @@ class RefinementPolicyTests(unittest.TestCase):
             "decision_id": "Experiment group 1:modification-family:14.015500",
             "decision_type": "modification",
             "candidate_values": ["NT=Methylation;AC=UniMod:34"],
+            "parameter_scope_status": scope_status,
             "original": {"rows": [{"row": 2, "values": []}]},
             "evidence": {
                 "supporting_runs": 10,
@@ -77,6 +105,17 @@ class RefinementPolicyTests(unittest.TestCase):
             },
         }
 
+    def test_policy_v3_records_reconstruction_thresholds(self) -> None:
+        metadata = pre_adjudication_policy_metadata()
+        self.assertEqual(metadata["version"], "prideqc-pre-adjudication-policy-v3")
+        self.assertTrue(
+            metadata["raw_precision_can_fill_missing_reported_tolerance_when_confident"]
+        )
+        self.assertTrue(
+            metadata["raw_ptm_identity_is_model_eligibility_not_automatic_acceptance"]
+        )
+        self.assertFalse(metadata["repository_summary_metadata_is_hard_negative_evidence"])
+
     def test_existing_reported_tolerance_matching_candidate_is_noop_accept(self) -> None:
         resolution = resolve_pre_adjudication_policy(self._tolerance("8 ppm"))
         self.assertIsNotNone(resolution)
@@ -86,40 +125,67 @@ class RefinementPolicyTests(unittest.TestCase):
         self.assertEqual(resolution.rule, "tolerance-original-already-matches")
 
     def test_existing_reported_tolerance_is_preserved_when_candidate_differs(self) -> None:
-            resolution = resolve_pre_adjudication_policy(self._tolerance("20 ppm"))
-            self.assertIsNotNone(resolution)
-            assert resolution is not None
-            self.assertEqual(resolution.decision, "reject")
-            self.assertIsNone(resolution.selected_value)
-            self.assertEqual(resolution.rule, "tolerance-preserve-reported-value")
+        resolution = resolve_pre_adjudication_policy(self._tolerance("20 ppm"))
+        self.assertIsNotNone(resolution)
+        assert resolution is not None
+        self.assertEqual(resolution.decision, "reject")
+        self.assertIsNone(resolution.selected_value)
+        self.assertEqual(resolution.rule, "tolerance-preserve-reported-value")
 
-    def test_missing_tolerance_abstains_without_model_adjudication(self) -> None:
+    def test_missing_stable_tolerance_is_reconstructed_for_verified_scope(self) -> None:
         resolution = resolve_pre_adjudication_policy(self._tolerance("not available"))
         self.assertIsNotNone(resolution)
         assert resolution is not None
-        self.assertEqual(resolution.decision, "abstain")
-        self.assertIsNone(resolution.selected_value)
-        self.assertEqual(resolution.rule, "tolerance-original-missing-abstain")
+        self.assertEqual(resolution.decision, "accept")
+        self.assertEqual(resolution.selected_value, "8 ppm")
+        self.assertEqual(
+            resolution.rule,
+            "tolerance-missing-high-confidence-reconstruction",
+        )
+        self.assertGreaterEqual(resolution.metrics["coverage"], 0.8)
+        self.assertLessEqual(resolution.metrics["relative_mad"], 0.10)
 
-    def test_high_confidence_raw_only_ptm_abstains_when_original_is_missing(self) -> None:
-        resolution = resolve_pre_adjudication_policy(self._ptm())
+    def test_missing_tolerance_abstains_for_unverified_partial_scope(self) -> None:
+        decision = self._tolerance(
+            "not available",
+            scope_status="cohort-group-unverified",
+        )
+        resolution = resolve_pre_adjudication_policy(decision)
         self.assertIsNotNone(resolution)
         assert resolution is not None
         self.assertEqual(resolution.decision, "abstain")
-        self.assertIsNone(resolution.selected_value)
-        self.assertEqual(resolution.rule, "ptm-raw-evidence-only-abstain")
-        self.assertEqual(resolution.metrics["strong_identity_run_fraction"], 1.0)
-        self.assertTrue(resolution.metrics["raw_identity_gate_met"])
+        self.assertEqual(resolution.rule, "tolerance-missing-insufficient-confidence")
+        self.assertEqual(
+            resolution.metrics["parameter_scope_status"],
+            "cohort-group-unverified",
+        )
+
+    def test_high_confidence_raw_ptm_is_model_eligible_for_verified_scope(self) -> None:
+        self.assertIsNone(resolve_pre_adjudication_policy(self._ptm()))
+
+    def test_high_confidence_raw_ptm_abstains_for_unverified_partial_scope(self) -> None:
+        resolution = resolve_pre_adjudication_policy(
+            self._ptm(scope_status="cohort-group-unverified")
+        )
+        self.assertIsNotNone(resolution)
+        assert resolution is not None
+        self.assertEqual(resolution.decision, "abstain")
+        self.assertEqual(resolution.rule, "ptm-parameter-scope-unverified")
+
+    def test_project_metadata_conflict_is_not_a_deterministic_veto(self) -> None:
+        decision = self._ptm()
+        decision["evidence"]["semantic_evidence_status"] = "conflicting"  # type: ignore[index]
+        self.assertIsNone(resolve_pre_adjudication_policy(decision))
 
     def test_mass_only_ptm_below_identity_gate_abstains_without_model(self) -> None:
-            decision = self._ptm()
-            decision["evidence"]["high_support_run_fraction"] = 0.8  # type: ignore[index]
-            resolution = resolve_pre_adjudication_policy(decision)
-            self.assertIsNotNone(resolution)
-            assert resolution is not None
-            self.assertEqual(resolution.decision, "abstain")
-            self.assertEqual(resolution.rule, "ptm-raw-evidence-only-abstain")
-            self.assertFalse(resolution.metrics["raw_identity_gate_met"])
+        decision = self._ptm()
+        decision["evidence"]["high_support_run_fraction"] = 0.8  # type: ignore[index]
+        resolution = resolve_pre_adjudication_policy(decision)
+        self.assertIsNotNone(resolution)
+        assert resolution is not None
+        self.assertEqual(resolution.decision, "abstain")
+        self.assertEqual(resolution.rule, "ptm-insufficient-identity-confidence")
+        self.assertFalse(resolution.metrics["raw_identity_gate_met"])
 
     def test_semantically_supported_borderline_ptm_is_left_for_model(self) -> None:
         decision = self._ptm()
@@ -139,13 +205,13 @@ class RefinementPolicyTests(unittest.TestCase):
         self.assertEqual(resolution.rule, "ptm-original-already-reported")
 
     def test_ptm_mass_ambiguity_always_abstains(self) -> None:
-            decision = self._ptm()
-            decision["evidence"]["mass_identity_ambiguous"] = True  # type: ignore[index]
-            resolution = resolve_pre_adjudication_policy(decision)
-            self.assertIsNotNone(resolution)
-            assert resolution is not None
-            self.assertEqual(resolution.decision, "abstain")
-            self.assertEqual(resolution.rule, "ptm-mass-identity-ambiguous")
+        decision = self._ptm()
+        decision["evidence"]["mass_identity_ambiguous"] = True  # type: ignore[index]
+        resolution = resolve_pre_adjudication_policy(decision)
+        self.assertIsNotNone(resolution)
+        assert resolution is not None
+        self.assertEqual(resolution.decision, "abstain")
+        self.assertEqual(resolution.rule, "ptm-mass-identity-ambiguous")
 
     def test_high_confidence_requires_biological_ptm_classification(self) -> None:
         decision = self._ptm()
