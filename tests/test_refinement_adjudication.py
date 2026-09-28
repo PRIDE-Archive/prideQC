@@ -91,8 +91,8 @@ class RefinementAdjudicationTests(unittest.TestCase):
                     "target_rows": [2],
                     "target_runs": ["run.raw"],
                     "original": {"rows": [{"row": 2, "values": []}]},
-                    "candidate_values": ["NT=Methylation;AC=UniMod:34"],
-                    "allowed_values": ["NT=Methylation;AC=UniMod:34"],
+                    "candidate_values": ["NT=Methylation;AC=UniMod:34;MT=variable"],
+                    "allowed_values": ["NT=Methylation;AC=UniMod:34;MT=variable"],
                     "allowed_decisions": allowed,
                     "evidence": {
                         "observed_delta_mass_da": 14.0155,
@@ -116,13 +116,16 @@ class RefinementAdjudicationTests(unittest.TestCase):
         self.assertEqual(first["schema_version"], REQUEST_SCHEMA_VERSION)
         self.assertRegex(first["request_id"], r"^sha256:[0-9a-f]{64}$")
         self.assertEqual(first["input_mode"], "sdrf-backed")
+        self.assertEqual(
+            first["annotation_intent"],
+            "prideqc-id-free-reanalysis-recommendation",
+        )
+        self.assertTrue(first["contract"]["historical_search_absence_is_not_rejection_by_itself"])
         self.assertEqual(len(first["decisions"]), 2)
         tolerance = next(
             item for item in first["decisions"] if item["decision_type"] == "mass_tolerance"
         )
-        ptm = next(
-            item for item in first["decisions"] if item["decision_type"] == "modification"
-        )
+        ptm = next(item for item in first["decisions"] if item["decision_type"] == "modification")
         self.assertEqual(tolerance["local_context"]["ptm_families"], [])
         self.assertEqual(len(ptm["local_context"]["ptm_families"]), 1)
         self.assertAlmostEqual(
@@ -181,9 +184,7 @@ class RefinementAdjudicationTests(unittest.TestCase):
     def test_reject_and_abstain_cannot_select_a_value(self) -> None:
         request = build_llm_adjudication_request(self._packet())
         response = empty_llm_refinement_response(request)
-        response["decisions"][0]["selected_value"] = request["decisions"][0][
-            "candidate_values"
-        ][0]
+        response["decisions"][0]["selected_value"] = request["decisions"][0]["candidate_values"][0]
         with self.assertRaisesRegex(ValueError, "null selected_value"):
             validate_llm_refinement_decisions(response, request)
 

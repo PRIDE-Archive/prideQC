@@ -92,6 +92,10 @@ class RefinementPacketTests(unittest.TestCase):
         self.assertEqual(packet["schema_version"], PACKET_SCHEMA_VERSION)
         self.assertEqual(packet["packet_scope"], "accession-sdrf")
         self.assertEqual(packet["project_accession"], "PXD000612")
+        self.assertEqual(
+            packet["provenance"]["annotation_intent"],
+            "prideqc-id-free-reanalysis-recommendation",
+        )
         self.assertEqual(len(packet["runs"]), len(results))
         self.assertEqual(len(packet["experiment_groups"]), len(synthesis.groups))
         self.assertEqual(len(packet["experiment_groups"]), 2)
@@ -110,9 +114,7 @@ class RefinementPacketTests(unittest.TestCase):
                 "comment[fragment mass tolerance]",
             },
         )
-        self.assertTrue(
-            all(item["evidence"]["per_run_estimates"] for item in tolerance_decisions)
-        )
+        self.assertTrue(all(item["evidence"]["per_run_estimates"] for item in tolerance_decisions))
         self.assertTrue(
             all(
                 run["tolerance_evidence"]["precursor"]["status"] == "available"
@@ -142,20 +144,13 @@ class RefinementPacketTests(unittest.TestCase):
         self.assertEqual(len(packet["ptm_context"]), 2)
         for item in ptms:
             self.assertEqual(item["evidence"]["review_gate"], "strict-cohort-ptm-review-family")
-            self.assertEqual(
-                item["candidate_values"], ["NT=Methylation;AC=UniMod:34"]
-            )
-            self.assertEqual(
-                item["evidence"]["candidate_options"][0]["accession"], "UniMod:34"
-            )
+            self.assertEqual(item["candidate_values"], ["NT=Methylation;AC=UniMod:34;MT=variable"])
+            self.assertEqual(item["evidence"]["candidate_options"][0]["accession"], "UniMod:34")
             self.assertGreaterEqual(item["evidence"]["supporting_runs"], 3)
             self.assertTrue(item["evidence"]["per_run_support"])
             self.assertFalse(
-                item["evidence_semantics"][
-                    "recurrent_family_probability_is_identity_probability"
-                ]
+                item["evidence_semantics"]["recurrent_family_probability_is_identity_probability"]
             )
-
 
     def test_packet_keeps_mass_ambiguous_family_as_non_actionable_context(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -174,10 +169,7 @@ class RefinementPacketTests(unittest.TestCase):
             sdrf_path = root / "PXDTEST.sdrf.tsv"
             sdrf_path.write_text(
                 "comment[data file]\tcomment[modification parameters]\n"
-                + "".join(
-                    f"run-{index}.raw\tNT=Oxidation;AC=UniMod:35\n"
-                    for index in range(10)
-                ),
+                + "".join(f"run-{index}.raw\tNT=Oxidation;AC=UniMod:35\n" for index in range(10)),
                 encoding="utf-8",
             )
             document = SDRFDocument.read(sdrf_path)
@@ -261,10 +253,7 @@ class RefinementPacketTests(unittest.TestCase):
             sdrf_path = root / "PXDTEST.sdrf.tsv"
             sdrf_path.write_text(
                 "comment[data file]\tcomment[modification parameters]\n"
-                + "".join(
-                    f"run-{index}.raw\tNT=Oxidation;AC=UniMod:35\n"
-                    for index in range(10)
-                ),
+                + "".join(f"run-{index}.raw\tNT=Oxidation;AC=UniMod:35\n" for index in range(10)),
                 encoding="utf-8",
             )
             document = SDRFDocument.read(sdrf_path)
@@ -288,7 +277,7 @@ class RefinementPacketTests(unittest.TestCase):
         self.assertEqual(len(ptm_decisions), 1)
         self.assertEqual(
             ptm_decisions[0]["candidate_values"],
-            ["NT=Methylation;AC=UniMod:34"],
+            ["NT=Methylation;AC=UniMod:34;MT=variable"],
         )
 
     def test_packet_preserves_repeated_original_modification_context(self) -> None:
@@ -304,7 +293,6 @@ class RefinementPacketTests(unittest.TestCase):
                 "NT=Carbamidomethyl;AC=UniMod:4",
             ],
         )
-
 
     def test_packet_supports_no_original_sdrf_mode(self) -> None:
         with tempfile.TemporaryDirectory():

@@ -78,7 +78,7 @@ class RefinementPolicyTests(unittest.TestCase):
         return {
             "decision_id": "Experiment group 1:modification-family:14.015500",
             "decision_type": "modification",
-            "candidate_values": ["NT=Methylation;AC=UniMod:34"],
+            "candidate_values": ["NT=Methylation;AC=UniMod:34;MT=variable"],
             "parameter_scope_status": scope_status,
             "original": {"rows": [{"row": 2, "values": []}]},
             "evidence": {
@@ -105,16 +105,19 @@ class RefinementPolicyTests(unittest.TestCase):
             },
         }
 
-    def test_policy_v3_records_reconstruction_thresholds(self) -> None:
+    def test_policy_v4_records_reanalysis_thresholds(self) -> None:
         metadata = pre_adjudication_policy_metadata()
-        self.assertEqual(metadata["version"], "prideqc-pre-adjudication-policy-v3")
+        self.assertEqual(metadata["version"], "prideqc-pre-adjudication-policy-v4")
         self.assertTrue(
             metadata["raw_precision_can_fill_missing_reported_tolerance_when_confident"]
         )
-        self.assertTrue(
-            metadata["raw_ptm_identity_is_model_eligibility_not_automatic_acceptance"]
-        )
+        self.assertTrue(metadata["raw_ptm_identity_is_model_eligibility_not_automatic_acceptance"])
         self.assertFalse(metadata["repository_summary_metadata_is_hard_negative_evidence"])
+        self.assertEqual(
+            metadata["annotation_intent"],
+            "prideqc-id-free-reanalysis-recommendation",
+        )
+        self.assertFalse(metadata["historical_search_parameters_required_for_ptm_acceptance"])
 
     def test_existing_reported_tolerance_matching_candidate_is_noop_accept(self) -> None:
         resolution = resolve_pre_adjudication_policy(self._tolerance("8 ppm"))
@@ -195,9 +198,7 @@ class RefinementPolicyTests(unittest.TestCase):
 
     def test_ptm_already_reported_is_noop_accept(self) -> None:
         decision = self._ptm()
-        decision["original"] = {
-            "rows": [{"row": 2, "values": ["NT=Methylation;AC=UniMod:34"]}]
-        }
+        decision["original"] = {"rows": [{"row": 2, "values": ["NT=Methylation;AC=UniMod:34"]}]}
         resolution = resolve_pre_adjudication_policy(decision)
         self.assertIsNotNone(resolution)
         assert resolution is not None
