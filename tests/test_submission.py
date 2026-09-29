@@ -10,7 +10,10 @@ from prideqc.refinement_adjudication import (
     REQUEST_SCOPE,
     RESPONSE_SCHEMA_VERSION,
 )
-from prideqc.refinement_packet import PACKET_SCHEMA_VERSION
+from prideqc.refinement_packet import (
+    PACKET_SCHEMA_VERSION,
+    REANALYSIS_ANNOTATION_INTENT,
+)
 from prideqc.sdrf import SDRFDocument
 from prideqc.submission import apply_adjudicated_sdrf
 from prideqc.validation import ValidationReport
@@ -41,6 +44,7 @@ def _request(decisions: list[dict[str, object]], *, mode: str = "sdrf-backed") -
         "request_id": f"sha256:{source_hash}",
         "project_accession": "PXD123456",
         "input_mode": mode,
+        "annotation_intent": REANALYSIS_ANNOTATION_INTENT,
         "source_packet": {
             "schema_version": PACKET_SCHEMA_VERSION,
             "sha256": source_hash,
@@ -149,7 +153,7 @@ class SubmissionApplicationTests(unittest.TestCase):
                         target_run="run-b.raw",
                         data_file="run-b.raw",
                         values=["NT=Oxidation;AC=UniMod:35"],
-                        candidate="NT=Methylation;AC=UniMod:34",
+                        candidate="NT=Methylation;AC=UniMod:34;MT=variable",
                         write_semantics=(
                             "append_one_allowed_canonical_value_if_accepted_and_missing"
                         ),
@@ -169,7 +173,7 @@ class SubmissionApplicationTests(unittest.TestCase):
                     {
                         "decision_id": "Experiment group 1:modification-family:14.015500",
                         "decision": "accept",
-                        "selected_value": "NT=Methylation;AC=UniMod:34",
+                        "selected_value": "NT=Methylation;AC=UniMod:34;MT=variable",
                         "reason": "Use the supplied candidate.",
                     },
                     {
@@ -205,8 +209,14 @@ class SubmissionApplicationTests(unittest.TestCase):
             self.assertEqual(final.rows[0][precursor], "10 ppm")
             self.assertEqual(final.rows[0][fragment], "0.02 Da")
             self.assertEqual(final.rows[2][precursor], "20 ppm")
-            self.assertIn("NT=Methylation;AC=UniMod:34", [final.rows[1][i] for i in mods])
-            self.assertNotIn("NT=Methylation;AC=UniMod:34", [final.rows[2][i] for i in mods])
+            self.assertIn(
+                "NT=Methylation;AC=UniMod:34;MT=variable",
+                [final.rows[1][i] for i in mods],
+            )
+            self.assertNotIn(
+                "NT=Methylation;AC=UniMod:34;MT=variable",
+                [final.rows[2][i] for i in mods],
+            )
             self.assertTrue(all(row[tool] == "prideQC v0.2.0" for row in final.rows))
 
     def test_refuses_full_sdrf_original_value_drift(self) -> None:
@@ -214,8 +224,7 @@ class SubmissionApplicationTests(unittest.TestCase):
             root = Path(folder)
             sdrf = root / "PXD123456.sdrf.tsv"
             sdrf.write_text(
-                "comment[data file]\tcomment[precursor mass tolerance]\n"
-                "run.raw\t30 ppm\n",
+                "comment[data file]\tcomment[precursor mass tolerance]\nrun.raw\t30 ppm\n",
                 encoding="utf-8",
             )
             request = _request(
@@ -260,8 +269,7 @@ class SubmissionApplicationTests(unittest.TestCase):
             root = Path(folder)
             sdrf = root / "PXD123456.sdrf.tsv"
             sdrf.write_text(
-                "comment[data file]\tcomment[precursor mass tolerance]\n"
-                "run.mzML\t20 ppm\n",
+                "comment[data file]\tcomment[precursor mass tolerance]\nrun.mzML\t20 ppm\n",
                 encoding="utf-8",
             )
             request = _request(
@@ -309,8 +317,7 @@ class SubmissionApplicationTests(unittest.TestCase):
             root = Path(folder)
             sdrf = root / "PXD123456.sdrf.tsv"
             sdrf.write_text(
-                "comment[data file]\tcomment[precursor mass tolerance]\n"
-                "run.raw\t20 ppm\n",
+                "comment[data file]\tcomment[precursor mass tolerance]\nrun.raw\t20 ppm\n",
                 encoding="utf-8",
             )
             request = _request(
@@ -393,6 +400,69 @@ class SubmissionApplicationTests(unittest.TestCase):
             assay = final.indices("assay name")[0]
             technology = final.indices("technology type")[0]
             self.assertEqual(technology, assay + 1)
+
+    def test_invalid_reanalysis_intent_does_not_delete_existing_output(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            sdrf = root / "PXD123456.sdrf.tsv"
+            sdrf.write_text(
+                "comment[data file]\nrun.raw\n",
+                encoding="utf-8",
+            )
+            request = _request([])
+            request.pop("annotation_intent")
+            response = _response(request, [])
+            request_path = root / "request.json"
+            decisions_path = root / "decisions.json"
+            _write_json(request_path, request)
+            _write_json(decisions_path, response)
+
+            output = root / "out"
+            output.mkdir()
+            sentinel = output / "sentinel.txt"
+            sentinel.write_text("keep me", encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "requires explicit ID-free re-analysis annotation intent",
+            ):
+                apply_adjudicated_sdrf(
+                    sdrf=sdrf,
+                    request_path=request_path,
+                    decisions_path=decisions_path,
+                    output_directory=output,
+                    overwrite=True,
+                    validator=_Validator([()]),
+                )
+
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep me")
+
+    def test_full_sdrf_application_requires_explicit_reanalysis_intent(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            sdrf = root / "PXD123456.sdrf.tsv"
+            sdrf.write_text(
+                "comment[data file]\nrun.raw\n",
+                encoding="utf-8",
+            )
+            request = _request([])
+            request.pop("annotation_intent")
+            response = _response(request, [])
+            request_path = root / "request.json"
+            decisions_path = root / "decisions.json"
+            _write_json(request_path, request)
+            _write_json(decisions_path, response)
+            with self.assertRaisesRegex(
+                ValueError,
+                "requires explicit ID-free re-analysis annotation intent",
+            ):
+                apply_adjudicated_sdrf(
+                    sdrf=sdrf,
+                    request_path=request_path,
+                    decisions_path=decisions_path,
+                    output_directory=root / "out",
+                    validator=_Validator([()]),
+                )
 
     def test_no_original_sdrf_adjudication_cannot_be_applied(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

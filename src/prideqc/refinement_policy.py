@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from statistics import median
 from typing import Any
 
-PRE_ADJUDICATION_POLICY_VERSION = "prideqc-pre-adjudication-policy-v3"
+PRE_ADJUDICATION_POLICY_VERSION = "prideqc-pre-adjudication-policy-v4"
 
 _MISSING_VALUES = {
     "",
@@ -51,14 +51,14 @@ def pre_adjudication_policy_metadata() -> dict[str, Any]:
     """Return the frozen thresholds recorded in every adjudication audit."""
     return {
         "version": PRE_ADJUDICATION_POLICY_VERSION,
+        "annotation_intent": "prideqc-id-free-reanalysis-recommendation",
+        "historical_search_parameters_required_for_ptm_acceptance": False,
         "tolerance_reconstruction": {
             "minimum_supporting_runs": _TOLERANCE_MIN_SUPPORTING_RUNS,
             "minimum_coverage": _TOLERANCE_MIN_COVERAGE,
             "minimum_high_confidence_fraction": _TOLERANCE_MIN_HIGH_CONFIDENCE_FRACTION,
             "maximum_relative_mad": _TOLERANCE_MAX_RELATIVE_MAD,
-            "maximum_common_max_to_median_ratio": (
-                _TOLERANCE_MAX_COMMON_MAX_TO_MEDIAN_RATIO
-            ),
+            "maximum_common_max_to_median_ratio": (_TOLERANCE_MAX_COMMON_MAX_TO_MEDIAN_RATIO),
             "verified_parameter_scopes": sorted(_VERIFIED_PARAMETER_SCOPES),
         },
         "ptm_high_confidence_raw_identity": {
@@ -207,7 +207,9 @@ def _tolerance_confidence(decision: Mapping[str, Any]) -> tuple[bool, dict[str, 
         "common_max_to_median_ratio": max_to_median,
         "units_consistent": units_consistent,
         "resolution_regimes_consistent": regimes_consistent,
-        "parameter_scope_status": str(decision.get("parameter_scope_status") or "legacy-unverified"),
+        "parameter_scope_status": str(
+            decision.get("parameter_scope_status") or "legacy-unverified"
+        ),
     }
     passed = (
         supporting_runs >= _TOLERANCE_MIN_SUPPORTING_RUNS
@@ -331,13 +333,90 @@ def _candidate_identity(decision: Mapping[str, Any]) -> tuple[str, str] | None:
     return accession, name
 
 
+def _modification_fields(value: str) -> dict[str, str]:
+    """Parse one SDRF modification value into normalized semantic fields."""
+    fields: dict[str, str] = {}
+    seen_keys: set[str] = set()
+    for token in value.split(";"):
+        key, separator, raw = token.partition("=")
+        if not separator:
+            continue
+        normalized_key = key.strip().casefold()
+        normalized_value = raw.strip().casefold()
+        if normalized_key:
+            if normalized_key in seen_keys:
+                return {}
+            seen_keys.add(normalized_key)
+        if normalized_key and normalized_value:
+            fields[normalized_key] = normalized_value
+    return fields
+
+
+def _modification_identity(value: str) -> tuple[str, str] | None:
+    fields = _modification_fields(value)
+    accession = fields.get("ac", "")
+    name = fields.get("nt", "")
+    if not accession and not name:
+        return None
+    return accession, name
+
+
+def _modification_signature(value: str) -> tuple[tuple[str, str], ...] | None:
+    fields = _modification_fields(value)
+    if not fields:
+        return None
+    return tuple(sorted(fields.items()))
+
+
+def _same_modification_identity(left: str, right: str) -> bool:
+    left_identity = _modification_identity(left)
+    right_identity = _modification_identity(right)
+    if left_identity is None or right_identity is None:
+        return False
+    left_accession, left_name = left_identity
+    right_accession, right_name = right_identity
+    if left_accession and right_accession:
+        return left_accession == right_accession
+    return bool(left_name and right_name and left_name == right_name)
+
+
 def _candidate_is_already_reported(decision: Mapping[str, Any]) -> bool:
+    """Return true only for an unambiguous full-semantics no-op on every target row."""
     candidates = decision.get("candidate_values")
     if not isinstance(candidates, list) or len(candidates) != 1:
         return False
-    candidate = str(candidates[0]).strip().casefold()
+    candidate = str(candidates[0])
+    candidate_signature = _modification_signature(candidate)
+    if candidate_signature is None:
+        return False
+    original = _as_mapping(decision.get("original"))
+    rows = original.get("rows")
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)) or not rows:
+        return False
+    for row in rows:
+        if not isinstance(row, Mapping):
+            return False
+        values = row.get("values")
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            return False
+        same_identity = [
+            str(value) for value in values if _same_modification_identity(candidate, str(value))
+        ]
+        if not same_identity:
+            return False
+        if any(_modification_signature(value) != candidate_signature for value in same_identity):
+            return False
+    return True
+
+
+def _candidate_identity_is_already_reported(decision: Mapping[str, Any]) -> bool:
+    """Return true when existing metadata has the candidate identity with other semantics."""
+    candidates = decision.get("candidate_values")
+    if not isinstance(candidates, list) or len(candidates) != 1:
+        return False
+    candidate = str(candidates[0])
     return any(
-        value.strip().casefold() == candidate
+        _same_modification_identity(candidate, value)
         for value in _flatten_original_values(decision)
     )
 
@@ -434,11 +513,29 @@ def _ptm_resolution(decision: Mapping[str, Any]) -> PolicyResolution | None:
             decision_id=decision_id,
             decision="accept",
             selected_value=candidate_value,
-            reason="The candidate PTM is already present in the original SDRF metadata.",
+            reason=(
+                "Every target row already contains the same PTM recommendation semantics, "
+                "so this is a deterministic no-op."
+            ),
             rule="ptm-original-already-reported",
             metrics={"candidate_value": candidate_value},
         )
-
+    if _candidate_identity_is_already_reported(decision):
+        return PolicyResolution(
+            decision_id=decision_id,
+            decision="reject",
+            selected_value=None,
+            reason=(
+                "The original SDRF already reports the same PTM identity with different "
+                "modification semantics or incomplete target-row coverage; preserve the "
+                "existing metadata rather than append a broader variable recommendation."
+            ),
+            rule="ptm-original-identity-preserve-existing-semantics",
+            metrics={
+                "candidate_value": candidate_value,
+                "original_values": _flatten_original_values(decision),
+            },
+        )
     evidence = _as_mapping(decision.get("evidence"))
     if evidence.get("mass_identity_ambiguous") is True:
         return PolicyResolution(
@@ -447,7 +544,7 @@ def _ptm_resolution(decision: Mapping[str, Any]) -> PolicyResolution | None:
             selected_value=None,
             reason=(
                 "The recurrent mass family maps to more than one chemical identity, so prideQC "
-                "will not promote a PTM into canonical SDRF metadata."
+                "will not promote it as a re-analysis PTM recommendation."
             ),
             rule="ptm-mass-identity-ambiguous",
             metrics={"candidate_value": candidate_value},
@@ -466,9 +563,9 @@ def _ptm_resolution(decision: Mapping[str, Any]) -> PolicyResolution | None:
     accession, name = identity
 
     semantic_status = str(evidence.get("semantic_evidence_status") or "not-evaluated")
-    # Repository/project-level semantic metadata is contextual evidence, not a
-    # deterministic veto. Direct deposited search evidence is surfaced to the constrained
-    # model and can support reject/abstain there.
+    # Repository/project/publication metadata is contextual evidence, not a deterministic
+    # veto. The constrained model judges re-analysis suitability, not whether the original
+    # submitter historically searched this PTM.
 
     supporting_runs = _finite_float(evidence.get("supporting_runs"))
     run_prevalence = _finite_float(evidence.get("run_prevalence"))
@@ -517,8 +614,8 @@ def _ptm_resolution(decision: Mapping[str, Any]) -> PolicyResolution | None:
             decision="abstain",
             selected_value=None,
             reason=(
-                "The PTM evidence may be strong, but the canonical search-parameter scope "
-                "is not verified; prideQC will not write a subset-of-rows search parameter."
+                "The PTM evidence may be strong, but the re-analysis recommendation scope "
+                "is not verified; prideQC will not write a subset-of-rows PTM recommendation."
             ),
             rule="ptm-parameter-scope-unverified",
             metrics=metrics,

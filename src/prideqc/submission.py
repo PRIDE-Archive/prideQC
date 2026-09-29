@@ -28,6 +28,7 @@ from prideqc.refinement_adjudication import (
     validate_llm_adjudication_request,
     validate_llm_refinement_decisions,
 )
+from prideqc.refinement_packet import REANALYSIS_ANNOTATION_INTENT
 from prideqc.sdrf import MISSING, SDRFDocument, _equal, file_name
 from prideqc.validation import SDRFPipelinesValidator, SDRFValidator
 
@@ -376,6 +377,18 @@ def apply_adjudicated_sdrf(
     output = Path(output_directory).resolve()
     file_map_path = Path(file_map).resolve(strict=True) if file_map is not None else None
 
+    request = _load_object(request_file, label="--request")
+    validate_llm_adjudication_request(request)
+    if request.get("annotation_intent") != REANALYSIS_ANNOTATION_INTENT:
+        raise ValueError(
+            "Full-SDRF application requires explicit ID-free re-analysis annotation intent"
+        )
+
+    decisions = _load_object(decisions_file, label="--decisions")
+    validate_llm_refinement_decisions(decisions, request)
+    if request.get("input_mode") != "sdrf-backed":
+        raise ValueError("Full-SDRF application requires an sdrf-backed adjudication request")
+
     if output.exists() and not output.is_dir():
         raise FileExistsError(f"Output path is not a directory: {output}")
     if output.exists() and any(output.iterdir()):
@@ -390,13 +403,6 @@ def apply_adjudicated_sdrf(
             else:
                 child.unlink()
     output.mkdir(parents=True, exist_ok=True)
-
-    request = _load_object(request_file, label="--request")
-    decisions = _load_object(decisions_file, label="--decisions")
-    validate_llm_adjudication_request(request)
-    validate_llm_refinement_decisions(decisions, request)
-    if request.get("input_mode") != "sdrf-backed":
-        raise ValueError("Full-SDRF application requires an sdrf-backed adjudication request")
     accession = _project_accession_guard(source, request)
     aliases = _load_file_map(file_map_path)
 
@@ -431,9 +437,7 @@ def apply_adjudicated_sdrf(
 
     applications: list[DecisionApplication] = []
     changed_cell_count = 0
-    decision_counts = Counter(
-        str(item.get("decision") or "") for item in response_by_id.values()
-    )
+    decision_counts = Counter(str(item.get("decision") or "") for item in response_by_id.values())
 
     for decision_id in sorted(request_by_id, key=str.casefold):
         request_decision = request_by_id[decision_id]
@@ -562,6 +566,7 @@ def apply_adjudicated_sdrf(
             "request": str(request_file),
             "request_sha256": _sha256(request_file),
             "request_id": request.get("request_id"),
+            "annotation_intent": request.get("annotation_intent"),
             "source_packet": request.get("source_packet"),
             "benchmark_sdrf": request.get("sdrf"),
             "decisions": str(decisions_file),

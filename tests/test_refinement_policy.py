@@ -78,7 +78,7 @@ class RefinementPolicyTests(unittest.TestCase):
         return {
             "decision_id": "Experiment group 1:modification-family:14.015500",
             "decision_type": "modification",
-            "candidate_values": ["NT=Methylation;AC=UniMod:34"],
+            "candidate_values": ["NT=Methylation;AC=UniMod:34;MT=variable"],
             "parameter_scope_status": scope_status,
             "original": {"rows": [{"row": 2, "values": []}]},
             "evidence": {
@@ -105,16 +105,19 @@ class RefinementPolicyTests(unittest.TestCase):
             },
         }
 
-    def test_policy_v3_records_reconstruction_thresholds(self) -> None:
+    def test_policy_v4_records_reanalysis_thresholds(self) -> None:
         metadata = pre_adjudication_policy_metadata()
-        self.assertEqual(metadata["version"], "prideqc-pre-adjudication-policy-v3")
+        self.assertEqual(metadata["version"], "prideqc-pre-adjudication-policy-v4")
         self.assertTrue(
             metadata["raw_precision_can_fill_missing_reported_tolerance_when_confident"]
         )
-        self.assertTrue(
-            metadata["raw_ptm_identity_is_model_eligibility_not_automatic_acceptance"]
-        )
+        self.assertTrue(metadata["raw_ptm_identity_is_model_eligibility_not_automatic_acceptance"])
         self.assertFalse(metadata["repository_summary_metadata_is_hard_negative_evidence"])
+        self.assertEqual(
+            metadata["annotation_intent"],
+            "prideqc-id-free-reanalysis-recommendation",
+        )
+        self.assertFalse(metadata["historical_search_parameters_required_for_ptm_acceptance"])
 
     def test_existing_reported_tolerance_matching_candidate_is_noop_accept(self) -> None:
         resolution = resolve_pre_adjudication_policy(self._tolerance("8 ppm"))
@@ -193,16 +196,144 @@ class RefinementPolicyTests(unittest.TestCase):
         decision["evidence"]["semantic_evidence_status"] = "supported"  # type: ignore[index]
         self.assertIsNone(resolve_pre_adjudication_policy(decision))
 
-    def test_ptm_already_reported_is_noop_accept(self) -> None:
+    def test_ptm_already_reported_with_same_semantics_is_noop_accept(self) -> None:
         decision = self._ptm()
         decision["original"] = {
-            "rows": [{"row": 2, "values": ["NT=Methylation;AC=UniMod:34"]}]
+            "rows": [
+                {
+                    "row": 2,
+                    "values": ["AC=UNIMOD:34;MT=Variable;NT=Methylation"],
+                }
+            ]
         }
         resolution = resolve_pre_adjudication_policy(decision)
         self.assertIsNotNone(resolution)
         assert resolution is not None
         self.assertEqual(resolution.decision, "accept")
         self.assertEqual(resolution.rule, "ptm-original-already-reported")
+
+    def test_ptm_duplicate_conflicting_type_is_not_already_reported(self) -> None:
+        decision = self._ptm()
+        decision["original"] = {
+            "rows": [
+                {
+                    "row": 2,
+                    "values": [
+                        "NT=Methylation;AC=UniMod:34;MT=fixed;MT=variable",
+                    ],
+                }
+            ]
+        }
+        resolution = resolve_pre_adjudication_policy(decision)
+        self.assertIsNone(resolution)
+
+    def test_ptm_duplicate_accession_is_not_already_reported(self) -> None:
+        decision = self._ptm()
+        decision["original"] = {
+            "rows": [
+                {
+                    "row": 2,
+                    "values": [
+                        "NT=Methylation;AC=UniMod:999;AC=UniMod:34;MT=variable",
+                    ],
+                }
+            ]
+        }
+        resolution = resolve_pre_adjudication_policy(decision)
+        self.assertIsNone(resolution)
+
+    def test_ptm_duplicate_identical_type_is_not_already_reported(self) -> None:
+        decision = self._ptm()
+        decision["original"] = {
+            "rows": [
+                {
+                    "row": 2,
+                    "values": [
+                        "NT=Methylation;AC=UniMod:34;MT=variable;MT=variable",
+                    ],
+                }
+            ]
+        }
+        resolution = resolve_pre_adjudication_policy(decision)
+        self.assertIsNone(resolution)
+
+    def test_ptm_exact_candidate_plus_conflicting_same_identity_is_preserved(self) -> None:
+        decision = self._ptm()
+        decision["original"] = {
+            "rows": [
+                {
+                    "row": 2,
+                    "values": [
+                        "NT=Methylation;AC=UniMod:34;MT=variable",
+                        "NT=Methylation;AC=UniMod:34;MT=fixed",
+                    ],
+                }
+            ]
+        }
+        resolution = resolve_pre_adjudication_policy(decision)
+        self.assertIsNotNone(resolution)
+        assert resolution is not None
+        self.assertEqual(resolution.decision, "reject")
+        self.assertIsNone(resolution.selected_value)
+        self.assertEqual(
+            resolution.rule,
+            "ptm-original-identity-preserve-existing-semantics",
+        )
+
+    def test_ptm_same_identity_fixed_is_preserved(self) -> None:
+        decision = self._ptm()
+        decision["original"] = {
+            "rows": [
+                {
+                    "row": 2,
+                    "values": ["NT=Methylation;AC=UniMod:34;MT=fixed"],
+                }
+            ]
+        }
+        resolution = resolve_pre_adjudication_policy(decision)
+        self.assertIsNotNone(resolution)
+        assert resolution is not None
+        self.assertEqual(resolution.decision, "reject")
+        self.assertIsNone(resolution.selected_value)
+        self.assertEqual(
+            resolution.rule,
+            "ptm-original-identity-preserve-existing-semantics",
+        )
+
+    def test_ptm_same_identity_without_type_is_preserved(self) -> None:
+        decision = self._ptm()
+        decision["original"] = {"rows": [{"row": 2, "values": ["NT=Methylation;AC=UniMod:34"]}]}
+        resolution = resolve_pre_adjudication_policy(decision)
+        self.assertIsNotNone(resolution)
+        assert resolution is not None
+        self.assertEqual(resolution.decision, "reject")
+        self.assertEqual(
+            resolution.rule,
+            "ptm-original-identity-preserve-existing-semantics",
+        )
+
+    def test_ptm_partial_target_row_presence_is_not_a_noop_accept(self) -> None:
+        decision = self._ptm()
+        decision["original"] = {
+            "rows": [
+                {
+                    "row": 2,
+                    "values": ["NT=Methylation;AC=UniMod:34;MT=variable"],
+                },
+                {
+                    "row": 3,
+                    "values": ["NT=Oxidation;AC=UniMod:35;MT=variable"],
+                },
+            ]
+        }
+        resolution = resolve_pre_adjudication_policy(decision)
+        self.assertIsNotNone(resolution)
+        assert resolution is not None
+        self.assertEqual(resolution.decision, "reject")
+        self.assertEqual(
+            resolution.rule,
+            "ptm-original-identity-preserve-existing-semantics",
+        )
 
     def test_ptm_mass_ambiguity_always_abstains(self) -> None:
         decision = self._ptm()

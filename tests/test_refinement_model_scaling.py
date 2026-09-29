@@ -11,6 +11,7 @@ from prideqc.refinement_model import (
     LocalLlamaCppAdapter,
     build_llama_chat_payload,
 )
+from prideqc.refinement_packet import REANALYSIS_ANNOTATION_INTENT
 
 
 class RefinementModelScalingTests(unittest.TestCase):
@@ -22,6 +23,7 @@ class RefinementModelScalingTests(unittest.TestCase):
             "request_scope": "accession-sdrf",
             "request_id": f"sha256:{source_hash}",
             "project_accession": "PXDTEST",
+            "annotation_intent": REANALYSIS_ANNOTATION_INTENT,
             "input_mode": "no-original-sdrf",
             "source_packet": {
                 "schema_version": "prideqc-llm-refinement-packet-v1",
@@ -93,7 +95,16 @@ class RefinementModelScalingTests(unittest.TestCase):
 
         self.assertEqual(
             set(model_input),
-            {"request_id", "project_accession", "decision"},
+            {
+                "request_id",
+                "project_accession",
+                "annotation_intent",
+                "decision",
+            },
+        )
+        self.assertEqual(
+            model_input["annotation_intent"],
+            REANALYSIS_ANNOTATION_INTENT,
         )
         self.assertEqual(projected["target_run_count"], 169)
         self.assertNotIn("target_runs", projected)

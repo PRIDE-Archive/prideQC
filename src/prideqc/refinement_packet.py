@@ -31,6 +31,11 @@ ALLOWED_DECISIONS = ("accept", "reject", "abstain")
 PRECURSOR_COLUMN = "comment[precursor mass tolerance]"
 FRAGMENT_COLUMN = "comment[fragment mass tolerance]"
 MODIFICATION_COLUMN = "comment[modification parameters]"
+REANALYSIS_ANNOTATION_INTENT = "prideqc-id-free-reanalysis-recommendation"
+
+
+def _reanalysis_ptm_candidate_value(accession: str, name: str) -> str:
+    return f"{CVTerm(accession, name).sdrf_value()};MT=variable"
 
 
 def _sha256(path: Path) -> str:
@@ -56,9 +61,13 @@ def _payload(result: AnalysisResult, field: str) -> tuple[Annotation, dict[str, 
 
 def _tolerance_evidence(result: AnalysisResult, *, fragment: bool) -> dict[str, Any]:
     fields = (
-        ("suggested_fragment_search_tolerance_ppm", "ppm"),
-        ("suggested_fragment_search_tolerance_da", "Da"),
-    ) if fragment else (("suggested_precursor_search_tolerance_ppm", "ppm"),)
+        (
+            ("suggested_fragment_search_tolerance_ppm", "ppm"),
+            ("suggested_fragment_search_tolerance_da", "Da"),
+        )
+        if fragment
+        else (("suggested_precursor_search_tolerance_ppm", "ppm"),)
+    )
     for field, fallback_unit in fields:
         found = _payload(result, field)
         if found is None:
@@ -510,8 +519,7 @@ def _compact_ptm_context_family(family: Mapping[str, Any]) -> dict[str, Any]:
     """Return non-actionable recurrent-family context without per-run payload expansion."""
     options = list(family.get("candidate_options") or [])
     candidate_values = [
-        CVTerm(str(option["accession"]), str(option["name"])).sdrf_value()
-        for option in options
+        CVTerm(str(option["accession"]), str(option["name"])).sdrf_value() for option in options
     ]
     return {
         "experiment_group": family.get("experiment_group"),
@@ -555,7 +563,7 @@ def _review_ptm_decision(
     accession = str(family.get("unimod_accession") or "")
     name = str(family.get("unimod_name") or "")
     family_mass = float(family.get("median_mass_da") or 0.0)
-    candidate_value = CVTerm(accession, name).sdrf_value()
+    candidate_value = _reanalysis_ptm_candidate_value(accession, name)
     per_run_support: list[dict[str, Any]] = []
     for run_name in sorted(members, key=str.casefold):
         result = by_name.get(run_name)
@@ -630,7 +638,9 @@ def _review_ptm_decision(
         "evidence_semantics": {
             "recurrent_family_probability_is_identity_probability": False,
             "candidate_is_peptide_or_site_localized": False,
-            "candidate_was_searched_in_original_analysis": False,
+            "candidate_is_reanalysis_recommendation": True,
+            "candidate_was_searched_in_original_analysis": None,
+            "original_search_status_is_required_for_acceptance": False,
         },
     }
 
@@ -775,6 +785,7 @@ def build_llm_refinement_packet(
             "cohort_grouping_evidence": list(synthesis.evidence),
             "decision_policy": "candidate-generation-only; no LLM adjudication performed",
             "input_mode": "sdrf-backed" if document is not None else "no-original-sdrf",
+            "annotation_intent": REANALYSIS_ANNOTATION_INTENT,
         },
         "sdrf": {
             "available": document is not None and sdrf_path is not None,
@@ -806,6 +817,7 @@ def build_llm_refinement_packet(
             "llm_must_not_invent_measurements_or_ontology_terms": True,
             "uncertainty_should_abstain": True,
             "packet_does_not_modify_sdrf": True,
+            "accepted_ptm_is_variable_reanalysis_candidate": True,
         },
         "limitations": {
             "ptm_candidate_scope": (
@@ -816,6 +828,8 @@ def build_llm_refinement_packet(
             "full_mzqc_documents_embedded": False,
             "original_sdrf_available": document is not None,
             "sdrf_writeback_supported": document is not None,
+            "annotation_intent": REANALYSIS_ANNOTATION_INTENT,
+            "historical_search_reconstruction": False,
         },
     }
     return packet
@@ -837,9 +851,7 @@ def validate_llm_refinement_packet(packet: Mapping[str, Any]) -> None:
         or not isinstance(ptm_context, list)
         or not isinstance(decisions, list)
     ):
-        raise ValueError(
-            "LLM refinement packet runs/groups/PTM context/decisions must be arrays"
-        )
+        raise ValueError("LLM refinement packet runs/groups/PTM context/decisions must be arrays")
     for family in ptm_context:
         if not isinstance(family, dict) or family.get("actionable") is not False:
             raise ValueError("PTM context families must be explicit non-actionable objects")
@@ -862,9 +874,7 @@ def validate_llm_refinement_packet(packet: Mapping[str, Any]) -> None:
         if not isinstance(values, list) or not values:
             raise ValueError(f"Decision {decision_id} must provide allowed candidate values")
         if not isinstance(candidates, list) or candidates != values:
-            raise ValueError(
-                f"Decision {decision_id} candidate values must equal allowed values"
-            )
+            raise ValueError(f"Decision {decision_id} candidate values must equal allowed values")
         scope_keys = {
             "evidence_runs",
             "parameter_scope_runs",
@@ -895,13 +905,9 @@ def validate_llm_refinement_packet(packet: Mapping[str, Any]) -> None:
                     f"Decision {decision_id} target rows must equal parameter-scope rows"
                 )
             if not str(item.get("parameter_scope_status") or ""):
-                raise ValueError(
-                    f"Decision {decision_id} must identify parameter-scope status"
-                )
+                raise ValueError(f"Decision {decision_id} must identify parameter-scope status")
             if not str(item.get("parameter_scope_basis") or ""):
-                raise ValueError(
-                    f"Decision {decision_id} must identify parameter-scope basis"
-                )
+                raise ValueError(f"Decision {decision_id} must identify parameter-scope basis")
     for group in groups:
         if not isinstance(group, dict):
             raise ValueError("LLM refinement experiment group must be an object")
