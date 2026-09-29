@@ -377,6 +377,18 @@ def apply_adjudicated_sdrf(
     output = Path(output_directory).resolve()
     file_map_path = Path(file_map).resolve(strict=True) if file_map is not None else None
 
+    request = _load_object(request_file, label="--request")
+    validate_llm_adjudication_request(request)
+    if request.get("annotation_intent") != REANALYSIS_ANNOTATION_INTENT:
+        raise ValueError(
+            "Full-SDRF application requires explicit ID-free re-analysis annotation intent"
+        )
+
+    decisions = _load_object(decisions_file, label="--decisions")
+    validate_llm_refinement_decisions(decisions, request)
+    if request.get("input_mode") != "sdrf-backed":
+        raise ValueError("Full-SDRF application requires an sdrf-backed adjudication request")
+
     if output.exists() and not output.is_dir():
         raise FileExistsError(f"Output path is not a directory: {output}")
     if output.exists() and any(output.iterdir()):
@@ -391,17 +403,6 @@ def apply_adjudicated_sdrf(
             else:
                 child.unlink()
     output.mkdir(parents=True, exist_ok=True)
-
-    request = _load_object(request_file, label="--request")
-    decisions = _load_object(decisions_file, label="--decisions")
-    validate_llm_adjudication_request(request)
-    validate_llm_refinement_decisions(decisions, request)
-    if request.get("annotation_intent") != REANALYSIS_ANNOTATION_INTENT:
-        raise ValueError(
-            "Full-SDRF application requires explicit ID-free re-analysis annotation intent"
-        )
-    if request.get("input_mode") != "sdrf-backed":
-        raise ValueError("Full-SDRF application requires an sdrf-backed adjudication request")
     accession = _project_accession_guard(source, request)
     aliases = _load_file_map(file_map_path)
 

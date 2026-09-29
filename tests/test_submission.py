@@ -401,6 +401,42 @@ class SubmissionApplicationTests(unittest.TestCase):
             technology = final.indices("technology type")[0]
             self.assertEqual(technology, assay + 1)
 
+    def test_invalid_reanalysis_intent_does_not_delete_existing_output(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            sdrf = root / "PXD123456.sdrf.tsv"
+            sdrf.write_text(
+                "comment[data file]\nrun.raw\n",
+                encoding="utf-8",
+            )
+            request = _request([])
+            request.pop("annotation_intent")
+            response = _response(request, [])
+            request_path = root / "request.json"
+            decisions_path = root / "decisions.json"
+            _write_json(request_path, request)
+            _write_json(decisions_path, response)
+
+            output = root / "out"
+            output.mkdir()
+            sentinel = output / "sentinel.txt"
+            sentinel.write_text("keep me", encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "requires explicit ID-free re-analysis annotation intent",
+            ):
+                apply_adjudicated_sdrf(
+                    sdrf=sdrf,
+                    request_path=request_path,
+                    decisions_path=decisions_path,
+                    output_directory=output,
+                    overwrite=True,
+                    validator=_Validator([()]),
+                )
+
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep me")
+
     def test_full_sdrf_application_requires_explicit_reanalysis_intent(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
