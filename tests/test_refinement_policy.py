@@ -212,6 +212,51 @@ class RefinementPolicyTests(unittest.TestCase):
         self.assertEqual(resolution.decision, "accept")
         self.assertEqual(resolution.rule, "ptm-original-already-reported")
 
+    def test_ptm_duplicate_conflicting_type_is_not_already_reported(self) -> None:
+        decision = self._ptm()
+        decision["original"] = {
+            "rows": [
+                {
+                    "row": 2,
+                    "values": [
+                        "NT=Methylation;AC=UniMod:34;MT=fixed;MT=variable",
+                    ],
+                }
+            ]
+        }
+        resolution = resolve_pre_adjudication_policy(decision)
+        self.assertIsNone(resolution)
+
+    def test_ptm_duplicate_accession_is_not_already_reported(self) -> None:
+        decision = self._ptm()
+        decision["original"] = {
+            "rows": [
+                {
+                    "row": 2,
+                    "values": [
+                        "NT=Methylation;AC=UniMod:999;AC=UniMod:34;MT=variable",
+                    ],
+                }
+            ]
+        }
+        resolution = resolve_pre_adjudication_policy(decision)
+        self.assertIsNone(resolution)
+
+    def test_ptm_duplicate_identical_type_is_not_already_reported(self) -> None:
+        decision = self._ptm()
+        decision["original"] = {
+            "rows": [
+                {
+                    "row": 2,
+                    "values": [
+                        "NT=Methylation;AC=UniMod:34;MT=variable;MT=variable",
+                    ],
+                }
+            ]
+        }
+        resolution = resolve_pre_adjudication_policy(decision)
+        self.assertIsNone(resolution)
+
     def test_ptm_exact_candidate_plus_conflicting_same_identity_is_preserved(self) -> None:
         decision = self._ptm()
         decision["original"] = {

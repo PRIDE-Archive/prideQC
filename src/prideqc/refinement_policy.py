@@ -336,12 +336,17 @@ def _candidate_identity(decision: Mapping[str, Any]) -> tuple[str, str] | None:
 def _modification_fields(value: str) -> dict[str, str]:
     """Parse one SDRF modification value into normalized semantic fields."""
     fields: dict[str, str] = {}
+    seen_keys: set[str] = set()
     for token in value.split(";"):
         key, separator, raw = token.partition("=")
         if not separator:
             continue
         normalized_key = key.strip().casefold()
         normalized_value = raw.strip().casefold()
+        if normalized_key:
+            if normalized_key in seen_keys:
+                return {}
+            seen_keys.add(normalized_key)
         if normalized_key and normalized_value:
             fields[normalized_key] = normalized_value
     return fields
