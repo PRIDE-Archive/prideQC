@@ -376,11 +376,12 @@ def _same_modification_identity(left: str, right: str) -> bool:
 
 
 def _candidate_is_already_reported(decision: Mapping[str, Any]) -> bool:
-    """Return true only when every target row already has the full candidate semantics."""
+    """Return true only for an unambiguous full-semantics no-op on every target row."""
     candidates = decision.get("candidate_values")
     if not isinstance(candidates, list) or len(candidates) != 1:
         return False
-    candidate_signature = _modification_signature(str(candidates[0]))
+    candidate = str(candidates[0])
+    candidate_signature = _modification_signature(candidate)
     if candidate_signature is None:
         return False
     original = _as_mapping(decision.get("original"))
@@ -393,7 +394,12 @@ def _candidate_is_already_reported(decision: Mapping[str, Any]) -> bool:
         values = row.get("values")
         if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
             return False
-        if not any(_modification_signature(str(value)) == candidate_signature for value in values):
+        same_identity = [
+            str(value) for value in values if _same_modification_identity(candidate, str(value))
+        ]
+        if not same_identity:
+            return False
+        if any(_modification_signature(value) != candidate_signature for value in same_identity):
             return False
     return True
 
