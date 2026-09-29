@@ -333,41 +333,81 @@ def _candidate_identity(decision: Mapping[str, Any]) -> tuple[str, str] | None:
     return accession, name
 
 
-def _modification_identity(value: str) -> tuple[str, str] | None:
+def _modification_fields(value: str) -> dict[str, str]:
+    """Parse one SDRF modification value into normalized semantic fields."""
     fields: dict[str, str] = {}
     for token in value.split(";"):
         key, separator, raw = token.partition("=")
         if not separator:
             continue
-        fields[key.strip().casefold()] = raw.strip()
-    accession = fields.get("ac", "").casefold()
-    name = fields.get("nt", "").casefold()
+        normalized_key = key.strip().casefold()
+        normalized_value = raw.strip().casefold()
+        if normalized_key and normalized_value:
+            fields[normalized_key] = normalized_value
+    return fields
+
+
+def _modification_identity(value: str) -> tuple[str, str] | None:
+    fields = _modification_fields(value)
+    accession = fields.get("ac", "")
+    name = fields.get("nt", "")
     if not accession and not name:
         return None
     return accession, name
 
 
+def _modification_signature(value: str) -> tuple[tuple[str, str], ...] | None:
+    fields = _modification_fields(value)
+    if not fields:
+        return None
+    return tuple(sorted(fields.items()))
+
+
+def _same_modification_identity(left: str, right: str) -> bool:
+    left_identity = _modification_identity(left)
+    right_identity = _modification_identity(right)
+    if left_identity is None or right_identity is None:
+        return False
+    left_accession, left_name = left_identity
+    right_accession, right_name = right_identity
+    if left_accession and right_accession:
+        return left_accession == right_accession
+    return bool(left_name and right_name and left_name == right_name)
+
+
 def _candidate_is_already_reported(decision: Mapping[str, Any]) -> bool:
+    """Return true only when every target row already has the full candidate semantics."""
     candidates = decision.get("candidate_values")
     if not isinstance(candidates, list) or len(candidates) != 1:
         return False
-    candidate = str(candidates[0]).strip()
-    candidate_folded = candidate.casefold()
-    candidate_identity = _modification_identity(candidate)
-    for value in _flatten_original_values(decision):
-        if value.strip().casefold() == candidate_folded:
-            return True
-        original_identity = _modification_identity(value)
-        if candidate_identity is None or original_identity is None:
-            continue
-        candidate_accession, candidate_name = candidate_identity
-        original_accession, original_name = original_identity
-        if candidate_accession and original_accession:
-            if candidate_accession == original_accession:
-                return True
-        elif candidate_name and original_name and candidate_name == original_name:
-            return True
-    return False
+    candidate_signature = _modification_signature(str(candidates[0]))
+    if candidate_signature is None:
+        return False
+    original = _as_mapping(decision.get("original"))
+    rows = original.get("rows")
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)) or not rows:
+        return False
+    for row in rows:
+        if not isinstance(row, Mapping):
+            return False
+        values = row.get("values")
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            return False
+        if not any(_modification_signature(str(value)) == candidate_signature for value in values):
+            return False
+    return True
+
+
+def _candidate_identity_is_already_reported(decision: Mapping[str, Any]) -> bool:
+    """Return true when existing metadata has the candidate identity with other semantics."""
+    candidates = decision.get("candidate_values")
+    if not isinstance(candidates, list) or len(candidates) != 1:
+        return False
+    candidate = str(candidates[0])
+    return any(
+        _same_modification_identity(candidate, value)
+        for value in _flatten_original_values(decision)
+    )
 
 
 def _observation_supports_identity(
@@ -462,11 +502,29 @@ def _ptm_resolution(decision: Mapping[str, Any]) -> PolicyResolution | None:
             decision_id=decision_id,
             decision="accept",
             selected_value=candidate_value,
-            reason="The candidate PTM is already present in the original SDRF metadata.",
+            reason=(
+                "Every target row already contains the same PTM recommendation semantics, "
+                "so this is a deterministic no-op."
+            ),
             rule="ptm-original-already-reported",
             metrics={"candidate_value": candidate_value},
         )
-
+    if _candidate_identity_is_already_reported(decision):
+        return PolicyResolution(
+            decision_id=decision_id,
+            decision="reject",
+            selected_value=None,
+            reason=(
+                "The original SDRF already reports the same PTM identity with different "
+                "modification semantics or incomplete target-row coverage; preserve the "
+                "existing metadata rather than append a broader variable recommendation."
+            ),
+            rule="ptm-original-identity-preserve-existing-semantics",
+            metrics={
+                "candidate_value": candidate_value,
+                "original_values": _flatten_original_values(decision),
+            },
+        )
     evidence = _as_mapping(decision.get("evidence"))
     if evidence.get("mass_identity_ambiguous") is True:
         return PolicyResolution(

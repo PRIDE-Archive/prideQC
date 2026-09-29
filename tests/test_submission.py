@@ -401,6 +401,33 @@ class SubmissionApplicationTests(unittest.TestCase):
             technology = final.indices("technology type")[0]
             self.assertEqual(technology, assay + 1)
 
+    def test_full_sdrf_application_requires_explicit_reanalysis_intent(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            sdrf = root / "PXD123456.sdrf.tsv"
+            sdrf.write_text(
+                "comment[data file]\nrun.raw\n",
+                encoding="utf-8",
+            )
+            request = _request([])
+            request.pop("annotation_intent")
+            response = _response(request, [])
+            request_path = root / "request.json"
+            decisions_path = root / "decisions.json"
+            _write_json(request_path, request)
+            _write_json(decisions_path, response)
+            with self.assertRaisesRegex(
+                ValueError,
+                "requires explicit ID-free re-analysis annotation intent",
+            ):
+                apply_adjudicated_sdrf(
+                    sdrf=sdrf,
+                    request_path=request_path,
+                    decisions_path=decisions_path,
+                    output_directory=root / "out",
+                    validator=_Validator([()]),
+                )
+
     def test_no_original_sdrf_adjudication_cannot_be_applied(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
