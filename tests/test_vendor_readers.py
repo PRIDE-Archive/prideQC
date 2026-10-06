@@ -90,6 +90,38 @@ class VendorReaderTests(unittest.TestCase):
             PyOpenMSReader(oms=oms).read(path, _Sink())
         self.assertEqual(calls, [path])
 
+    def test_bruker_native_mass_error_uses_hillbased_without_rt_aggregation(self):
+        configs = []
+
+        class BrukerTimsFile:
+            class Config:
+                class CentroidAlgo:
+                    OFF = 0
+                    GREEDY2D = 1
+                    HILL_BASED = 2
+
+                def __init__(self):
+                    self.ms2_centroid_algo = self.CentroidAlgo.OFF
+                    self.dia_ms2_n_neighbors = -1
+
+            def load(self, path, config=None):
+                configs.append(config)
+                return _EmptyExperiment()
+
+        oms = type("OMS", (_FakeOMS,), {"BrukerTimsFile": BrukerTimsFile})
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "sample.d"
+            path.mkdir()
+            PyOpenMSReader(oms=oms, native_mass_error=True).read(path, _Sink())
+
+        self.assertEqual(len(configs), 2)
+        self.assertEqual(
+            configs[0].ms2_centroid_algo,
+            BrukerTimsFile.Config.CentroidAlgo.HILL_BASED,
+        )
+        self.assertEqual(configs[0].dia_ms2_n_neighbors, 0)
+        self.assertIsNone(configs[1], "normal QC stream must keep the default Bruker load")
+
     def test_d_zip_falls_back_to_a_temporary_extracted_directory(self):
         calls = []
 

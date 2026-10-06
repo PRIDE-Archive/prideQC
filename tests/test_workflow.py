@@ -11,6 +11,7 @@ import unittest
 from contextlib import redirect_stderr
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -20,10 +21,14 @@ from prideqc.annotations import DiagnosticIonCollector
 from prideqc.cli import main
 from prideqc.conversion import ExternalConverter
 from prideqc.io import atomic_text, json_safe
-from prideqc.mass_error import RepeatSpectrumMassErrorCollector
+from prideqc.mass_error import (
+    NativeOpenMSMassErrorCollector,
+    RepeatSpectrumMassErrorCollector,
+)
+from prideqc.metrics import RunSummary
 from prideqc.models import Annotation, EvidenceKind, Metric, RunMetadata
 from prideqc.mzqc import MzQCWriter, definition
-from prideqc.pipeline import Analyzer, FileOutcome, Workflow, WorkflowOptions
+from prideqc.pipeline import _AnalysisSink, Analyzer, FileOutcome, Workflow, WorkflowOptions
 from prideqc.readers import read_header
 from prideqc.sdrf import SDRFDocument
 from tests.helpers import FUSION, MemoryReader, spectrum
@@ -32,6 +37,132 @@ from tests.helpers import FUSION, MemoryReader, spectrum
 def analyze(spectra=None, name="run.mzML", metadata=None):
     reader = MemoryReader(spectra or [spectrum(0, [10]), spectrum(10, [20])], metadata)
     return Analyzer(reader).analyze(name)
+
+
+class NativeSpectrumHookTests(unittest.TestCase):
+    def test_analysis_sink_forwards_native_spectra_only_to_native_collectors(self):
+        seen = []
+
+        class Collector:
+            def consume_native_spectrum(self, native):
+                seen.append(native)
+
+            def consume_spectrum(self, converted):
+                pass
+
+            def annotations(self):
+                return []
+
+        marker = object()
+        _AnalysisSink(RunSummary(), [Collector()]).consume_native_spectrum(marker)
+        self.assertEqual(seen, [marker])
+
+
+class NativeMassErrorAdapterTests(unittest.TestCase):
+    def test_native_adapter_preserves_existing_annotation_contract(self):
+        robust = SimpleNamespace(
+            pairwise_median=0.0,
+            pairwise_sigma=2.0,
+            single_measurement_sigma=math.sqrt(2.0),
+            pairwise_p95_abs=4.0,
+            robust_inlier_threshold_3sigma=6.0,
+            robust_inlier_count=900,
+            robust_outlier_count=100,
+            robust_inlier_fraction=0.9,
+            robust_inlier_p95_abs_centered=3.0,
+        )
+        tolerance = SimpleNamespace(
+            tolerance=8.5,
+            single_measurement_sigma=8.5 / 6.0,
+            sigma_multiplier=6.0,
+            unit="ppm",
+            confidence="high",
+            support=12000,
+        )
+        diagnostics = SimpleNamespace(
+            precursor_eligible_ms2=1000,
+            precursor_paired_spectra=500,
+            precursor_clusters_used=200,
+            fragment_eligible_ms2=2000,
+            fragment_paired_spectra=800,
+            fragment_pairs=15000,
+            fragment_mixture_pairs=13000,
+            fragment_mixture_signal_pairs=12000,
+            fragment_zero_delta_fraction=0.01,
+            fragment_mixture_signal_fraction=0.75,
+            fragment_mixture_converged=True,
+            fragment_mixture_rejected_zero_quantization=False,
+            fragment_high_intensity_pairs=3000,
+            fragment_high_intensity_signal_pairs=2500,
+            fragment_high_intensity_signal_fraction=0.8,
+            fragment_high_intensity_fallback_used=True,
+            fragment_centroid_spectra=1900,
+            fragment_profile_spectra=0,
+            excluded_fragment_profile_or_unknown=0,
+            excluded_low_fragment_peaks=0,
+            excluded_missing_precursor=0,
+        )
+        result = SimpleNamespace(
+            precursor_ppm=robust,
+            precursor_da=robust,
+            fragment_ppm=robust,
+            fragment_da=robust,
+            precursor_tolerance_ppm=tolerance,
+            fragment_tolerance_ppm=tolerance,
+            fragment_tolerance_da=None,
+            fragment_resolution_regime="FragmentResolutionRegime.HIGH_RESOLUTION",
+            fragment_match_window_da=0.2,
+            fragment_window_censored=False,
+            diagnostics=diagnostics,
+        )
+
+        class Parameters:
+            min_tolerance_pairs = 200
+            min_tolerance_clusters = 100
+
+        class Estimator:
+            def __init__(self):
+                self.seen = []
+
+            def consumeSpectrum(self, native):
+                self.seen.append(native)
+
+            def getResult(self):
+                return result
+
+            def getPrecursorPrecisionPPM(self):
+                return robust
+
+            def getParameters(self):
+                return Parameters()
+
+        class OMS:
+            IDFreeMassErrorEstimator = Estimator
+
+        collector = NativeOpenMSMassErrorCollector(oms=OMS)
+        marker = object()
+        collector.consume_native_spectrum(marker)
+        collector.consume_spectrum(spectrum(0, [1.0], 2))
+        annotations = {item.field: item for item in collector.annotations()}
+
+        self.assertEqual(collector._estimator.seen, [marker])
+        self.assertEqual(
+            annotations["suggested_fragment_search_tolerance_ppm"].value["suggested_tolerance"],
+            8.5,
+        )
+        self.assertEqual(
+            annotations["mass_error_estimator_diagnostics"].value["backend"],
+            "openms-native",
+        )
+        self.assertTrue(
+            annotations["mass_error_estimator_diagnostics"].value[
+                "fragment_high_intensity_fallback_used"
+            ]
+        )
+        self.assertEqual(collector.precursor_paired_spectra, 500)
+        self.assertEqual(collector.precursor_clusters_used, 200)
+        self.assertEqual(collector.min_tolerance_pairs, 200)
+        self.assertEqual(collector.min_tolerance_clusters, 100)
 
 
 class AnnotationTests(unittest.TestCase):

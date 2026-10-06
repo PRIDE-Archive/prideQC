@@ -181,16 +181,14 @@ sample label, fixed modification or enrichment is invented.
 `--diagnostics` adds a centroid MS2/MS3 reporter/oxonium screen for TMT-family,
 iTRAQ-family and glycan signatures. This returns counts and thresholds,
 not confirmed PTMs or plex/channel assignments, and never auto-fills SDRF.
-`--estimate-mass-error` adds an experimental one-pass estimator for precursor and
-fragment *measurement precision*. Precursor precision uses repeated precursor m/z
-observations with compatible charge and retention time, so it can remain available
-when MS2 fragment arrays are profile-mode. Fragment precision uses strong peak
-centers from likely repeated MS2 spectra. Native centroid scans use their existing
-peak lists; native profile scans use an ephemeral three-point log-parabolic
-(Gaussian-apex) center estimate around strong local maxima. This derived peak list is
-used only inside the QC estimator: the input spectrum is never modified, centroided
-in-place, or written back. Native `unknown` scans use OpenMS PeakTypeEstimator to
-select the centroid/profile evidence path and otherwise abstain. The estimator emits
+`--estimate-mass-error` adds an experimental native OpenMS estimator for precursor and
+fragment *measurement precision* when the installed pyOpenMS exposes
+`IDFreeMassErrorEstimator`; older pyOpenMS builds retain the legacy Python estimator as
+a compatibility fallback. The native estimator consumes each `MSSpectrum` before
+prideQC converts it to its internal spectrum object, so mzML and Thermo input remain
+one-pass. Direct Bruker DIA-PASEF input uses a separate HillBased IM-centroided MS2
+evidence pass with no RT-neighbor aggregation while the normal prideQC QC stream keeps
+the reader's existing representation. The estimator emits
 separate inferred annotations such as
 `estimated_precursor_mass_error_ppm` and `estimated_fragment_mass_error_da`. When
 precursor evidence is strong and distributed across at least 100 repeat clusters, it
