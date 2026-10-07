@@ -26,7 +26,10 @@ from prideqc.cohort import (
 )
 from prideqc.conversion import ExternalConverter
 from prideqc.io import atomic_text, json_safe, write_json
-from prideqc.mass_error import RepeatSpectrumMassErrorCollector
+from prideqc.mass_error import (
+    NativeOpenMSMassErrorCollector,
+    RepeatSpectrumMassErrorCollector,
+)
 from prideqc.mass_shift import MassShiftCollector
 from prideqc.metrics import QCMetricCalculator, RunSummary
 from prideqc.models import AnalysisResult, EvidenceCollector, FloatArray, Spectrum, SpectrumReader
@@ -50,6 +53,12 @@ class _AnalysisSink:
     def __init__(self, summary: RunSummary, collectors: Iterable[EvidenceCollector]) -> None:
         self.summary = summary
         self.collectors = tuple(collectors)
+
+    def consume_native_spectrum(self, spectrum: Any) -> None:
+        for collector in self.collectors:
+            consume = getattr(collector, "consume_native_spectrum", None)
+            if callable(consume):
+                consume(spectrum)
 
     def consume_spectrum(self, spectrum: Spectrum) -> None:
         self.summary.consume_spectrum(spectrum)
@@ -190,9 +199,13 @@ def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
         collectors: list[EvidenceCollector] = []
         if options.diagnostics:
             collectors.append(DiagnosticIonCollector())
-        mass_error_collector = None
+        mass_error_collector: (
+            NativeOpenMSMassErrorCollector | RepeatSpectrumMassErrorCollector | None
+        ) = None
         if options.estimate_mass_error:
-            mass_error_collector = RepeatSpectrumMassErrorCollector()
+            mass_error_collector = NativeOpenMSMassErrorCollector.create_if_available()
+            if mass_error_collector is None:
+                mass_error_collector = RepeatSpectrumMassErrorCollector()
             collectors.append(mass_error_collector)
         if options.estimate_mass_shifts:
             collectors.append(MassShiftCollector(precision_source=mass_error_collector))
@@ -204,6 +217,7 @@ def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
                 or options.estimate_mass_error
                 or options.estimate_mass_shifts
             ),
+            native_mass_error=isinstance(mass_error_collector, NativeOpenMSMassErrorCollector),
         )
         is_mzml = source.name.casefold().endswith((".mzml", ".mzml.gz"))
         detected_vendor = vendor_format(source)

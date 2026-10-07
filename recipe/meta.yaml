@@ -1,0 +1,57 @@
+{% set name = "prideqc" %}
+{% set version = "0.2.0" %}
+
+package:
+  name: {{ name }}
+  version: {{ version }}
+
+# Repository-local recipe for validating the package before the first release.
+# For the upstream Bioconda PR, replace this local source with the released
+# v{{ version }} archive (or PyPI sdist) and its SHA-256.
+source:
+  path: ../
+
+build:
+  number: 0
+  noarch: python
+  script_env:
+    - SETUPTOOLS_SCM_PRETEND_VERSION={{ version }}
+  script: "{{ PYTHON }} -m pip install . --no-deps --no-build-isolation --no-cache-dir -vvv"
+  run_exports:
+    - {{ pin_subpackage(name, max_pin="x") }}
+
+requirements:
+  host:
+    - python >=3.11,<3.14
+    - pip
+    - hatchling
+    - hatch-vcs
+  run:
+    - python >=3.11,<3.14
+    - numpy >=1.26,<3
+    - pyopenms >=3.5,<4
+    - sdrf-pipelines >=0.1.6,<0.2
+    - pridepy >=0.0.16,<0.1
+
+test:
+  imports:
+    - prideqc
+  commands:
+    - prideqc --version
+    - prideqc --help
+
+about:
+  home: "https://github.com/PRIDE-Archive/prideQC"
+  dev_url: "https://github.com/PRIDE-Archive/prideQC"
+  doc_url: "https://github.com/PRIDE-Archive/prideQC#readme"
+  license: "Apache-2.0 AND MIT"
+  license_file:
+    - LICENSE
+    - NOTICE
+    - licenses/rawQC-MIT.txt
+  summary: "Streaming mass spectrometry QC and evidence-based technical SDRF annotation"
+
+extra:
+  recipe-maintainers:
+    - singjc
+    - ypriverol

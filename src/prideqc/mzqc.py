@@ -328,8 +328,8 @@ ANNOTATION_DESCRIPTIONS = {
     "mass_error_estimator_diagnostics": (
         "mass error estimator diagnostics",
         (
-            "Support and accounting diagnostics for the frozen repeat-observation mass-error "
-            "estimator, including paired-spectrum counts and resolution-regime evidence."
+            "Support and accounting diagnostics for the active repeat-observation mass-error "
+            "backend, including paired-spectrum counts and resolution-regime evidence."
         ),
     ),
     "putative_modification_mass_shifts": (

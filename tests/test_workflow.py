@@ -11,6 +11,7 @@ import unittest
 from contextlib import redirect_stderr
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -20,10 +21,14 @@ from prideqc.annotations import DiagnosticIonCollector
 from prideqc.cli import main
 from prideqc.conversion import ExternalConverter
 from prideqc.io import atomic_text, json_safe
-from prideqc.mass_error import RepeatSpectrumMassErrorCollector
+from prideqc.mass_error import (
+    NativeOpenMSMassErrorCollector,
+    RepeatSpectrumMassErrorCollector,
+)
+from prideqc.metrics import RunSummary
 from prideqc.models import Annotation, EvidenceKind, Metric, RunMetadata
 from prideqc.mzqc import MzQCWriter, definition
-from prideqc.pipeline import Analyzer, FileOutcome, Workflow, WorkflowOptions
+from prideqc.pipeline import Analyzer, FileOutcome, Workflow, WorkflowOptions, _AnalysisSink
 from prideqc.readers import read_header
 from prideqc.sdrf import SDRFDocument
 from tests.helpers import FUSION, MemoryReader, spectrum
@@ -32,6 +37,132 @@ from tests.helpers import FUSION, MemoryReader, spectrum
 def analyze(spectra=None, name="run.mzML", metadata=None):
     reader = MemoryReader(spectra or [spectrum(0, [10]), spectrum(10, [20])], metadata)
     return Analyzer(reader).analyze(name)
+
+
+class NativeSpectrumHookTests(unittest.TestCase):
+    def test_analysis_sink_forwards_native_spectra_only_to_native_collectors(self):
+        seen = []
+
+        class Collector:
+            def consume_native_spectrum(self, native):
+                seen.append(native)
+
+            def consume_spectrum(self, converted):
+                pass
+
+            def annotations(self):
+                return []
+
+        marker = object()
+        _AnalysisSink(RunSummary(), [Collector()]).consume_native_spectrum(marker)
+        self.assertEqual(seen, [marker])
+
+
+class NativeMassErrorAdapterTests(unittest.TestCase):
+    def test_native_adapter_preserves_existing_annotation_contract(self):
+        robust = SimpleNamespace(
+            pairwise_median=0.0,
+            pairwise_sigma=2.0,
+            single_measurement_sigma=math.sqrt(2.0),
+            pairwise_p95_abs=4.0,
+            robust_inlier_threshold_3sigma=6.0,
+            robust_inlier_count=900,
+            robust_outlier_count=100,
+            robust_inlier_fraction=0.9,
+            robust_inlier_p95_abs_centered=3.0,
+        )
+        tolerance = SimpleNamespace(
+            tolerance=8.5,
+            single_measurement_sigma=8.5 / 6.0,
+            sigma_multiplier=6.0,
+            unit="ppm",
+            confidence="high",
+            support=12000,
+        )
+        diagnostics = SimpleNamespace(
+            precursor_eligible_ms2=1000,
+            precursor_paired_spectra=500,
+            precursor_clusters_used=200,
+            fragment_eligible_ms2=2000,
+            fragment_paired_spectra=800,
+            fragment_pairs=15000,
+            fragment_mixture_pairs=13000,
+            fragment_mixture_signal_pairs=12000,
+            fragment_zero_delta_fraction=0.01,
+            fragment_mixture_signal_fraction=0.75,
+            fragment_mixture_converged=True,
+            fragment_mixture_rejected_zero_quantization=False,
+            fragment_high_intensity_pairs=3000,
+            fragment_high_intensity_signal_pairs=2500,
+            fragment_high_intensity_signal_fraction=0.8,
+            fragment_high_intensity_fallback_used=True,
+            fragment_centroid_spectra=1900,
+            fragment_profile_spectra=0,
+            excluded_fragment_profile_or_unknown=0,
+            excluded_low_fragment_peaks=0,
+            excluded_missing_precursor=0,
+        )
+        result = SimpleNamespace(
+            precursor_ppm=robust,
+            precursor_da=robust,
+            fragment_ppm=robust,
+            fragment_da=robust,
+            precursor_tolerance_ppm=tolerance,
+            fragment_tolerance_ppm=tolerance,
+            fragment_tolerance_da=None,
+            fragment_resolution_regime="FragmentResolutionRegime.HIGH_RESOLUTION",
+            fragment_match_window_da=0.2,
+            fragment_window_censored=False,
+            diagnostics=diagnostics,
+        )
+
+        class Parameters:
+            min_tolerance_pairs = 200
+            min_tolerance_clusters = 100
+
+        class Estimator:
+            def __init__(self):
+                self.seen = []
+
+            def consumeSpectrum(self, native):
+                self.seen.append(native)
+
+            def getResult(self):
+                return result
+
+            def getPrecursorPrecisionPPM(self):
+                return robust
+
+            def getParameters(self):
+                return Parameters()
+
+        class OMS:
+            IDFreeMassErrorEstimator = Estimator
+
+        collector = NativeOpenMSMassErrorCollector(oms=OMS)
+        marker = object()
+        collector.consume_native_spectrum(marker)
+        collector.consume_spectrum(spectrum(0, [1.0], 2))
+        annotations = {item.field: item for item in collector.annotations()}
+
+        self.assertEqual(collector._estimator.seen, [marker])
+        self.assertEqual(
+            annotations["suggested_fragment_search_tolerance_ppm"].value["suggested_tolerance"],
+            8.5,
+        )
+        self.assertEqual(
+            annotations["mass_error_estimator_diagnostics"].value["backend"],
+            "openms-native",
+        )
+        self.assertTrue(
+            annotations["mass_error_estimator_diagnostics"].value[
+                "fragment_high_intensity_fallback_used"
+            ]
+        )
+        self.assertEqual(collector.precursor_paired_spectra, 500)
+        self.assertEqual(collector.precursor_clusters_used, 200)
+        self.assertEqual(collector.min_tolerance_pairs, 200)
+        self.assertEqual(collector.min_tolerance_clusters, 100)
 
 
 class AnnotationTests(unittest.TestCase):
@@ -46,7 +177,6 @@ class AnnotationTests(unittest.TestCase):
         self.assertEqual(evidence.support, 1)
         self.assertIsNone(evidence.sdrf_value)
 
-
     def test_repeat_spectrum_mass_error_estimator_reports_precision(self):
         collector = RepeatSpectrumMassErrorCollector(
             min_spectrum_pairs=10,
@@ -59,15 +189,17 @@ class AnnotationTests(unittest.TestCase):
         for i in range(30):
             shift_da = math.sin(i * 0.73) * 0.002
             precursor = 500.0 + math.sin(i * 0.61) * 0.001
-            spectra.append(spectrum(
-                i * 2.0,
-                intensities,
-                2,
-                charge=2,
-                precursor_mz=precursor,
-                mz=(base_fragments + shift_da).tolist(),
-                representation="centroid",
-            ))
+            spectra.append(
+                spectrum(
+                    i * 2.0,
+                    intensities,
+                    2,
+                    charge=2,
+                    precursor_mz=precursor,
+                    mz=(base_fragments + shift_da).tolist(),
+                    representation="centroid",
+                )
+            )
         result = Analyzer(MemoryReader(spectra)).analyze("repeat.mzML", collectors=[collector])
         precursor = next(
             a for a in result.annotations if a.field == "estimated_precursor_mass_error_ppm"
@@ -138,18 +270,18 @@ class AnnotationTests(unittest.TestCase):
             intensities = []
             for peak_index, center in enumerate(base_fragments):
                 mz.extend(center + shift_da + offsets)
-                intensities.extend(
-                    (100.0 - peak_index) * np.exp(-0.5 * (offsets / 0.012) ** 2)
+                intensities.extend((100.0 - peak_index) * np.exp(-0.5 * (offsets / 0.012) ** 2))
+            spectra.append(
+                spectrum(
+                    i * 2.0,
+                    list(intensities),
+                    2,
+                    charge=2,
+                    precursor_mz=precursor,
+                    mz=list(mz),
+                    representation="profile",
                 )
-            spectra.append(spectrum(
-                i * 2.0,
-                list(intensities),
-                2,
-                charge=2,
-                precursor_mz=precursor,
-                mz=list(mz),
-                representation="profile",
-            ))
+            )
         result = Analyzer(MemoryReader(spectra)).analyze(
             "profile-peaks.mzML",
             collectors=[collector],
@@ -178,16 +310,20 @@ class AnnotationTests(unittest.TestCase):
             for target_index in range(20):
                 base = 500.0 + target_index * 2.0
                 precursor = base + math.sin(cycle * 0.71 + target_index * 0.13) * 0.001
-                spectra.append(spectrum(
-                    cycle * 30 + target_index,
-                    [10.0] * 10,
-                    2,
-                    charge=2,
-                    precursor_mz=precursor,
-                    mz=[100.0 + j for j in range(10)],
-                    representation="profile",
-                ))
-        result = Analyzer(MemoryReader(spectra)).analyze("profile-flat.mzML", collectors=[collector])
+                spectra.append(
+                    spectrum(
+                        cycle * 30 + target_index,
+                        [10.0] * 10,
+                        2,
+                        charge=2,
+                        precursor_mz=precursor,
+                        mz=[100.0 + j for j in range(10)],
+                        representation="profile",
+                    )
+                )
+        result = Analyzer(MemoryReader(spectra)).analyze(
+            "profile-flat.mzML", collectors=[collector]
+        )
         precursor = next(
             a for a in result.annotations if a.field == "estimated_precursor_mass_error_ppm"
         )
@@ -220,19 +356,20 @@ class AnnotationTests(unittest.TestCase):
             for target_index in range(12):
                 base = 450.0 + target_index * 5.0
                 precursor = base + math.sin(cycle * 0.83 + target_index * 0.19) * 0.001
-                spectra.append(spectrum(
-                    cycle * 30 + target_index,
-                    [10.0] * 10,
-                    2,
-                    charge=2,
-                    precursor_mz=precursor,
-                    mz=[100.0 + j for j in range(10)],
-                    representation="profile",
-                ))
+                spectra.append(
+                    spectrum(
+                        cycle * 30 + target_index,
+                        [10.0] * 10,
+                        2,
+                        charge=2,
+                        precursor_mz=precursor,
+                        mz=[100.0 + j for j in range(10)],
+                        representation="profile",
+                    )
+                )
         result = Analyzer(MemoryReader(spectra)).analyze("tolerance.mzML", collectors=[collector])
         suggestion = next(
-            a for a in result.annotations
-            if a.field == "suggested_precursor_search_tolerance_ppm"
+            a for a in result.annotations if a.field == "suggested_precursor_search_tolerance_ppm"
         )
         precision = next(
             a for a in result.annotations if a.field == "estimated_precursor_mass_error_ppm"
@@ -251,29 +388,14 @@ class AnnotationTests(unittest.TestCase):
             min_fragment_tolerance_pairs=20,
             min_fragment_tolerance_spectra=5,
         )
-        collector.fragment_errors_da = [
-            math.sin(i * 0.47) * 0.001
-            for i in range(200)
-        ]
-        collector.fragment_errors_ppm = [
-            math.sin(i * 0.47) * 2.0
-            for i in range(200)
-        ]
+        collector.fragment_errors_da = [math.sin(i * 0.47) * 0.001 for i in range(200)]
+        collector.fragment_errors_ppm = [math.sin(i * 0.47) * 2.0 for i in range(200)]
         collector.fragment_paired_spectra = 25
         collector.fragment_eligible_ms2 = 200
         annotations = collector.annotations()
-        ppm = next(
-            a for a in annotations
-            if a.field == "suggested_fragment_search_tolerance_ppm"
-        )
-        da = next(
-            a for a in annotations
-            if a.field == "suggested_fragment_search_tolerance_da"
-        )
-        precision = next(
-            a for a in annotations
-            if a.field == "estimated_fragment_mass_error_ppm"
-        )
+        ppm = next(a for a in annotations if a.field == "suggested_fragment_search_tolerance_ppm")
+        da = next(a for a in annotations if a.field == "suggested_fragment_search_tolerance_da")
+        precision = next(a for a in annotations if a.field == "estimated_fragment_mass_error_ppm")
         self.assertEqual(ppm.kind, EvidenceKind.INFERRED)
         self.assertEqual(ppm.value["resolution_regime"], "high-resolution")
         self.assertAlmostEqual(
@@ -297,21 +419,16 @@ class AnnotationTests(unittest.TestCase):
         collector.fragment_eligible_ms2 = 220
 
         annotations = collector.annotations()
-        precision = next(
-            a for a in annotations
-            if a.field == "estimated_fragment_mass_error_ppm"
-        )
+        precision = next(a for a in annotations if a.field == "estimated_fragment_mass_error_ppm")
         suggestion = next(
-            a for a in annotations
-            if a.field == "suggested_fragment_search_tolerance_ppm"
+            a for a in annotations if a.field == "suggested_fragment_search_tolerance_ppm"
         )
 
         self.assertEqual(suggestion.kind, EvidenceKind.INFERRED)
         self.assertGreater(precision.value["robust_inlier_fraction"], 0.8)
         self.assertLess(precision.value["robust_inlier_fraction"], 1.0)
         self.assertEqual(
-            precision.value["robust_inlier_count"]
-            + precision.value["robust_outlier_count"],
+            precision.value["robust_inlier_count"] + precision.value["robust_outlier_count"],
             220,
         )
         self.assertAlmostEqual(
@@ -333,37 +450,16 @@ class AnnotationTests(unittest.TestCase):
             min_fragment_tolerance_pairs=20,
             min_fragment_tolerance_spectra=5,
         )
-        collector.fragment_errors_da = [
-            math.sin(i * 0.47) * 0.08
-            for i in range(200)
-        ]
-        collector.fragment_errors_ppm = [
-            math.sin(i * 0.47) * 120.0
-            for i in range(200)
-        ]
-        collector.fragment_low_res_errors_da = [
-            math.sin(i * 0.47) * 0.12
-            for i in range(200)
-        ]
-        collector.fragment_low_res_errors_ppm = [
-            math.sin(i * 0.47) * 180.0
-            for i in range(200)
-        ]
+        collector.fragment_errors_da = [math.sin(i * 0.47) * 0.08 for i in range(200)]
+        collector.fragment_errors_ppm = [math.sin(i * 0.47) * 120.0 for i in range(200)]
+        collector.fragment_low_res_errors_da = [math.sin(i * 0.47) * 0.12 for i in range(200)]
+        collector.fragment_low_res_errors_ppm = [math.sin(i * 0.47) * 180.0 for i in range(200)]
         collector.fragment_paired_spectra = 25
         collector.fragment_eligible_ms2 = 200
         annotations = collector.annotations()
-        ppm = next(
-            a for a in annotations
-            if a.field == "suggested_fragment_search_tolerance_ppm"
-        )
-        da = next(
-            a for a in annotations
-            if a.field == "suggested_fragment_search_tolerance_da"
-        )
-        precision = next(
-            a for a in annotations
-            if a.field == "estimated_fragment_mass_error_da"
-        )
+        ppm = next(a for a in annotations if a.field == "suggested_fragment_search_tolerance_ppm")
+        da = next(a for a in annotations if a.field == "suggested_fragment_search_tolerance_da")
+        precision = next(a for a in annotations if a.field == "estimated_fragment_mass_error_da")
         self.assertEqual(da.kind, EvidenceKind.INFERRED)
         self.assertEqual(da.value["resolution_regime"], "low-resolution")
         self.assertEqual(da.value["fragment_match_window_da"], 0.5)
@@ -376,49 +472,26 @@ class AnnotationTests(unittest.TestCase):
         self.assertEqual(ppm.kind, EvidenceKind.UNAVAILABLE)
         self.assertIsNone(ppm.value)
 
-
     def test_fragment_search_tolerance_expands_to_one_da_when_half_da_is_censored(self):
         collector = RepeatSpectrumMassErrorCollector(
             min_fragment_pairs=10,
             min_fragment_tolerance_pairs=20,
             min_fragment_tolerance_spectra=5,
         )
-        collector.fragment_errors_da = [
-            math.sin(i * 0.47) * 0.08
-            for i in range(200)
-        ]
-        collector.fragment_errors_ppm = [
-            math.sin(i * 0.47) * 120.0
-            for i in range(200)
-        ]
-        collector.fragment_low_res_errors_da = [
-            math.sin(i * 0.47) * 0.22
-            for i in range(200)
-        ]
-        collector.fragment_low_res_errors_ppm = [
-            math.sin(i * 0.47) * 330.0
-            for i in range(200)
-        ]
-        collector.fragment_very_low_res_errors_da = [
-            math.sin(i * 0.47) * 0.22
-            for i in range(220)
-        ]
+        collector.fragment_errors_da = [math.sin(i * 0.47) * 0.08 for i in range(200)]
+        collector.fragment_errors_ppm = [math.sin(i * 0.47) * 120.0 for i in range(200)]
+        collector.fragment_low_res_errors_da = [math.sin(i * 0.47) * 0.22 for i in range(200)]
+        collector.fragment_low_res_errors_ppm = [math.sin(i * 0.47) * 330.0 for i in range(200)]
+        collector.fragment_very_low_res_errors_da = [math.sin(i * 0.47) * 0.22 for i in range(220)]
         collector.fragment_very_low_res_errors_ppm = [
-            math.sin(i * 0.47) * 330.0
-            for i in range(220)
+            math.sin(i * 0.47) * 330.0 for i in range(220)
         ]
         collector.fragment_paired_spectra = 25
         collector.fragment_eligible_ms2 = 200
 
         annotations = collector.annotations()
-        da = next(
-            a for a in annotations
-            if a.field == "suggested_fragment_search_tolerance_da"
-        )
-        precision = next(
-            a for a in annotations
-            if a.field == "estimated_fragment_mass_error_da"
-        )
+        da = next(a for a in annotations if a.field == "suggested_fragment_search_tolerance_da")
+        precision = next(a for a in annotations if a.field == "estimated_fragment_mass_error_da")
 
         self.assertEqual(da.kind, EvidenceKind.INFERRED)
         self.assertEqual(precision.kind, EvidenceKind.INFERRED)
@@ -434,42 +507,20 @@ class AnnotationTests(unittest.TestCase):
             min_fragment_tolerance_pairs=20,
             min_fragment_tolerance_spectra=5,
         )
-        collector.fragment_errors_da = [
-            math.sin(i * 0.47) * 0.08
-            for i in range(200)
-        ]
-        collector.fragment_errors_ppm = [
-            math.sin(i * 0.47) * 120.0
-            for i in range(200)
-        ]
-        collector.fragment_low_res_errors_da = [
-            math.sin(i * 0.47) * 0.22
-            for i in range(200)
-        ]
-        collector.fragment_low_res_errors_ppm = [
-            math.sin(i * 0.47) * 330.0
-            for i in range(200)
-        ]
-        collector.fragment_very_low_res_errors_da = [
-            math.sin(i * 0.47) * 0.40
-            for i in range(200)
-        ]
+        collector.fragment_errors_da = [math.sin(i * 0.47) * 0.08 for i in range(200)]
+        collector.fragment_errors_ppm = [math.sin(i * 0.47) * 120.0 for i in range(200)]
+        collector.fragment_low_res_errors_da = [math.sin(i * 0.47) * 0.22 for i in range(200)]
+        collector.fragment_low_res_errors_ppm = [math.sin(i * 0.47) * 330.0 for i in range(200)]
+        collector.fragment_very_low_res_errors_da = [math.sin(i * 0.47) * 0.40 for i in range(200)]
         collector.fragment_very_low_res_errors_ppm = [
-            math.sin(i * 0.47) * 600.0
-            for i in range(200)
+            math.sin(i * 0.47) * 600.0 for i in range(200)
         ]
         collector.fragment_paired_spectra = 25
         collector.fragment_eligible_ms2 = 200
 
         annotations = collector.annotations()
-        da = next(
-            a for a in annotations
-            if a.field == "suggested_fragment_search_tolerance_da"
-        )
-        precision = next(
-            a for a in annotations
-            if a.field == "estimated_fragment_mass_error_da"
-        )
+        da = next(a for a in annotations if a.field == "suggested_fragment_search_tolerance_da")
+        precision = next(a for a in annotations if a.field == "estimated_fragment_mass_error_da")
 
         self.assertEqual(da.kind, EvidenceKind.UNAVAILABLE)
         self.assertIsNone(da.value)
@@ -483,14 +534,8 @@ class AnnotationTests(unittest.TestCase):
             min_fragment_tolerance_pairs=20,
             min_fragment_tolerance_spectra=5,
         )
-        collector.fragment_errors_da = [
-            math.sin(i * 0.47) * 0.02
-            for i in range(200)
-        ]
-        collector.fragment_errors_ppm = [
-            math.sin(i * 0.47) * 12.0
-            for i in range(200)
-        ]
+        collector.fragment_errors_da = [math.sin(i * 0.47) * 0.02 for i in range(200)]
+        collector.fragment_errors_ppm = [math.sin(i * 0.47) * 12.0 for i in range(200)]
         collector.fragment_paired_spectra = 25
         collector.fragment_eligible_ms2 = 200
         annotations = collector.annotations()
@@ -514,22 +559,23 @@ class AnnotationTests(unittest.TestCase):
             for target_index in range(4):
                 base = 500.0 + target_index * 10.0
                 precursor = base + math.sin(cycle * 0.67 + target_index) * 0.001
-                spectra.append(spectrum(
-                    cycle * 10 + target_index,
-                    [10.0] * 10,
-                    2,
-                    charge=2,
-                    precursor_mz=precursor,
-                    mz=[100.0 + j for j in range(10)],
-                    representation="profile",
-                ))
+                spectra.append(
+                    spectrum(
+                        cycle * 10 + target_index,
+                        [10.0] * 10,
+                        2,
+                        charge=2,
+                        precursor_mz=precursor,
+                        mz=[100.0 + j for j in range(10)],
+                        representation="profile",
+                    )
+                )
         result = Analyzer(MemoryReader(spectra)).analyze("fixed-grid.mzML", collectors=[collector])
         precision = next(
             a for a in result.annotations if a.field == "estimated_precursor_mass_error_ppm"
         )
         suggestion = next(
-            a for a in result.annotations
-            if a.field == "suggested_precursor_search_tolerance_ppm"
+            a for a in result.annotations if a.field == "suggested_precursor_search_tolerance_ppm"
         )
         self.assertEqual(precision.kind, EvidenceKind.INFERRED)
         self.assertEqual(suggestion.kind, EvidenceKind.UNAVAILABLE)
@@ -659,9 +705,17 @@ class SDRFTests(unittest.TestCase):
         self.assertEqual(document.rows[0][1], "not applicable")
 
     def test_duplicate_modification_columns_and_repeated_sample_rows_survive(self):
-        columns = ["source name", "comment[data file]", "comment[modification parameters]", "comment[modification parameters]"]
-        document = SDRFDocument(columns.copy(), [["s1", "run.raw", "Oxidation", "Carbamidomethyl"],
-                                                 ["s2", "run.raw", "", ""]], ["# meta\n"])
+        columns = [
+            "source name",
+            "comment[data file]",
+            "comment[modification parameters]",
+            "comment[modification parameters]",
+        ]
+        document = SDRFDocument(
+            columns.copy(),
+            [["s1", "run.raw", "Oxidation", "Carbamidomethyl"], ["s2", "run.raw", "", ""]],
+            ["# meta\n"],
+        )
         result = analyze(metadata=RunMetadata(instruments=[FUSION], source_files=["run.raw"]))
         changes = document.annotate([result])
         self.assertEqual(document.columns[:4], columns)
@@ -705,26 +759,31 @@ class SDRFTests(unittest.TestCase):
         document = SDRFDocument(["comment[data file]"], [["run.raw"]])
         with self.assertRaisesRegex(ValueError, "Ambiguous"):
             document.annotate(
-                [analyze(
-                    name="a.mzML",
-                    metadata=metadata,
-                ), analyze(
-                    name="b.mzML",
-                    metadata=metadata,
-                )],
+                [
+                    analyze(
+                        name="a.mzML",
+                        metadata=metadata,
+                    ),
+                    analyze(
+                        name="b.mzML",
+                        metadata=metadata,
+                    ),
+                ],
             )
         self.assertEqual(len(document.columns), 1)
 
     def test_inferred_annotation_requires_explicit_option(self):
         result = analyze()
-        result.annotations = [Annotation(
-            "mode",
-            "DIA",
-            EvidenceKind.INFERRED,
-            "test",
-            sdrf_column="comment[proteomics data acquisition method]",
-            sdrf_value="NT=Data-independent acquisition;AC=PRIDE:0000450",
-        )]
+        result.annotations = [
+            Annotation(
+                "mode",
+                "DIA",
+                EvidenceKind.INFERRED,
+                "test",
+                sdrf_column="comment[proteomics data acquisition method]",
+                sdrf_value="NT=Data-independent acquisition;AC=PRIDE:0000450",
+            )
+        ]
         document = SDRFDocument(["comment[data file]"], [["run.mzML"]])
         self.assertEqual(document.annotate([result])[0].status, "suggestion")
         self.assertEqual(len(document.columns), 1)
@@ -787,46 +846,49 @@ class SerializationTests(unittest.TestCase):
         for items in ([], [spectrum(0, [1])], [spectrum(0, [1], 2, charge=2)]):
             result = Analyzer(MemoryReader(items)).analyze("run.mzML")
             jsonschema.Draft7Validator(schema, format_checker=jsonschema.FormatChecker()).validate(
-                MzQCWriter().build(result, Path("local.obo")))
+                MzQCWriter().build(result, Path("local.obo"))
+            )
 
     def test_mass_error_annotations_are_serialized_for_reporting(self):
         result = analyze()
-        result.annotations.extend([
-            Annotation(
-                "estimated_precursor_mass_error_ppm",
-                {"unit": "ppm", "single_measurement_sigma": 1.25},
-                EvidenceKind.INFERRED,
-                "test",
-                support=120,
-                total=300,
-            ),
-            Annotation(
-                "suggested_precursor_search_tolerance_ppm",
-                {
-                    "unit": "ppm",
-                    "suggested_tolerance": 7.5,
-                    "single_measurement_sigma": 1.25,
-                    "confidence": "moderate",
-                },
-                EvidenceKind.INFERRED,
-                "test",
-                support=120,
-                total=300,
-            ),
-            Annotation(
-                "mass_error_estimator_diagnostics",
-                {
-                    "precursor_paired_spectra": 120,
-                    "precursor_clusters_used": 42,
-                    "fragment_pairs": 900,
-                    "fragment_resolution_regime": "high-resolution",
-                },
-                EvidenceKind.INFERRED,
-                "test",
-                support=120,
-                total=300,
-            ),
-        ])
+        result.annotations.extend(
+            [
+                Annotation(
+                    "estimated_precursor_mass_error_ppm",
+                    {"unit": "ppm", "single_measurement_sigma": 1.25},
+                    EvidenceKind.INFERRED,
+                    "test",
+                    support=120,
+                    total=300,
+                ),
+                Annotation(
+                    "suggested_precursor_search_tolerance_ppm",
+                    {
+                        "unit": "ppm",
+                        "suggested_tolerance": 7.5,
+                        "single_measurement_sigma": 1.25,
+                        "confidence": "moderate",
+                    },
+                    EvidenceKind.INFERRED,
+                    "test",
+                    support=120,
+                    total=300,
+                ),
+                Annotation(
+                    "mass_error_estimator_diagnostics",
+                    {
+                        "precursor_paired_spectra": 120,
+                        "precursor_clusters_used": 42,
+                        "fragment_pairs": 900,
+                        "fragment_resolution_regime": "high-resolution",
+                    },
+                    EvidenceKind.INFERRED,
+                    "test",
+                    support=120,
+                    total=300,
+                ),
+            ]
+        )
 
         run = MzQCWriter().build(result, Path("local.obo"))["mzQC"]["runQualities"][0]
         metrics = {item["name"]: item["value"] for item in run["qualityMetrics"]}
@@ -865,7 +927,7 @@ class SerializationTests(unittest.TestCase):
 
 class ReaderHeaderTests(unittest.TestCase):
     def test_preserves_cv_and_reference_groups_without_reading_payload(self):
-        xml = '''<mzML xmlns="http://psi.hupo.org/ms/mzml">
+        xml = """<mzML xmlns="http://psi.hupo.org/ms/mzml">
         <referenceableParamGroupList><referenceableParamGroup id="inst">
         <cvParam accession="MS:1002416" name="Orbitrap Fusion" value=""/>
         </referenceableParamGroup></referenceableParamGroupList>
@@ -875,7 +937,7 @@ class ReaderHeaderTests(unittest.TestCase):
         <cvParam accession="MS:1000529" name="instrument serial number" value="ABC"/>
         <componentList><analyzer><cvParam accession="MS:1000484" name="orbitrap"/></analyzer></componentList>
         </instrumentConfiguration></instrumentConfigurationList>
-        <run startTimeStamp="2026-01-01T00:00:00Z"><spectrumList count="1">'''
+        <run startTimeStamp="2026-01-01T00:00:00Z"><spectrumList count="1">"""
         # Malformed content is far beyond the header parser's read-ahead buffer.
         xml += " " * 65536 + "<invalid payload"
         with tempfile.TemporaryDirectory() as folder:

@@ -881,3 +881,291 @@ class RepeatSpectrumMassErrorCollector:
             total=self.precursor_eligible_ms2,
         ))
         return result
+
+
+
+def _openms_robust_error_payload(value: Any, unit: str) -> dict[str, Any] | None:
+    if value is None or float(value.single_measurement_sigma) <= 0:
+        return None
+    return {
+        "unit": unit,
+        "pairwise_median": float(value.pairwise_median),
+        "pairwise_sigma": float(value.pairwise_sigma),
+        "single_measurement_sigma": float(value.single_measurement_sigma),
+        "pairwise_p95_abs": float(value.pairwise_p95_abs),
+        "robust_inlier_threshold_3sigma": float(value.robust_inlier_threshold_3sigma),
+        "robust_inlier_count": int(value.robust_inlier_count),
+        "robust_outlier_count": int(value.robust_outlier_count),
+        "robust_inlier_fraction": float(value.robust_inlier_fraction),
+        "robust_inlier_p95_abs_centered": float(value.robust_inlier_p95_abs_centered),
+    }
+
+
+@dataclass(slots=True)
+class NativeOpenMSMassErrorCollector:
+    """Thin prideQC adapter around OpenMS's native ID-free estimator."""
+
+    oms: Any | None = None
+    _estimator: Any = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.oms is None:
+            try:
+                import pyopenms
+            except ImportError as exc:
+                raise RuntimeError("pyOpenMS is required for native mass-error estimation") from exc
+            self.oms = pyopenms
+        estimator_type = getattr(self.oms, "IDFreeMassErrorEstimator", None)
+        if estimator_type is None:
+            raise RuntimeError("This pyOpenMS build does not expose IDFreeMassErrorEstimator")
+        self._estimator = estimator_type()
+
+    @classmethod
+    def create_if_available(cls) -> NativeOpenMSMassErrorCollector | None:
+        try:
+            import pyopenms
+        except ImportError:
+            return None
+        if not hasattr(pyopenms, "IDFreeMassErrorEstimator"):
+            return None
+        return cls(oms=pyopenms)
+
+    def consume_native_spectrum(self, spectrum: Any) -> None:
+        self._estimator.consumeSpectrum(spectrum)
+
+    def consume_spectrum(self, spectrum: Spectrum) -> None:
+        # Native MSSpectrum evidence is consumed by the reader before conversion.
+        pass
+
+    @property
+    def precursor_paired_spectra(self) -> int:
+        return int(self._estimator.getResult().diagnostics.precursor_paired_spectra)
+
+    @property
+    def precursor_clusters_used(self) -> int:
+        return int(self._estimator.getResult().diagnostics.precursor_clusters_used)
+
+    @property
+    def min_tolerance_pairs(self) -> int:
+        return int(self._estimator.getParameters().min_tolerance_pairs)
+
+    @property
+    def min_tolerance_clusters(self) -> int:
+        return int(self._estimator.getParameters().min_tolerance_clusters)
+
+    def precursor_precision_ppm(self) -> dict[str, float | int] | None:
+        payload = _openms_robust_error_payload(self._estimator.getPrecursorPrecisionPPM(), "ppm")
+        if payload is None:
+            return None
+        payload.pop("unit", None)
+        return payload
+
+    @staticmethod
+    def _regime_name(result: Any) -> str:
+        name = str(result.fragment_resolution_regime).rsplit(".", 1)[-1].upper()
+        return {
+            "HIGH_RESOLUTION": "high-resolution",
+            "LOW_RESOLUTION": "low-resolution",
+        }.get(name, "unavailable")
+
+    def annotations(self) -> list[Annotation]:
+        result = self._estimator.getResult()
+        diagnostics = result.diagnostics
+        regime = self._regime_name(result)
+        method = (
+            "OpenMS IDFreeMassErrorEstimator; repeat-observation precursor precision and "
+            "background-aware repeated-spectrum fragment precision"
+        )
+        detail = (
+            "Native OpenMS measurement-precision evidence. High-resolution fragment precision uses "
+            "a Gaussian-plus-background model with an adaptive high-intensity fallback; input "
+            "spectra are not modified by the estimator. This is not a recovered historical "
+            "search tolerance."
+        )
+
+        precursor_ppm = _openms_robust_error_payload(result.precursor_ppm, "ppm")
+        precursor_da = _openms_robust_error_payload(result.precursor_da, "Da")
+        fragment_ppm = _openms_robust_error_payload(result.fragment_ppm, "ppm")
+        fragment_da = _openms_robust_error_payload(result.fragment_da, "Da")
+        for payload in (fragment_ppm, fragment_da):
+            if payload is not None:
+                payload.update(
+                    {
+                        "resolution_regime": regime,
+                        "fragment_match_window_da": float(result.fragment_match_window_da),
+                        "window_censored": bool(result.fragment_window_censored),
+                    }
+                )
+
+        fragment_support = int(
+            diagnostics.fragment_mixture_signal_pairs
+            if regime == "high-resolution" and diagnostics.fragment_mixture_signal_pairs
+            else diagnostics.fragment_pairs
+        )
+        annotations = [
+            Annotation(
+                "estimated_precursor_mass_error_ppm",
+                precursor_ppm,
+                EvidenceKind.INFERRED if precursor_ppm is not None else EvidenceKind.UNAVAILABLE,
+                method,
+                detail,
+                support=int(diagnostics.precursor_paired_spectra),
+                total=int(diagnostics.precursor_eligible_ms2),
+            ),
+            Annotation(
+                "estimated_precursor_mass_error_da",
+                precursor_da,
+                EvidenceKind.INFERRED if precursor_da is not None else EvidenceKind.UNAVAILABLE,
+                method,
+                detail,
+                support=int(diagnostics.precursor_paired_spectra),
+                total=int(diagnostics.precursor_eligible_ms2),
+            ),
+            Annotation(
+                "estimated_fragment_mass_error_da",
+                fragment_da,
+                EvidenceKind.INFERRED if fragment_da is not None else EvidenceKind.UNAVAILABLE,
+                method,
+                detail,
+                support=fragment_support,
+                total=int(diagnostics.fragment_eligible_ms2),
+            ),
+            Annotation(
+                "estimated_fragment_mass_error_ppm",
+                fragment_ppm,
+                EvidenceKind.INFERRED if fragment_ppm is not None else EvidenceKind.UNAVAILABLE,
+                method,
+                detail,
+                support=fragment_support,
+                total=int(diagnostics.fragment_eligible_ms2),
+            ),
+        ]
+
+        precursor_tolerance = result.precursor_tolerance_ppm
+        precursor_payload = None
+        if precursor_tolerance is not None:
+            precursor_payload = {
+                "unit": str(precursor_tolerance.unit),
+                "suggested_tolerance": float(precursor_tolerance.tolerance),
+                "single_measurement_sigma": float(precursor_tolerance.single_measurement_sigma),
+                "sigma_multiplier": float(precursor_tolerance.sigma_multiplier),
+                "confidence": str(precursor_tolerance.confidence),
+                "precursor_clusters": int(diagnostics.precursor_clusters_used),
+            }
+        annotations.append(
+            Annotation(
+                "suggested_precursor_search_tolerance_ppm",
+                precursor_payload,
+                (
+                    EvidenceKind.INFERRED
+                    if precursor_payload is not None
+                    else EvidenceKind.UNAVAILABLE
+                ),
+                method,
+                detail,
+                support=int(diagnostics.precursor_paired_spectra),
+                total=int(diagnostics.precursor_eligible_ms2),
+            )
+        )
+
+        for field_name, suggestion, unit, precision in (
+            (
+                "suggested_fragment_search_tolerance_ppm",
+                result.fragment_tolerance_ppm,
+                "ppm",
+                fragment_ppm,
+            ),
+            (
+                "suggested_fragment_search_tolerance_da",
+                result.fragment_tolerance_da,
+                "Da",
+                fragment_da,
+            ),
+        ):
+            payload = None
+            if suggestion is not None:
+                payload = {
+                    "unit": unit,
+                    "suggested_tolerance": float(suggestion.tolerance),
+                    "single_measurement_sigma": float(suggestion.single_measurement_sigma),
+                    "sigma_multiplier": float(suggestion.sigma_multiplier),
+                    "confidence": str(suggestion.confidence),
+                    "fragment_pairs": int(suggestion.support),
+                    "paired_spectra": int(diagnostics.fragment_paired_spectra),
+                    "resolution_regime": regime,
+                    "fragment_match_window_da": float(result.fragment_match_window_da),
+                    "window_censored": bool(result.fragment_window_censored),
+                }
+                if precision is not None:
+                    for key in (
+                        "robust_inlier_fraction",
+                        "robust_inlier_count",
+                        "robust_outlier_count",
+                    ):
+                        payload[key] = precision[key]
+            annotations.append(
+                Annotation(
+                    field_name,
+                    payload,
+                    EvidenceKind.INFERRED if payload is not None else EvidenceKind.UNAVAILABLE,
+                    method,
+                    detail,
+                    support=int(suggestion.support) if suggestion is not None else fragment_support,
+                    total=int(diagnostics.fragment_eligible_ms2),
+                )
+            )
+
+        annotations.append(
+            Annotation(
+                "mass_error_estimator_diagnostics",
+                {
+                    "backend": "openms-native",
+                    "precursor_eligible_ms2": int(diagnostics.precursor_eligible_ms2),
+                    "precursor_paired_spectra": int(diagnostics.precursor_paired_spectra),
+                    "precursor_clusters_used": int(diagnostics.precursor_clusters_used),
+                    "fragment_eligible_ms2": int(diagnostics.fragment_eligible_ms2),
+                    "fragment_paired_spectra": int(diagnostics.fragment_paired_spectra),
+                    "fragment_pairs": int(diagnostics.fragment_pairs),
+                    "fragment_mixture_pairs": int(diagnostics.fragment_mixture_pairs),
+                    "fragment_mixture_signal_pairs": int(diagnostics.fragment_mixture_signal_pairs),
+                    "fragment_zero_delta_fraction": float(diagnostics.fragment_zero_delta_fraction),
+                    "fragment_mixture_signal_fraction": float(
+                        diagnostics.fragment_mixture_signal_fraction
+                    ),
+                    "fragment_mixture_converged": bool(diagnostics.fragment_mixture_converged),
+                    "fragment_mixture_rejected_zero_quantization": bool(
+                        diagnostics.fragment_mixture_rejected_zero_quantization
+                    ),
+                    "fragment_high_intensity_pairs": int(diagnostics.fragment_high_intensity_pairs),
+                    "fragment_high_intensity_signal_pairs": int(
+                        diagnostics.fragment_high_intensity_signal_pairs
+                    ),
+                    "fragment_high_intensity_signal_fraction": float(
+                        diagnostics.fragment_high_intensity_signal_fraction
+                    ),
+                    "fragment_high_intensity_fallback_used": bool(
+                        diagnostics.fragment_high_intensity_fallback_used
+                    ),
+                    "fragment_resolution_regime": regime,
+                    "fragment_match_window_da": float(result.fragment_match_window_da),
+                    "fragment_window_censored": bool(result.fragment_window_censored),
+                    "fragment_centroid_spectra": int(diagnostics.fragment_centroid_spectra),
+                    "fragment_profile_spectra": int(diagnostics.fragment_profile_spectra),
+                    "excluded_fragment_profile_or_unknown": int(
+                        diagnostics.excluded_fragment_profile_or_unknown
+                    ),
+                    "excluded_low_fragment_peaks": int(diagnostics.excluded_low_fragment_peaks),
+                    "excluded_missing_precursor": int(diagnostics.excluded_missing_precursor),
+                },
+                EvidenceKind.INFERRED
+                if diagnostics.precursor_eligible_ms2 or diagnostics.fragment_eligible_ms2
+                else EvidenceKind.UNAVAILABLE,
+                method,
+                "Estimator support/accounting only; not an SDRF annotation.",
+                support=int(
+                    diagnostics.precursor_paired_spectra + diagnostics.fragment_paired_spectra
+                ),
+                total=int(diagnostics.precursor_eligible_ms2 + diagnostics.fragment_eligible_ms2),
+            )
+        )
+        return annotations

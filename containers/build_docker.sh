@@ -14,6 +14,10 @@ UV_IMAGE="${PRIDEQC_UV_IMAGE:-ghcr.io/astral-sh/uv:0.12.11}"
 DOTNET_IMAGE="${PRIDEQC_DOTNET_IMAGE:-mcr.microsoft.com/dotnet/runtime:8.0.29-bookworm-slim}"
 PMULTIQC_GIT_URL="${PRIDEQC_PMULTIQC_GIT_URL:-https://github.com/singjc/pmultiqc.git}"
 PMULTIQC_GIT_REF="${PRIDEQC_PMULTIQC_GIT_REF:-fae0c95ff6dac996a7e66138ab0b5992ca7c9b23}"
+OPENMS_GIT_URL="${PRIDEQC_OPENMS_GIT_URL:-https://github.com/OpenMS/OpenMS.git}"
+OPENMS_GIT_REQUESTED_REF="${PRIDEQC_OPENMS_GIT_REF:-develop}"
+OPENMS_BUILD_JOBS="${PRIDEQC_OPENMS_BUILD_JOBS:-8}"
+NANOBIND_BACKEND_VERSION="${PRIDEQC_NANOBIND_BACKEND_VERSION:-1.0.0}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -22,14 +26,25 @@ command -v docker >/dev/null 2>&1 || { echo "docker is required" >&2; exit 2; }
 docker buildx version >/dev/null 2>&1 || { echo "docker buildx is required" >&2; exit 2; }
 test -f pyproject.toml
 test -f uv.lock
-test -f containers/pyopenms.requirements.txt
+command -v git >/dev/null 2>&1 || { echo "git is required to resolve the OpenMS source ref" >&2; exit 2; }
 
-EXPECTED_PYOPENMS_REQUIREMENT="pyopenms @ https://github.com/PRIDE-Archive/prideQC/releases/download/vendor-pyopenms-3.6.0.dev20260910/pyopenms-3.6.0.dev20260910-cp312-cp312-manylinux_2_34_x86_64.whl#sha256=9c7cbb35f3a9557c1988b99a8ec51ef3ac2bc961fd818844e4cfc645ad73a7d6"
-[[ "$(cat containers/pyopenms.requirements.txt)" == "$EXPECTED_PYOPENMS_REQUIREMENT" ]] || {
-    echo "containers/pyopenms.requirements.txt must contain the approved pyOpenMS wheel and SHA-256 exactly" >&2
+if [[ "$OPENMS_GIT_REQUESTED_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    OPENMS_GIT_REF="${OPENMS_GIT_REQUESTED_REF,,}"
+else
+    OPENMS_GIT_REF="$(
+        git ls-remote \
+          "$OPENMS_GIT_URL" \
+          "$OPENMS_GIT_REQUESTED_REF" \
+          "refs/heads/$OPENMS_GIT_REQUESTED_REF" \
+          "refs/tags/$OPENMS_GIT_REQUESTED_REF" \
+        | awk 'NR == 1 {print tolower($1)}'
+    )"
+fi
+[[ "$OPENMS_GIT_REF" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "Could not resolve OpenMS ref '$OPENMS_GIT_REQUESTED_REF' from $OPENMS_GIT_URL" >&2
     exit 2
 }
-PYOPENMS_PIN_HASH="$(sha256sum containers/pyopenms.requirements.txt | awk '{print $1}')"
+echo "OpenMS source: $OPENMS_GIT_URL $OPENMS_GIT_REQUESTED_REF -> $OPENMS_GIT_REF"
 
 PROJECT_VERSION="$(awk -F '"' '/^version = "/ {print $2; exit}' pyproject.toml)"
 PYTHON_LOCK_HASH="$(sha256sum uv.lock | awk '{print $1}')"
@@ -76,7 +91,11 @@ build_args=(
     --build-arg "PYTHON_LOCK_HASH=$PYTHON_LOCK_HASH"
     --build-arg "CARGO_LOCK_HASH=$CARGO_LOCK_HASH"
     --build-arg "BUILD_ID=$BUILD_ID"
-    --build-arg "PYOPENMS_PIN_HASH=$PYOPENMS_PIN_HASH"
+    --build-arg "OPENMS_GIT_URL=$OPENMS_GIT_URL"
+    --build-arg "OPENMS_GIT_REF=$OPENMS_GIT_REF"
+    --build-arg "OPENMS_GIT_REQUESTED_REF=$OPENMS_GIT_REQUESTED_REF"
+    --build-arg "OPENMS_BUILD_JOBS=$OPENMS_BUILD_JOBS"
+    --build-arg "NANOBIND_BACKEND_VERSION=$NANOBIND_BACKEND_VERSION"
     --build-arg "PYTHON_IMAGE=$PYTHON_IMAGE"
     --build-arg "RUST_IMAGE=$RUST_IMAGE"
     --build-arg "UV_IMAGE=$UV_IMAGE"
@@ -100,7 +119,7 @@ docker buildx build "${build_args[@]}" --target "$TARGET" -t "$IMAGE" .
 echo "==> Runtime smoke tests"
 docker run --rm "$IMAGE" prideqc --version
 docker run --rm "$IMAGE" python -c \
-  "import importlib.metadata as m, pyopenms as oms; print('Python/pyOpenMS:', m.version('pyopenms')); assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"
+  "import importlib.metadata as m, pyopenms as oms; print('Python/pyOpenMS:', m.version('pyopenms')); assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile'); assert hasattr(oms, 'IDFreeMassErrorEstimator'); assert oms.BrukerTimsFile.Config.CentroidAlgo.HILL_BASED is not None"
 docker run --rm "$IMAGE" dotnet --info >/dev/null
 docker run --rm "$IMAGE" multiqc --version
 docker run --rm "$IMAGE" /opt/pmultiqc/.venv/bin/python -c \

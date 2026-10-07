@@ -52,7 +52,7 @@ fi
 echo "==> SIF smoke tests"
 "$CONTAINER_BIN" exec "$SIF" prideqc --version
 "$CONTAINER_BIN" exec "$SIF" python -c \
-  "import importlib.metadata as m, pyopenms as oms; print('pyOpenMS', m.version('pyopenms')); assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"
+  "import importlib.metadata as m, pyopenms as oms; print('pyOpenMS', m.version('pyopenms')); assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile'); assert hasattr(oms, 'IDFreeMassErrorEstimator'); assert oms.BrukerTimsFile.Config.CentroidAlgo.HILL_BASED is not None"
 "$CONTAINER_BIN" exec "$SIF" dotnet --info >/dev/null
 "$CONTAINER_BIN" exec "$SIF" multiqc --version
 "$CONTAINER_BIN" exec "$SIF" /opt/pmultiqc/.venv/bin/python -c \

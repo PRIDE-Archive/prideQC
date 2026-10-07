@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from prideqc import __version__
 from prideqc.refinement_adjudication import (
     REQUEST_SCHEMA_VERSION,
     REQUEST_SCOPE,
@@ -200,7 +201,7 @@ class SubmissionApplicationTests(unittest.TestCase):
 
             self.assertTrue(manifest["submission_ready"])
             self.assertEqual(manifest["changed_cell_count"], 2)
-            self.assertEqual(manifest["annotation_tool"], "prideQC v0.2.0")
+            self.assertEqual(manifest["annotation_tool"], f"prideQC v{__version__}")
             final = SDRFDocument.read(output / "PXD123456.sdrf.tsv")
             precursor = final.indices("comment[precursor mass tolerance]")[0]
             fragment = final.indices("comment[fragment mass tolerance]")[0]
@@ -217,7 +218,7 @@ class SubmissionApplicationTests(unittest.TestCase):
                 "NT=Methylation;AC=UniMod:34;MT=variable",
                 [final.rows[2][i] for i in mods],
             )
-            self.assertTrue(all(row[tool] == "prideQC v0.2.0" for row in final.rows))
+            self.assertTrue(all(row[tool] == f"prideQC v{__version__}" for row in final.rows))
 
     def test_refuses_full_sdrf_original_value_drift(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -395,7 +396,7 @@ class SubmissionApplicationTests(unittest.TestCase):
             )
             self.assertTrue(manifest["submission_ready"])
             self.assertEqual(len(manifest["structural_changes"]), 1)
-            self.assertEqual(manifest["annotation_tool"], "prideQC v0.2.0")
+            self.assertEqual(manifest["annotation_tool"], f"prideQC v{__version__}")
             final = SDRFDocument.read(output / "PXD123456.sdrf.tsv")
             assay = final.indices("assay name")[0]
             technology = final.indices("technology type")[0]

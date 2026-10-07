@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=77,<85"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [project]
 name = "prideQC"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Streaming mass spectrometry QC and evidence-based technical SDRF annotation"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -23,14 +23,39 @@ ontology = ["sdrf-pipelines[ontology]>=0.1.6,<0.2"]
 [project.scripts]
 prideqc = "prideqc.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/PRIDE-Archive/prideQC"
+Repository = "https://github.com/PRIDE-Archive/prideQC"
+Issues = "https://github.com/PRIDE-Archive/prideQC/issues"
+Releases = "https://github.com/PRIDE-Archive/prideQC/releases"
+
 [dependency-groups]
 dev = ["ruff>=0.11,<1", "mypy>=1.15,<2", "jsonschema>=4.23,<5"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.2.0.dev0"
+tag-pattern = "^v(?P<version>.+)$"
 
-[tool.setuptools.package-data]
-prideqc = ["py.typed", "data/*"]
+[tool.hatch.version.raw-options]
+local_scheme = "no-local-version"
+git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--match", "v[0-9]*"]
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/prideqc/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prideqc"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.git*",
+    "/.githooks",
+    "/benchmarks",
+    "/containers",
+    "/scripts",
+    "/tests",
+]
 
 [tool.ruff]
 target-version = "py311"

@@ -259,8 +259,15 @@ def _metadata_from_experiment(experiment: Any, source: Path) -> RunMetadata:
 class _Consumer:
     """The camelCase methods are pyOpenMS's required callback interface."""
 
-    def __init__(self, sink: SpectrumSink, oms: Any, estimate_peak_type: bool = False) -> None:
+    def __init__(
+        self,
+        sink: SpectrumSink,
+        oms: Any,
+        estimate_peak_type: bool = False,
+        consume_native: bool = True,
+    ) -> None:
         self.sink = sink
+        self.consume_native = consume_native
         self.activations = _enum_names(oms.Precursor.ActivationMethod)
         self.polarities = _enum_names(oms.IonSource.Polarity)
         self.types = _enum_names(oms.SpectrumSettings.SpectrumType)
@@ -281,6 +288,9 @@ class _Consumer:
         )
 
     def consumeSpectrum(self, spectrum: Any) -> None:
+        consume_native = getattr(self.sink, "consume_native_spectrum", None)
+        if self.consume_native and callable(consume_native):
+            consume_native(spectrum)
         mz, intensity = spectrum.get_peaks()
         precursors = []
         for precursor in spectrum.getPrecursors():
@@ -340,7 +350,13 @@ class _Consumer:
 class PyOpenMSReader:
     """Read mzML and, when available, Thermo/Bruker vendor files."""
 
-    def __init__(self, *, estimate_peak_type: bool = False, oms: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        estimate_peak_type: bool = False,
+        native_mass_error: bool = False,
+        oms: Any | None = None,
+    ) -> None:
         if oms is None:
             try:
                 import pyopenms
@@ -353,6 +369,7 @@ class PyOpenMSReader:
         self._oms: Any = oms
         self.engine_version = str(getattr(oms, "__version__", "unknown"))
         self.estimate_peak_type = estimate_peak_type
+        self.native_mass_error = native_mass_error
 
     def supports_direct(self, path: Path) -> bool:
         """Return whether a native reader is exposed for this vendor path."""
@@ -397,8 +414,53 @@ class PyOpenMSReader:
             return experiment
         return self._oms.BrukerTimsFile().load(str(path))
 
-    def _consume_experiment(self, experiment: Any, sink: SpectrumSink) -> None:
-        consumer = _Consumer(sink, self._oms, self.estimate_peak_type)
+    def _load_bruker_mass_error(self, path: Path) -> Any:
+        config_type = getattr(self._oms.BrukerTimsFile, "Config", None)
+        centroid_algo = (
+            getattr(config_type, "CentroidAlgo", None) if config_type is not None else None
+        )
+        if config_type is None or centroid_algo is None or not hasattr(centroid_algo, "HILL_BASED"):
+            raise VendorReaderUnavailable(
+                "Native Bruker mass-error estimation requires a pyOpenMS build exposing "
+                "BrukerTimsFile.Config.CentroidAlgo.HILL_BASED."
+            )
+        config = config_type()
+        config.ms2_centroid_algo = centroid_algo.HILL_BASED
+        config.dia_ms2_n_neighbors = 0
+        return self._oms.BrukerTimsFile().load(str(path), config)
+
+    @staticmethod
+    def _consume_native_experiment(experiment: Any, sink: SpectrumSink) -> None:
+        consume = getattr(sink, "consume_native_spectrum", None)
+        if not callable(consume):
+            return
+        spectra_getter = getattr(experiment, "getSpectra", None) or getattr(
+            experiment, "get_spectra", None
+        )
+        if callable(spectra_getter):
+            spectra = spectra_getter()
+        elif callable(getattr(experiment, "getNrSpectra", None)) and callable(
+            getattr(experiment, "getSpectrum", None),
+        ):
+            spectra = (experiment.getSpectrum(index) for index in range(experiment.getNrSpectra()))
+        else:
+            spectra = experiment
+        for spectrum in spectra:
+            consume(spectrum)
+
+    def _consume_experiment(
+        self,
+        experiment: Any,
+        sink: SpectrumSink,
+        *,
+        consume_native: bool = True,
+    ) -> None:
+        consumer = _Consumer(
+            sink,
+            self._oms,
+            self.estimate_peak_type,
+            consume_native=consume_native,
+        )
         spectra_getter = getattr(experiment, "getSpectra", None) or getattr(experiment, "get_spectra", None)
         chromatograms_getter = getattr(experiment, "getChromatograms", None) or getattr(
             experiment, "get_chromatograms", None
@@ -446,12 +508,22 @@ class PyOpenMSReader:
         try:
             if format_name == "Bruker TDF (.d)" and path.name.casefold().endswith(".d.zip"):
                 temporary, extracted = self._extract_d_archive(path)
-                experiment = self._load_vendor(extracted, format_name)
+                vendor_path = extracted
             else:
-                experiment = self._load_vendor(path, format_name)
+                vendor_path = path
+
+            if format_name == "Bruker TDF (.d)" and self.native_mass_error:
+                mass_error_experiment = self._load_bruker_mass_error(vendor_path)
+                self._consume_native_experiment(mass_error_experiment, sink)
+
+            experiment = self._load_vendor(vendor_path, format_name)
             # Consume before removing a temporary archive extraction: some
             # reader implementations expose lazy/on-disc experiment objects.
-            self._consume_experiment(experiment, sink)
+            self._consume_experiment(
+                experiment,
+                sink,
+                consume_native=not (format_name == "Bruker TDF (.d)" and self.native_mass_error),
+            )
         finally:
             if temporary is not None:
                 temporary.cleanup()

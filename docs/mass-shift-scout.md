@@ -74,14 +74,16 @@ the bounded fingerprint representation.
 
 ## v19 precision and annotation tolerance
 
-If `--estimate-mass-error` is enabled at the same time, the frozen v19 precursor
-precision estimate is consumed **read-only** to widen mass-shift clustering when
-supported. v22.1 intentionally decouples this from UniMod annotation: the
+If `--estimate-mass-error` is enabled at the same time, the active precursor-precision
+source is consumed **read-only** to widen mass-shift clustering when supported. Current
+pyOpenMS builds use the native OpenMS ID-free estimator; older builds retain the frozen
+Python estimator as a compatibility fallback. v22.1 intentionally decouples this from
+UniMod annotation: the
 UniMod lookup window remains at the configured tight fixed tolerance and does
 not inherit a wider run-specific clustering radius.
 
 This prevents noisy runs from turning a broad clustering tolerance into a broad
-chemical-database lookup. v19 itself is unchanged.
+chemical-database lookup. The mass-shift scout does not retune either precision backend.
 
 ## QC-facing reporting
 

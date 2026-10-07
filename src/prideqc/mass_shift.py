@@ -25,7 +25,10 @@ import numpy as np
 from prideqc.models import Annotation, EvidenceKind, Spectrum
 
 if TYPE_CHECKING:
-    from prideqc.mass_error import RepeatSpectrumMassErrorCollector
+    from prideqc.mass_error import (
+        NativeOpenMSMassErrorCollector,
+        RepeatSpectrumMassErrorCollector,
+    )
 
 # CODATA/OpenMS-compatible fallbacks are used only when a caller does not supply
 # the constants and pyOpenMS is unavailable (principally pure unit tests).
@@ -544,7 +547,9 @@ class MassShiftCollector:
     independent and tight; the mass-error estimator itself is never changed.
     """
 
-    precision_source: RepeatSpectrumMassErrorCollector | None = None
+    precision_source: (
+        RepeatSpectrumMassErrorCollector | NativeOpenMSMassErrorCollector | None
+    ) = None
     modifications: tuple[ModificationRecord, ...] | None = None
     oms: Any | None = None
     top_peaks: int = 60
