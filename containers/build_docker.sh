@@ -27,6 +27,7 @@ docker buildx version >/dev/null 2>&1 || { echo "docker buildx is required" >&2;
 test -f pyproject.toml
 test -f uv.lock
 command -v git >/dev/null 2>&1 || { echo "git is required to resolve the OpenMS source ref" >&2; exit 2; }
+command -v uv >/dev/null 2>&1 || { echo "uv is required to resolve the Hatch-VCS project version" >&2; exit 2; }
 
 if [[ "$OPENMS_GIT_REQUESTED_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
     OPENMS_GIT_REF="${OPENMS_GIT_REQUESTED_REF,,}"
@@ -46,7 +47,11 @@ fi
 }
 echo "OpenMS source: $OPENMS_GIT_URL $OPENMS_GIT_REQUESTED_REF -> $OPENMS_GIT_REF"
 
-PROJECT_VERSION="$(awk -F '"' '/^version = "/ {print $2; exit}' pyproject.toml)"
+PROJECT_VERSION="$(uvx --from hatch --with hatch-vcs hatch version)"
+[[ -n "$PROJECT_VERSION" ]] || {
+    echo "Could not resolve prideQC version with uv" >&2
+    exit 2
+}
 PYTHON_LOCK_HASH="$(sha256sum uv.lock | awk '{print $1}')"
 if [[ -f Cargo.toml ]]; then
     test -f Cargo.lock || { echo "Cargo.toml exists but Cargo.lock is missing" >&2; exit 2; }
