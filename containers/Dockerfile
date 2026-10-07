@@ -6,12 +6,83 @@ ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.11
 ARG DOTNET_IMAGE=mcr.microsoft.com/dotnet/runtime:8.0.29-bookworm-slim
 ARG PMULTIQC_GIT_URL=https://github.com/singjc/pmultiqc.git
 ARG PMULTIQC_GIT_REF=fae0c95ff6dac996a7e66138ab0b5992ca7c9b23
+ARG OPENMS_GIT_URL=https://github.com/OpenMS/OpenMS.git
+ARG OPENMS_GIT_REF=develop
+ARG OPENMS_GIT_REQUESTED_REF=develop
+ARG OPENMS_MANYLINUX_IMAGE=quay.io/pypa/manylinux_2_34_x86_64
+ARG OPENMS_BUILD_JOBS=8
+ARG NANOBIND_BACKEND_VERSION=1.0.0
 
 FROM ${UV_IMAGE} AS uv-bin
 
 # ThermoRawFile on Linux uses the OpenMS .NET bridge. Keep the runtime pinned
 # and copy it into the final Python image; no SDK is needed at runtime.
 FROM ${DOTNET_IMAGE} AS dotnet-runtime
+
+# Build the exact pyOpenMS revision used by the scientific runtime. This is a
+# temporary source-build lane for validating OpenMS changes before a release
+# wheel containing them exists. build_docker.sh resolves a branch/tag to one
+# immutable commit SHA before invoking Docker.
+FROM ${OPENMS_MANYLINUX_IMAGE} AS pyopenms-builder
+ARG OPENMS_GIT_URL
+ARG OPENMS_GIT_REF
+ARG OPENMS_GIT_REQUESTED_REF
+ARG OPENMS_BUILD_JOBS
+ENV CMAKE_BUILD_PARALLEL_LEVEL=${OPENMS_BUILD_JOBS} \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1
+
+RUN dnf install -y --disablerepo='epel*' git && dnf clean all
+WORKDIR /src
+RUN set -eux; \
+    git init OpenMS; \
+    cd OpenMS; \
+    git remote add origin "${OPENMS_GIT_URL}"; \
+    # Fetch the immutable SHA already resolved by build_docker.sh. The requested ref
+    # is retained only as provenance; fetching a moving branch here creates a race.
+    git fetch --depth=1 origin "${OPENMS_GIT_REF}"; \
+    git checkout --detach FETCH_HEAD; \
+    resolved_sha="$(git rev-parse HEAD)"; \
+    test "$resolved_sha" = "${OPENMS_GIT_REF}"; \
+    git submodule update --init --depth=1 vcpkg; \
+    printf '%s\n' \
+      "openms_git_url=${OPENMS_GIT_URL}" \
+      "openms_requested_ref=${OPENMS_GIT_REQUESTED_REF}" \
+      "openms_resolved_sha=${resolved_sha}" \
+      > /tmp/openms-build-info.txt
+
+# Reuse OpenMS's own manylinux build recipe. It installs the C++ libraries into
+# /src/OpenMS/install with the same vcpkg/static-dependency policy used by the
+# upstream pyOpenMS wheel workflow.
+RUN cd /src/OpenMS && bash tools/ci/build_openms_manylinux.sh /src/OpenMS
+
+ENV OpenMS_ROOT=/src/OpenMS/install \
+    CMAKE_PREFIX_PATH=/src/OpenMS/vcpkg_installed/x64-linux:/src/OpenMS/install \
+    LD_LIBRARY_PATH=/src/OpenMS/install/lib
+
+# Build the abi3 pyOpenMS wheel against that exact OpenMS install, then repair
+# it so the prideQC runtime does not need the OpenMS build tree.
+RUN set -eux; \
+    py=/opt/python/cp312-cp312/bin/python; \
+    "$py" -m pip install --no-cache-dir build auditwheel; \
+    mkdir -p /tmp/unrepaired /out/wheels; \
+    "$py" -m pip wheel \
+      --no-deps \
+      --wheel-dir /tmp/unrepaired \
+      --config-settings=cmake.options.OpenMS_ROOT=/src/OpenMS/install \
+      --config-settings=cmake.options.NO_DEPENDENCIES=ON \
+      --config-settings=cmake.options.PYOPENMS_PREPARE_WHEEL_REPAIR=ON \
+      --config-settings=cmake.options.ARROW_USE_STATIC=ON \
+      /src/OpenMS/src/pyOpenMS; \
+    auditwheel repair -w /out/wheels /tmp/unrepaired/pyopenms-*.whl; \
+    repaired="$(find /out/wheels -maxdepth 1 -type f -name 'pyopenms-*.whl' -print -quit)"; \
+    test -n "$repaired"; \
+    wheel_sha="$(sha256sum "$repaired" | awk '{print $1}')"; \
+    { \
+      cat /tmp/openms-build-info.txt; \
+      echo "pyopenms_wheel=$(basename "$repaired")"; \
+      echo "pyopenms_wheel_sha256=${wheel_sha}"; \
+    } > /out/openms-build-info.txt
 
 # prideQC is currently Python-only. This stage is intentionally future-proof:
 # if Cargo.toml is added later, release binaries are built with the committed
@@ -34,6 +105,7 @@ RUN set -eux; \
     cargo --version > /out/cargo-version.txt
 
 FROM ${PYTHON_IMAGE} AS python-builder
+ARG NANOBIND_BACKEND_VERSION
 ENV UV_PYTHON_DOWNLOADS=0 \
     UV_PROJECT_ENVIRONMENT=/opt/prideqc/.venv \
     UV_LINK_MODE=copy \
@@ -44,52 +116,24 @@ WORKDIR /src/prideqc
 
 # Cache the locked transitive environment separately from project source.
 COPY pyproject.toml uv.lock ./
-COPY containers/pyopenms.requirements.txt /tmp/pyopenms.requirements.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project --no-install-package pyopenms --no-editable
 
-# Freeze the validated pyOpenMS vendor-reader wheel before project source is
-# copied. The requirement points at a PRIDE-controlled GitHub Release mirror
-# and keeps the original wheel SHA-256. Downloading it into the image here
-# means ordinary prideQC source edits do not re-fetch the large wheel.
-RUN python - <<'PY'
-from hashlib import sha256
-from pathlib import Path
-from urllib.parse import urlparse
-from urllib.request import urlopen
-import re
-
-requirement = Path("/tmp/pyopenms.requirements.txt").read_text(encoding="utf-8").strip()
-match = re.fullmatch(r"pyopenms @ (https://[^#]+)#sha256=([0-9a-f]{64})", requirement)
-if match is None:
-    raise SystemExit("invalid pinned pyOpenMS requirement")
-url, expected = match.groups()
-filename = Path(urlparse(url).path).name
-if not filename.endswith(".whl"):
-    raise SystemExit(f"pyOpenMS URL is not a wheel: {url}")
-out_dir = Path("/opt/prideqc/wheels")
-out_dir.mkdir(parents=True, exist_ok=True)
-out_path = out_dir / filename
-hasher = sha256()
-with urlopen(url) as response, out_path.open("wb") as handle:
-    while chunk := response.read(1024 * 1024):
-        hasher.update(chunk)
-        handle.write(chunk)
-actual = hasher.hexdigest()
-if actual != expected:
-    out_path.unlink(missing_ok=True)
-    raise SystemExit(f"pyOpenMS wheel SHA-256 mismatch: expected {expected}, got {actual}")
-print(f"Pinned pyOpenMS wheel: {out_path} sha256={actual}")
-PY
+COPY --from=pyopenms-builder /out/wheels/ /opt/prideqc/wheels/
+COPY --from=pyopenms-builder /out/openms-build-info.txt /opt/prideqc/openms-build-info.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /opt/prideqc/.venv/bin/python --no-deps "nanobind-backend==${NANOBIND_BACKEND_VERSION}" && \
     uv pip install --python /opt/prideqc/.venv/bin/python --no-deps /opt/prideqc/wheels/*.whl && \
     /opt/prideqc/.venv/bin/python -c \
-      "import importlib.metadata as m, pyopenms as oms; v=m.version('pyopenms'); print('pyOpenMS', v); assert v == '3.6.0.dev20260910'; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"
+      "import pyopenms as oms; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile'); assert hasattr(oms, 'IDFreeMassErrorEstimator'); assert oms.BrukerTimsFile.Config.CentroidAlgo.HILL_BASED is not None"
 
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-package pyopenms --no-editable && \
-    uv pip install --python /opt/prideqc/.venv/bin/python --no-deps /opt/prideqc/wheels/*.whl && \
+    uv pip install --python /opt/prideqc/.venv/bin/python --no-deps \
+      "nanobind-backend==${NANOBIND_BACKEND_VERSION}" /opt/prideqc/wheels/*.whl && \
+    /opt/prideqc/.venv/bin/python -c \
+      "import nanobind_backend, pyopenms as oms; assert hasattr(oms, 'IDFreeMassErrorEstimator')" && \
     /opt/prideqc/.venv/bin/prideqc --version
 
 # Keep reporting isolated from the scientific runtime. The current pmultiqc
@@ -130,9 +174,10 @@ RUN set -eux; \
 FROM python-builder AS quality
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --group dev --no-install-package pyopenms --no-editable && \
-    uv pip install --python /opt/prideqc/.venv/bin/python --no-deps /opt/prideqc/wheels/*.whl && \
+    uv pip install --python /opt/prideqc/.venv/bin/python --no-deps \
+      "nanobind-backend==${NANOBIND_BACKEND_VERSION}" /opt/prideqc/wheels/*.whl && \
     /opt/prideqc/.venv/bin/python -c \
-      "import pyopenms as oms; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')" && \
+      "import nanobind_backend, pyopenms as oms; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile'); assert hasattr(oms, 'IDFreeMassErrorEstimator'); assert oms.BrukerTimsFile.Config.CentroidAlgo.HILL_BASED is not None" && \
     /opt/prideqc/.venv/bin/python -m compileall -q src tests && \
     PRIDE_QC_REQUIRE_INTEGRATION=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /opt/prideqc/.venv/bin/python -m unittest discover -s tests -v && \
     /opt/prideqc/.venv/bin/ruff check . && \
@@ -146,7 +191,10 @@ ARG SOURCE_FINGERPRINT=unknown
 ARG PYTHON_LOCK_HASH=unknown
 ARG CARGO_LOCK_HASH=not-present
 ARG BUILD_ID=unknown
-ARG PYOPENMS_PIN_HASH=unknown
+ARG OPENMS_GIT_URL=https://github.com/OpenMS/OpenMS.git
+ARG OPENMS_GIT_REF=unknown
+ARG OPENMS_GIT_REQUESTED_REF=unknown
+ARG NANOBIND_BACKEND_VERSION=1.0.0
 ARG PYTHON_IMAGE=python:3.12.14-slim-bookworm
 ARG RUST_IMAGE=rust:1.98.1-slim-bookworm
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.11
@@ -163,7 +211,7 @@ RUN apt-get update && \
     chmod 1777 /data /results /cache /work
 
 COPY --from=python-builder /opt/prideqc/.venv /opt/prideqc/.venv
-COPY --from=python-builder /tmp/pyopenms.requirements.txt /opt/prideqc/pyopenms.requirements.txt
+COPY --from=python-builder /opt/prideqc/openms-build-info.txt /opt/prideqc/openms-build-info.txt
 COPY --from=reporting-builder /opt/pmultiqc/.venv /opt/pmultiqc/.venv
 COPY --from=reporting-builder /out/pmultiqc-build-info.txt /opt/prideqc/pmultiqc-build-info.txt
 COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
@@ -201,8 +249,11 @@ RUN set -eux; \
       echo "python_package_lock=uv.lock"; \
       echo "python_package_lock_sha256=${PYTHON_LOCK_HASH}"; \
       echo "pyopenms_version=${PYOPENMS_VERSION}"; \
-      echo "pyopenms_pin_file_sha256=${PYOPENMS_PIN_HASH}"; \
-      printf 'pyopenms_requirement='; cat /opt/prideqc/pyopenms.requirements.txt; \
+      echo "openms_git_url=${OPENMS_GIT_URL}"; \
+      echo "openms_requested_ref=${OPENMS_GIT_REQUESTED_REF}"; \
+      echo "openms_build_ref=${OPENMS_GIT_REF}"; \
+      echo "nanobind_backend_version=${NANOBIND_BACKEND_VERSION}"; \
+      cat /opt/prideqc/openms-build-info.txt; \
       echo "cargo_lock_sha256=${CARGO_LOCK_HASH}"; \
       printf 'rustc_version='; cat /tmp/rustc-version.txt; \
       printf 'cargo_version='; cat /tmp/cargo-version.txt; \
@@ -219,7 +270,7 @@ RUN set -eux; \
     rm -f /tmp/rustc-version.txt /tmp/cargo-version.txt; \
     dotnet --info >/dev/null; \
     prideqc --version; \
-    python -c "import pyopenms as oms; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"; \
+    python -c "import pyopenms as oms; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile'); assert hasattr(oms, 'IDFreeMassErrorEstimator'); assert oms.BrukerTimsFile.Config.CentroidAlgo.HILL_BASED is not None"; \
     /opt/pmultiqc/.venv/bin/multiqc --version; \
     /opt/pmultiqc/.venv/bin/python -c "from pmultiqc.modules.mzqc import MzQCModule, parse_mzqc_document; print('pmultiqc mzQC module: OK')"; \
     mkdir -p /tmp/mzqc-smoke /tmp/multiqc-smoke; \

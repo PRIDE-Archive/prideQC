@@ -199,7 +199,9 @@ def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
         collectors: list[EvidenceCollector] = []
         if options.diagnostics:
             collectors.append(DiagnosticIonCollector())
-        mass_error_collector = None
+        mass_error_collector: (
+            NativeOpenMSMassErrorCollector | RepeatSpectrumMassErrorCollector | None
+        ) = None
         if options.estimate_mass_error:
             mass_error_collector = NativeOpenMSMassErrorCollector.create_if_available()
             if mass_error_collector is None:
