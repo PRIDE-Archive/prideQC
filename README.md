@@ -72,10 +72,13 @@ See the documentation for the complete QC, reporting, and SDRF-refinement workfl
 ```bash
 uv venv .venv-docs --python 3.12
 uv pip install --python .venv-docs/bin/python -r docs/requirements.txt
-uv pip install --python .venv-docs/bin/python "matplotlib>=3.9,<4"
-.venv-docs/bin/python docs/_static/generate_figures.py
 .venv-docs/bin/sphinx-build -W --keep-going -b html docs docs/_build/html
 ```
+
+The six scientific SVG figures are checked into `docs/_static/figures/`; a
+normal Sphinx / Read the Docs build does **not** need pyOpenMS, matplotlib, or
+to regenerate the figures. For intentional figure regeneration, see the
+maintainer-only `docs/figure_source/README.md`.
 
 ## License
 

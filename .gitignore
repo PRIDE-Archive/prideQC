@@ -226,3 +226,6 @@ src/prideqc/_version.py
 
 # Local documentation environment
 .venv-docs/
+
+# Developer-only scientific figure generation
+.venv-figures/

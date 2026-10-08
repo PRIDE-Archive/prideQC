@@ -1,0 +1,58 @@
+/* Widen the science pages so the dense, editable SVG plots remain legible. */
+:root {
+  --content-width: 68rem;
+}
+
+.hero-title {
+  font-size: 2.3rem;
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+}
+
+.hero-subtitle {
+  font-size: 1.15rem;
+  line-height: 1.6;
+  color: var(--color-content-secondary);
+  margin-bottom: 1rem;
+}
+
+/* Scientific illustrations are full-width SVGs, not boxed UI cards. */
+figure.doc-figure {
+  margin: 1.5rem 0 2.2rem;
+  max-width: 100%;
+}
+
+figure.doc-figure img,
+figure.doc-figure object {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border: 0;
+}
+
+figure.doc-figure figcaption {
+  max-width: 80ch;
+  color: var(--color-content-secondary);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  margin: 0.55rem auto 0;
+  text-align: left;
+}
+
+.sd-card {
+  border-radius: 14px;
+}
+
+.sd-card .sd-card-title {
+  font-weight: 700;
+}
+
+.caption-emphasis {
+  color: var(--color-content-secondary);
+  font-size: 0.95rem;
+}
+
+.note-grid .sd-card {
+  height: 100%;
+}

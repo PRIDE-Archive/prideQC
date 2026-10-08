@@ -1,0 +1,6 @@
+# Developer-only tools for regenerating the source-grounded SVG figures.
+# NOT installed by Read the Docs.
+numpy>=1.26,<3
+pillow>=10,<13
+pyopenms>=3.5,<4
+cairosvg>=2.7,<3
