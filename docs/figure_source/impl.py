@@ -6,6 +6,7 @@ installed by Read the Docs when building the published SVG files.
 
 PRIDEQC_SRC can override the checkout source directory if required.
 """
+
 from __future__ import annotations
 
 import os
@@ -22,5 +23,5 @@ if not (SRC / "prideqc" / "__init__.py").is_file():
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from prideqc import models, metrics, mass_error, mass_shift  # noqa: E402,F401
-from prideqc.models import Spectrum, Precursor  # noqa: E402,F401
+from prideqc import mass_error, mass_shift, metrics, models  # noqa: E402,F401
+from prideqc.models import Precursor, Spectrum  # noqa: E402,F401

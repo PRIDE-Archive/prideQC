@@ -10,6 +10,7 @@ Examples (from the repository root):
     python docs/figure_source/build_all.py --preview-dir docs/_build/figure-previews
     python docs/figure_source/build_all.py --figures 1 2 3
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,12 +41,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_SVG_DIR)
     parser.add_argument("--preview-dir", type=Path, default=None)
-    parser.add_argument("--figures", type=int, nargs="+", choices=FIGURES.keys(), default=list(FIGURES))
+    parser.add_argument(
+        "--figures", type=int, nargs="+", choices=FIGURES.keys(), default=list(FIGURES)
+    )
     args = parser.parse_args(argv)
 
     preview = None
     if args.preview_dir is not None:
         from render import render  # CairoSVG only needed for preview generation
+
         preview = render
         args.preview_dir.mkdir(parents=True, exist_ok=True)
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -69,7 +73,9 @@ def main(argv: list[str] | None = None) -> int:
         fig.save(svg_path)
         if preview is not None:
             preview(svg_path, args.preview_dir / f"{name}.png", scale=1.5)
-        print(f"{name}: {fig.w:g}×{fig.h:g}, {len(fig.texts)} text items, {len(problems)} layout warnings")
+        print(
+            f"{name}: {fig.w:g}×{fig.h:g}, {len(fig.texts)} text items, {len(problems)} layout warnings"
+        )
     if bad:
         print(f"Layout lint: {bad} issues; review the SVGs before committing.", file=sys.stderr)
         return 1
