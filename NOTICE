@@ -1,0 +1,34 @@
+prideQC
+
+This integrated implementation was developed from rawQC and
+TechSDRF source archives. It is substantially reorganized: shared streaming
+reader, compact scan summaries, standard-library serialization and SDRF editing,
+explicit evidence kinds, optional external converters and uv packaging.
+
+rawQC: https://github.com/bigbio/rawQC
+Copyright (c) 2025 BigBio. MIT License retained in licenses/rawQC-MIT.txt.
+The numerical metric contracts and selected formulas informed metrics.py;
+edge-case fixtures and expected behaviors informed the regression tests.
+
+TechSDRF: https://github.com/bigbio/techsdrf
+PRIDE Team. Apache License 2.0, retained in LICENSE.
+The technical annotation scope, isolation-window heuristics, diagnostic target
+families and external converter command patterns informed the implementation.
+No RunAssessor or Param-Medic source code is vendored.
+
+HUPO-PSI mzQC: https://github.com/HUPO-PSI/mzQC
+The unmodified mzQC 1.0 JSON schema in tests/data/mzqc_schema.json is retained
+from the rawQC archive. Licensed CC BY 4.0:
+https://creativecommons.org/licenses/by/4.0/
+Schema attribution and provenance are documented in docs/validation.md.
+
+PSI-MS controlled vocabulary: https://github.com/HUPO-PSI/psi-ms-CV
+HUPO Proteomics Standards Initiative Mass Spectrometry Standards Working Group
+and Proteomics Informatics Working Group. CC BY 4.0.
+Selected standard term identifiers and names are used for interoperability.
+
+Maintained integrations added in 0.2:
+sdrf-pipelines: https://github.com/bigbio/sdrf-pipelines
+pridepy: https://github.com/PRIDE-Archive/pridepy
+These packages are dependencies, not vendored sources. Their public APIs own
+SDRF conformance and PRIDE file acquisition respectively.
