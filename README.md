@@ -1,5 +1,17 @@
 # prideQC
 
+<!-- prideQC project badges -->
+[![Python CI](https://github.com/PRIDE-Archive/prideQC/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PRIDE-Archive/prideQC/actions/workflows/ci.yml)
+[![Docker](https://github.com/PRIDE-Archive/prideQC/actions/workflows/container-docker.yml/badge.svg?branch=main)](https://github.com/PRIDE-Archive/prideQC/actions/workflows/container-docker.yml)
+[![Apptainer SIF](https://github.com/PRIDE-Archive/prideQC/actions/workflows/container-sif.yml/badge.svg?branch=main)](https://github.com/PRIDE-Archive/prideQC/actions/workflows/container-sif.yml)
+[![Documentation](https://img.shields.io/badge/docs-Read%20the%20Docs-8CA1AF?logo=readthedocs&logoColor=white)](https://prideqc.readthedocs.io/en/latest/)
+[![Python 3.11–3.13](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![License: Apache-2.0 AND MIT](https://img.shields.io/badge/license-Apache--2.0%20AND%20MIT-2C7A7B)](LICENSE)
+
+<!-- After the first PyPI publication, optionally add a dynamic release badge:
+[![PyPI version](https://img.shields.io/pypi/v/prideQC?logo=pypi&logoColor=white)](https://pypi.org/project/prideQC/)
+-->
+
 **prideQC** computes quality-control metrics from raw mass-spectrometry data and uses that measured evidence to refine technical SDRF metadata.
 
 It is designed around a simple separation of responsibilities:
