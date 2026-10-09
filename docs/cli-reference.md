@@ -42,6 +42,11 @@ Build accession/study-level refinement outputs from previously generated `*.summ
 - `--ptm-study-evidence PATH`
 - `--project-accession PXD...`
 
+This command also writes `sdrf-qc-proposals.tsv` and `.json` with proposed
+PSI-MS QC measurements. The proposed columns are not added to the refined SDRF
+until upstream template/term acceptance. The same sidecars are produced by
+`prideqc analyze --refine-sdrf-qc` with an original SDRF.
+
 ## `prideqc check-sdrf`
 
 Validate an SDRF via `sdrf-pipelines`.

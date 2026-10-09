@@ -34,6 +34,7 @@ from prideqc.mass_shift import MassShiftCollector
 from prideqc.metrics import QCMetricCalculator, RunSummary
 from prideqc.models import AnalysisResult, EvidenceCollector, FloatArray, Spectrum, SpectrumReader
 from prideqc.mzqc import MzQCWriter
+from prideqc.qc_sdrf import write_qc_sdrf_proposals
 from prideqc.refinement_adjudication import (
     build_llm_adjudication_request,
     validate_llm_adjudication_request,
@@ -336,16 +337,20 @@ class Workflow:
         output = Path(output_directory).resolve()
         download = Path(download_directory).resolve()
         if output.is_relative_to(download) or download.is_relative_to(output):
-            raise ValueError("QC and download directories must be separate, non-nested directories.")
+            raise ValueError(
+                "QC and download directories must be separate, non-nested directories."
+            )
         if output.exists() and not output.is_dir():
             raise FileExistsError(f"Output path is not a directory: {output}")
         if output.exists() and any(output.iterdir()) and not self.options.overwrite:
             raise FileExistsError(f"Output directory is not empty: {output}")
         document = SDRFDocument.read(sdrf) if sdrf else None
         if filenames is None:
-            filenames = [
-                (aliases or {}).get(name, name) for name in document.data_files()
-            ] if document else []
+            filenames = (
+                [(aliases or {}).get(name, name) for name in document.data_files()]
+                if document
+                else []
+            )
         names = selected_files(filenames)
         if self.options.converter is None:
             vendor_names = [
@@ -460,9 +465,7 @@ class Workflow:
             # than waiting behind a slow first file in executor.map().
             stream = (
                 future.result()
-                for future in as_completed(
-                    [executor.submit(_analyze_file, task) for task in tasks]
-                )
+                for future in as_completed([executor.submit(_analyze_file, task) for task in tasks])
             )
         else:
             stream = map(_analyze_file, tasks)
@@ -533,9 +536,7 @@ class Workflow:
             ],
             "unprocessed": [str(p) for p in inputs if p not in processed],
             "errors": [],
-            "sdrf_validation": {"input": input_validation.to_dict()}
-            if input_validation
-            else None,
+            "sdrf_validation": {"input": input_validation.to_dict()} if input_validation else None,
             "cohort_refinement": {"enabled": self.options.refine_sdrf_qc},
         }
         try:
@@ -606,6 +607,10 @@ class Workflow:
                     MzQCWriter().write(outcome.result, Path(f"{prefix}.mzQC"))
                     write_json(Path(f"{prefix}.summary.json"), outcome.result.to_dict())
             self._write_tables(results, output)
+            if document and self.options.refine_sdrf_qc:
+                write_qc_sdrf_proposals(output, results, document, aliases)
+                manifest["cohort_refinement"]["run_qc_proposals"] = "sdrf-qc-proposals.tsv"
+                manifest["cohort_refinement"]["run_qc_proposals_json"] = "sdrf-qc-proposals.json"
             if document:
                 changes = document.annotate(
                     results,
@@ -616,9 +621,7 @@ class Workflow:
                         COHORT_SDRF_FIELDS if self.options.refine_sdrf_qc else frozenset()
                     ),
                     overwrite_fields=(
-                        COHORT_OVERWRITE_FIELDS
-                        if self.options.refine_sdrf_qc
-                        else frozenset()
+                        COHORT_OVERWRITE_FIELDS if self.options.refine_sdrf_qc else frozenset()
                     ),
                     append_columns=(
                         frozenset(
@@ -638,13 +641,9 @@ class Workflow:
                     cohort_synthesis.to_dict() if cohort_synthesis is not None else None,
                 )
                 try:
-                    refined_validation = self.validator.validate(
-                        output / "refined.sdrf.tsv"
-                    )
+                    refined_validation = self.validator.validate(output / "refined.sdrf.tsv")
                 except Exception as exc:
-                    manifest["sdrf_validation"]["refined_error"] = (
-                        f"{type(exc).__name__}: {exc}"
-                    )
+                    manifest["sdrf_validation"]["refined_error"] = f"{type(exc).__name__}: {exc}"
                     write_json(
                         output / "sdrf-validation.json",
                         manifest["sdrf_validation"],
@@ -667,9 +666,7 @@ class Workflow:
         except Exception as exc:
             manifest["errors"].append(f"{type(exc).__name__}: {exc}")
         manifest["success"] = not (
-            any(o.error for o in outcomes)
-            or manifest["unprocessed"]
-            or manifest["errors"]
+            any(o.error for o in outcomes) or manifest["unprocessed"] or manifest["errors"]
         )
         write_json(output / "manifest.json", manifest)
         return manifest
@@ -770,6 +767,7 @@ class Workflow:
         else:
             cohort_results = results
 
+        write_qc_sdrf_proposals(output, cohort_results, document, aliases)
         semantic_evidence = self._ptm_semantic_evidence()
         synthesis = synthesize_cohort(
             cohort_results,
@@ -843,6 +841,8 @@ class Workflow:
             "sdrf_writeback_supported": resolved_sdrf is not None,
             "sdrf_annotation_tool": annotation_tool,
             "cohort_refinement": "cohort-refinement.json",
+            "run_qc_proposals": "sdrf-qc-proposals.tsv",
+            "run_qc_proposals_json": "sdrf-qc-proposals.json",
             "llm_refinement_packet": "llm-refinement-packet.json",
             "llm_adjudication_request": "llm-adjudication-request.json",
             "sdrf_changes": "sdrf-changes.tsv" if resolved_sdrf is not None else None,
@@ -882,16 +882,12 @@ class Workflow:
             "total",
         ]
         with atomic_text(output / "sdrf-changes.tsv") as handle:
-            writer = csv.DictWriter(
-                handle, fieldnames=fields, delimiter="\t", lineterminator="\n"
-            )
+            writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", lineterminator="\n")
             writer.writeheader()
             writer.writerows(asdict(change) for change in changes)
 
         applied = [
-            change
-            for change in changes
-            if change.status in {"filled", "replaced", "appended"}
+            change for change in changes if change.status in {"filled", "replaced", "appended"}
         ]
         review = [
             change
@@ -1046,57 +1042,59 @@ class Workflow:
                     ),
                     None,
                 )
-                clusters = annotation.value if annotation and isinstance(annotation.value, list) else []
+                clusters = (
+                    annotation.value if annotation and isinstance(annotation.value, list) else []
+                )
                 for cluster_rank, cluster in enumerate(clusters, start=1):
                     artifact = cluster.get("artifact_candidate") or {}
                     candidates = cluster.get("unimod_candidates") or [None]
                     for candidate_rank, candidate in enumerate(candidates, start=1):
                         candidate = candidate or {}
-                        writer.writerow({
-                            "data_file": result.input_path.name,
-                            "cluster_rank": cluster_rank,
-                            "delta_mass_da": cluster.get("delta_mass_da"),
-                            "cluster_sigma_da": cluster.get("cluster_sigma_da"),
-                            "cluster_min_da": cluster.get("cluster_min_da"),
-                            "cluster_max_da": cluster.get("cluster_max_da"),
-                            "pair_support": cluster.get("pair_support"),
-                            "unique_spectrum_support": cluster.get("unique_spectrum_support"),
-                            "median_spectral_similarity": cluster.get(
-                                "median_spectral_similarity"
-                            ),
-                            "classification": cluster.get("classification"),
-                            "confidence": cluster.get("confidence"),
-                            "match_tolerance_da": cluster.get("match_tolerance_da"),
-                            "support_fraction_of_accepted_pairs": cluster.get(
-                                "support_fraction_of_accepted_pairs"
-                            ),
-                            "diagnostic_unimod_candidate_count": cluster.get(
-                                "diagnostic_unimod_candidate_count"
-                            ),
-                            "diagnostic_suppressed_unimod_candidates": cluster.get(
-                                "diagnostic_suppressed_unimod_candidates"
-                            ),
-                            "artifact_name": artifact.get("name"),
-                            "artifact_theoretical_delta_mass_da": artifact.get(
-                                "theoretical_delta_mass_da"
-                            ),
-                            "artifact_residual_da": artifact.get("residual_da"),
-                            "candidate_rank": candidate_rank if candidate else "",
-                            "unimod_accession": candidate.get("unimod_accession"),
-                            "unimod_name": candidate.get("name"),
-                            "unimod_theoretical_delta_mass_da": candidate.get(
-                                "theoretical_delta_mass_da"
-                            ),
-                            "unimod_residual_da": candidate.get("residual_da"),
-                            "unimod_origins": ";".join(candidate.get("origins") or []),
-                            "unimod_term_specificities": ";".join(
-                                candidate.get("term_specificities") or []
-                            ),
-                            "unimod_source_classification": candidate.get(
-                                "source_classification"
-                            ),
-                            "unimod_candidate_category": candidate.get(
-                                "candidate_category"
-                            ),
-                            "orientation": cluster.get("orientation"),
-                        })
+                        writer.writerow(
+                            {
+                                "data_file": result.input_path.name,
+                                "cluster_rank": cluster_rank,
+                                "delta_mass_da": cluster.get("delta_mass_da"),
+                                "cluster_sigma_da": cluster.get("cluster_sigma_da"),
+                                "cluster_min_da": cluster.get("cluster_min_da"),
+                                "cluster_max_da": cluster.get("cluster_max_da"),
+                                "pair_support": cluster.get("pair_support"),
+                                "unique_spectrum_support": cluster.get("unique_spectrum_support"),
+                                "median_spectral_similarity": cluster.get(
+                                    "median_spectral_similarity"
+                                ),
+                                "classification": cluster.get("classification"),
+                                "confidence": cluster.get("confidence"),
+                                "match_tolerance_da": cluster.get("match_tolerance_da"),
+                                "support_fraction_of_accepted_pairs": cluster.get(
+                                    "support_fraction_of_accepted_pairs"
+                                ),
+                                "diagnostic_unimod_candidate_count": cluster.get(
+                                    "diagnostic_unimod_candidate_count"
+                                ),
+                                "diagnostic_suppressed_unimod_candidates": cluster.get(
+                                    "diagnostic_suppressed_unimod_candidates"
+                                ),
+                                "artifact_name": artifact.get("name"),
+                                "artifact_theoretical_delta_mass_da": artifact.get(
+                                    "theoretical_delta_mass_da"
+                                ),
+                                "artifact_residual_da": artifact.get("residual_da"),
+                                "candidate_rank": candidate_rank if candidate else "",
+                                "unimod_accession": candidate.get("unimod_accession"),
+                                "unimod_name": candidate.get("name"),
+                                "unimod_theoretical_delta_mass_da": candidate.get(
+                                    "theoretical_delta_mass_da"
+                                ),
+                                "unimod_residual_da": candidate.get("residual_da"),
+                                "unimod_origins": ";".join(candidate.get("origins") or []),
+                                "unimod_term_specificities": ";".join(
+                                    candidate.get("term_specificities") or []
+                                ),
+                                "unimod_source_classification": candidate.get(
+                                    "source_classification"
+                                ),
+                                "unimod_candidate_category": candidate.get("candidate_category"),
+                                "orientation": cluster.get("orientation"),
+                            }
+                        )

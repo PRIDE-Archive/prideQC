@@ -47,6 +47,62 @@ prideQC therefore distinguishes between:
 - existing metadata that should be preserved;
 - ambiguous or incomplete cases that should remain unchanged or go to review.
 
+## Measured run-level QC proposals (standards-pending)
+
+The three measurements below are computed directly from each raw data file. They
+are **observed QC measurements**, not experimental search parameters and not
+cohort-level tolerance recommendations.
+
+| prideQC metric | PSI-MS term | Unit | Proposed, **not yet approved**, SDRF header |
+|---|---|---|---|
+| `NumberOfSpectra_MS1` | `MS:4000059` | count (`UO:0000189`) | `comment[number of MS1 spectra]` |
+| `NumberOfSpectra_MS2` | `MS:4000060` | count (`UO:0000189`) | `comment[number of MS2 spectra]` |
+| `ChromatographyDuration` | `MS:4000053` | seconds (`UO:0000010`) | `comment[chromatography duration]` |
+
+The counts include empty spectra; zero is a valid count. Duration is the
+maximum minus minimum **finite observed spectrum retention time**, over all
+measured MS levels. A one-RT scan can have zero duration, while a file without
+any finite spectrum RT has **no duration measurement**. Duration is not
+necessarily the programmed LC gradient time. Do not substitute the SDRF
+method-setting fields `comment[ms min rt]` or `comment[ms max rt]`.
+
+The proposed headers are absent from the current SDRF-Proteomics `TERMS.tsv`
+registry and the `ms-proteomics` v1.1.0 template. Accordingly, prideQC does
+**not** write them into the refined SDRF. During the existing `--refine-sdrf-qc`
+workflow, prideQC instead produces `sdrf-qc-proposals.tsv` and
+`sdrf-qc-proposals.json` as **read-only, per-row proposals**.
+
+For example, a matching `sample.raw` with 0 MS1 scans, 48 MS2 scans, and
+120 seconds of observed RT evidence yields proposal records such as:
+
+```text
+metric_key               proposed_column                    value   unit
+NumberOfSpectra_MS1      comment[number of MS1 spectra]      0       count
+NumberOfSpectra_MS2      comment[number of MS2 spectra]      48      count
+ChromatographyDuration   comment[chromatography duration]    120 s   second
+```
+
+These are illustrative values, not an SDRF output header/value grammar approved
+by the standard. The actual TSV contains additional linkage, ontology, status,
+existing-value, and method/provenance columns. Each matching SDRF row gets its
+own proposal even when multiple rows represent the same data file. Counts and
+RT spans are never averaged across files. Unmatched files and missing/invalid
+measurements remain explicitly unresolved rather than being replaced with zero.
+
+Existing values are never overwritten by the proposal exporter. Proposed
+headers already present in the input are inspected for matches, conflicts,
+missing cells, or duplicate columns, but the original is unchanged. The
+standard refined SDRF continues through the existing `sdrf-pipelines`
+validation step; neither ontology nor schema checks are relaxed. Once the
+SDRF term registry and value grammar are accepted upstream, a separate
+reviewed change can enable guarded opt-in write-back via the existing
+`SDRFDocument.annotate()` mechanism.
+
+Putative PTM candidates are a separate scientific-evidence lane: an
+unregistered miscellaneous-parameter representation needs upstream review,
+but it must not be silently reinterpreted as a confirmed
+`comment[modification parameters]` assertion.
+
 ## Audit and validation artifacts
 
 An SDRF refinement directory can contain:
@@ -58,6 +114,8 @@ refinement/
 ├── sdrf-changes.tsv
 ├── sdrf-validation.json
 ├── cohort-refinement.json
+├── sdrf-qc-proposals.tsv
+├── sdrf-qc-proposals.json
 ├── llm-refinement-packet.json
 ├── llm-adjudication-request.json
 └── manifest.json

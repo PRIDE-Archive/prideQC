@@ -69,12 +69,17 @@ results/
 ├── sdrf-validation.json
 ├── sdrf-changes.tsv
 ├── cohort-refinement.json
+├── sdrf-qc-proposals.tsv
+├── sdrf-qc-proposals.json
 ├── llm-refinement-packet.json
 ├── llm-adjudication-request.json
 └── manifest.json
 ```
 
-The exact set depends on the enabled analysis/refinement options.
+The exact set depends on the enabled analysis/refinement options. The
+`sdrf-qc-proposals.tsv` and `sdrf-qc-proposals.json` sidecars list measured
+run-level QC values for standards review and **do not add columns** to
+`refined.sdrf.tsv`. See [SDRF refinement](sdrf-refinement.md).
 
 ## Refine an SDRF from existing QC results
 
