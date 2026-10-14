@@ -15,7 +15,8 @@ from prideqc import __version__
 def _validation_arguments(command: argparse.ArgumentParser) -> None:
     command.add_argument("--sdrf-template", default="ms-proteomics", help="sdrf-pipelines template")
     command.add_argument(
-        "--validate-ontology", action="store_true",
+        "--validate-ontology",
+        action="store_true",
         help="Also validate ontology terms (requires uv sync --extra ontology)",
     )
 
@@ -44,7 +45,8 @@ def _download_arguments(command: argparse.ArgumentParser) -> None:
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
-        prog="prideqc", description="Per-file mass spectrometry QC and technical SDRF evidence",
+        prog="prideqc",
+        description="Per-file mass spectrometry QC and technical SDRF evidence",
     )
     result.add_argument("--version", action="version", version=f"prideQC {__version__}")
     commands = result.add_subparsers(dest="command", required=True)
@@ -84,6 +86,11 @@ def parser() -> argparse.ArgumentParser:
         "--diagnostics",
         action="store_true",
         help="Screen centroid MS2/MS3 for candidate reporter/oxonium signatures",
+    )
+    analyze.add_argument(
+        "--tmt-reporter-evidence",
+        action="store_true",
+        help="Collect centroid MS2/MS3 TMT channel evidence without inferring SDRF labels",
     )
     analyze.add_argument(
         "--estimate-mass-error",
@@ -160,7 +167,9 @@ def parser() -> argparse.ArgumentParser:
     )
     analyze.add_argument("--conversion-timeout", type=float, default=3600)
     validate = commands.add_parser(
-        "check-sdrf", aliases=["validate-sdrf"], help="Validate SDRF with sdrf-pipelines templates",
+        "check-sdrf",
+        aliases=["validate-sdrf"],
+        help="Validate SDRF with sdrf-pipelines templates",
     )
     validate.add_argument("file", type=Path)
     validate.add_argument(
@@ -289,10 +298,12 @@ def _download_settings(arguments: argparse.Namespace) -> dict[str, Any]:
         raise ValueError(f"Set the password environment variable {arguments.password_env!r}.")
     return {
         "options": DownloadOptions(
-            protocol=arguments.protocol, checksum_check=not arguments.no_checksum_check,
+            protocol=arguments.protocol,
+            checksum_check=not arguments.no_checksum_check,
             aspera_maximum_bandwidth=arguments.aspera_maximum_bandwidth,
         ),
-        "username": arguments.username, "password": password,
+        "username": arguments.username,
+        "password": password,
     }
 
 
@@ -313,22 +324,31 @@ def _analyze(arguments: argparse.Namespace) -> int:
             raise ValueError("--file-map requires --sdrf.")
     if arguments.converter_executable and not arguments.converter:
         raise ValueError("--converter-executable requires --converter.")
-    workflow = Workflow(WorkflowOptions(
-        workers=arguments.workers, diagnostics=arguments.diagnostics,
-        estimate_mass_error=arguments.estimate_mass_error,
-        estimate_mass_shifts=arguments.estimate_mass_shifts,
-        estimate_peak_type=arguments.estimate_peak_type, converter=arguments.converter,
-        converter_executable=arguments.converter_executable,
-        conversion_timeout=arguments.conversion_timeout, continue_on_error=arguments.continue_on_error,
-        include_inferred=arguments.include_inferred, overwrite_sdrf_values=arguments.overwrite_sdrf_values,
-        refine_sdrf_qc=arguments.refine_sdrf_qc,
-        ptm_study_evidence=(
-            str(arguments.ptm_study_evidence) if arguments.ptm_study_evidence else None
-        ),
-        project_accession=arguments.project_accession or arguments.accession,
-        sdrf_template=arguments.sdrf_template, validate_ontology=arguments.validate_ontology,
-        progress=arguments.progress, overwrite=arguments.overwrite,
-    ))
+    workflow = Workflow(
+        WorkflowOptions(
+            workers=arguments.workers,
+            diagnostics=arguments.diagnostics,
+            tmt_reporter_evidence=arguments.tmt_reporter_evidence,
+            estimate_mass_error=arguments.estimate_mass_error,
+            estimate_mass_shifts=arguments.estimate_mass_shifts,
+            estimate_peak_type=arguments.estimate_peak_type,
+            converter=arguments.converter,
+            converter_executable=arguments.converter_executable,
+            conversion_timeout=arguments.conversion_timeout,
+            continue_on_error=arguments.continue_on_error,
+            include_inferred=arguments.include_inferred,
+            overwrite_sdrf_values=arguments.overwrite_sdrf_values,
+            refine_sdrf_qc=arguments.refine_sdrf_qc,
+            ptm_study_evidence=(
+                str(arguments.ptm_study_evidence) if arguments.ptm_study_evidence else None
+            ),
+            project_accession=arguments.project_accession or arguments.accession,
+            sdrf_template=arguments.sdrf_template,
+            validate_ontology=arguments.validate_ontology,
+            progress=arguments.progress,
+            overwrite=arguments.overwrite,
+        )
+    )
     if arguments.accession:
         if arguments.files or not arguments.download_dir:
             raise ValueError(
@@ -336,16 +356,28 @@ def _analyze(arguments: argparse.Namespace) -> int:
             )
         settings = _download_settings(arguments)
         manifest = workflow.run_project(
-            arguments.accession, arguments.output_dir, download_directory=arguments.download_dir,
-            filenames=arguments.remote_files, sdrf=arguments.sdrf, aliases=aliases,
-            download_options=settings["options"], username=settings["username"], password=settings["password"],
+            arguments.accession,
+            arguments.output_dir,
+            download_directory=arguments.download_dir,
+            filenames=arguments.remote_files,
+            sdrf=arguments.sdrf,
+            aliases=aliases,
+            download_options=settings["options"],
+            username=settings["username"],
+            password=settings["password"],
         )
     else:
         if not arguments.files:
             raise ValueError("Provide local files or --accession with --file/--sdrf.")
-        if (arguments.download_dir or arguments.remote_files or arguments.username
-                or arguments.no_checksum_check or arguments.protocol != "ftp"
-                or arguments.aspera_maximum_bandwidth != "100M" or arguments.password_env != "PRIDE_PASSWORD"):
+        if (
+            arguments.download_dir
+            or arguments.remote_files
+            or arguments.username
+            or arguments.no_checksum_check
+            or arguments.protocol != "ftp"
+            or arguments.aspera_maximum_bandwidth != "100M"
+            or arguments.password_env != "PRIDE_PASSWORD"
+        ):
             raise ValueError("PRIDE download options require --accession.")
         manifest = workflow.run(
             arguments.files,
@@ -368,9 +400,7 @@ def _refine_sdrf_qc(arguments: argparse.Namespace) -> int:
     from prideqc.pipeline import Workflow, WorkflowOptions
 
     if bool(arguments.sdrf) == bool(arguments.no_original_sdrf):
-        raise ValueError(
-            "Provide exactly one of --sdrf or --no-original-sdrf for refine-sdrf-qc."
-        )
+        raise ValueError("Provide exactly one of --sdrf or --no-original-sdrf for refine-sdrf-qc.")
     aliases = None
     if arguments.file_map:
         aliases = json.loads(arguments.file_map.read_text(encoding="utf-8"))
@@ -409,9 +439,7 @@ def _llm(arguments: argparse.Namespace) -> int:
     if arguments.llm_command == "setup":
         from prideqc.local_llm import setup_local_llm
 
-        status = setup_local_llm(
-            arguments.cache_dir, force=arguments.force, show_progress=True
-        )
+        status = setup_local_llm(arguments.cache_dir, force=arguments.force, show_progress=True)
         print(json.dumps(status, indent=2, sort_keys=True))
         return 0
     if arguments.llm_command == "status":
@@ -435,6 +463,7 @@ def _llm(arguments: argparse.Namespace) -> int:
             raise ValueError("LLM timeouts must be positive")
         output = arguments.output or arguments.request.with_name("llm-refinement-decisions.json")
         audit_output = arguments.audit_output or arguments.request.with_name("llm-model-run.json")
+
         def report_progress(index: int, total: int, decision_id: str) -> None:
             print(f"Adjudicating {index}/{total}: {decision_id}")
 
@@ -472,7 +501,8 @@ def main(argv: list[str] | None = None) -> int:
             from prideqc.validation import SDRFPipelinesValidator
 
             report = SDRFPipelinesValidator(
-                arguments.sdrf_template, ontology=arguments.validate_ontology,
+                arguments.sdrf_template,
+                ontology=arguments.validate_ontology,
             ).validate(arguments.file)
             if arguments.report:
                 write_json(arguments.report, report.to_dict())
@@ -493,7 +523,10 @@ def main(argv: list[str] | None = None) -> int:
             if names is None and arguments.sdrf:
                 names = SDRFDocument.read(arguments.sdrf).data_files()
             paths = PrideRepository().download_files(
-                arguments.accession, names or [], arguments.output_dir, **_download_settings(arguments),
+                arguments.accession,
+                names or [],
+                arguments.output_dir,
+                **_download_settings(arguments),
             )
             print(f"Downloaded {len(paths)} files to {arguments.output_dir}.")
             return 0

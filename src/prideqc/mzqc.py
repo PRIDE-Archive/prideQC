@@ -196,14 +196,12 @@ LEVEL_DEFINITIONS = {
     "EmptyScans_MS{n}": "MS{n} scans with no valid positive intensity (zero TIC).",
     "PeakDensity_MS{n}_Quantiles": "25th, 50th, 75th percentiles of valid stored peak counts, including zero, MS{n}.",
     "BasePeak_MS{n}_Mean": (
-        "Mean of per-spectrum maximum valid intensity, excluding scans with no valid peaks, "
-        "MS{n}."
+        "Mean of per-spectrum maximum valid intensity, excluding scans with no valid peaks, MS{n}."
     ),
     "TIC_MS{n}_Median": "Median sum of valid peak intensities per scan, MS{n}.",
     "TIC_MS{n}_CV": "Sample standard deviation (ddof=1) divided by mean TIC, MS{n}.",
     "TIC_MS{n}_Area": (
-        "Trapezoidal TIC integral against RT, stable time order, intensity times seconds, "
-        "MS{n}."
+        "Trapezoidal TIC integral against RT, stable time order, intensity times seconds, MS{n}."
     ),
     "TIC_MS{n}_Area_RTQuantiles": (
         "Four exact integrals of piecewise-linear TIC split at scan-RT quartiles, intensity "
@@ -220,8 +218,7 @@ LEVEL_DEFINITIONS = {
         "in seconds, MS{n}; ID-free proxy."
     ),
     "ObservedMzRange_MS{n}": (
-        "Min/max valid peak m/z; this is an observed range, not the instrument scan window, "
-        "MS{n}."
+        "Min/max valid peak m/z; this is an observed range, not the instrument scan window, MS{n}."
     ),
     "ScanWindow_MS{n}": "Envelope of recorded scan-window bounds in Th (m/z), MS{n}.",
     "PeakTypes_MS{n}": "Counts of centroid, profile and unknown scan representations, MS{n}.",
@@ -325,6 +322,14 @@ ANNOTATION_DESCRIPTIONS = {
             "low-resolution regime."
         ),
     ),
+    "tmt_reporter_evidence": (
+        "TMT reporter-ion channel evidence",
+        (
+            "Identification-free, per-channel centroid MS2/MS3 reporter m/z matches and "
+            "uncorrected signal totals using runtime pyOpenMS quantitation masses. "
+            "Candidate evidence only; no labeling-kit or biological sample-channel assignment."
+        ),
+    ),
     "mass_error_estimator_diagnostics": (
         "mass error estimator diagnostics",
         (
@@ -403,11 +408,16 @@ def definition(metric: Metric) -> MetricDefinition:
         raise ValueError(f"Unregistered QC metric: {metric.key}")
     # Shape is a property of the term, not of a particular observed value.
     # In particular, an unavailable tuple must not become a scalar CV term.
-    if metric.key in {"ChromatogramTypes", "MS2_PrecursorCharge_Fractions"} or metric.key.startswith(
+    if metric.key in {
+        "ChromatogramTypes",
+        "MS2_PrecursorCharge_Fractions",
+    } or metric.key.startswith(
         ("PeakTypes_", "EstimatedPeakTypes_", "Polarity_"),
     ):
         shape = "table"
-    elif metric.key == "FAIMS_CV_Values" or any(part in metric.key for part in ("Range", "Quantiles", "LogRatios", "ScanWindow")):
+    elif metric.key == "FAIMS_CV_Values" or any(
+        part in metric.key for part in ("Range", "Quantiles", "LogRatios", "ScanWindow")
+    ):
         shape = "tuple"
     else:
         shape = "scalar"
@@ -426,8 +436,12 @@ class MzQCWriter:
                 # Missing observations are explicit in summary JSON/TSV. Do not
                 # turn missing values into falsely measured zero-valued metrics.
                 continue
-            item = {"accession": term.accession, "name": term.name,
-                    "description": f"{term.description} Internal key: {metric.key}.", "value": value}
+            item = {
+                "accession": term.accession,
+                "name": term.name,
+                "description": f"{term.description} Internal key: {metric.key}.",
+                "value": value,
+            }
             if term.unit:
                 item["unit"] = {"accession": term.unit.accession, "name": term.unit.name}
             metrics.append(item)
@@ -436,55 +450,90 @@ class MzQCWriter:
             value = json_safe(annotation.value)
             if annotation_term is None or value is None:
                 continue
-            metrics.append({
-                "accession": annotation_term.accession,
-                "name": annotation_term.name,
-                "description": (
-                    f"{annotation_term.description} Evidence field: {annotation.field}."
-                ),
-                "value": value,
-            })
+            metrics.append(
+                {
+                    "accession": annotation_term.accession,
+                    "name": annotation_term.name,
+                    "description": (
+                        f"{annotation_term.description} Evidence field: {annotation.field}."
+                    ),
+                    "value": value,
+                }
+            )
         properties: list[dict[str, Any]] = [
-            {"accession": term.accession, "name": term.name}
-            for term in result.metadata.instruments
+            {"accession": term.accession, "name": term.name} for term in result.metadata.instruments
         ]
         if result.source_path:
-            properties.append({"accession": "QCPRIDE:SOURCEFILE", "name": "original vendor file",
-                               "value": str(result.source_path)})
+            properties.append(
+                {
+                    "accession": "QCPRIDE:SOURCEFILE",
+                    "name": "original vendor file",
+                    "value": str(result.source_path),
+                }
+            )
         project_accession = (result.project_accession or "").strip().upper()
         if project_accession.startswith("PXD"):
-            properties.append({
-                "accession": "MS:1001919",
-                "name": "ProteomeXchange accession number",
-                "value": project_accession,
-            })
+            properties.append(
+                {
+                    "accession": "MS:1001919",
+                    "name": "ProteomeXchange accession number",
+                    "value": project_accession,
+                }
+            )
         provenance_path = result.source_path or result.input_path
         input_file: dict[str, Any] = {
-            "name": provenance_path.name, "location": provenance_path.resolve().as_uri(),
+            "name": provenance_path.name,
+            "location": provenance_path.resolve().as_uri(),
             "fileFormat": file_format(provenance_path),
         }
         if properties:
             input_file["fileProperties"] = properties
-        return {"mzQC": {
-            "version": "1.0.0", "creationDate": datetime.now(UTC).isoformat(),
-            "description": (
-                "prideqc ID-free analysis; missing values and annotation evidence are in the "
-                "companion summary."
-            ),
-            "runQualities": [{"metadata": {
-                "label": result.input_path.name, "inputFiles": [input_file],
-                "analysisSoftware": [
-                    {"accession": "QCPRIDE:SOFTWARE", "name": "prideqc", "version": __version__},
-                    {"accession": "MS:1000531", "name": "software", "version": result.engine_version,
-                     "value": "pyOpenMS", "description": "pyOpenMS bindings used for mzML decoding", "uri": "https://openms.de"},
+        return {
+            "mzQC": {
+                "version": "1.0.0",
+                "creationDate": datetime.now(UTC).isoformat(),
+                "description": (
+                    "prideqc ID-free analysis; missing values and annotation evidence are in the "
+                    "companion summary."
+                ),
+                "runQualities": [
+                    {
+                        "metadata": {
+                            "label": result.input_path.name,
+                            "inputFiles": [input_file],
+                            "analysisSoftware": [
+                                {
+                                    "accession": "QCPRIDE:SOFTWARE",
+                                    "name": "prideqc",
+                                    "version": __version__,
+                                },
+                                {
+                                    "accession": "MS:1000531",
+                                    "name": "software",
+                                    "version": result.engine_version,
+                                    "value": "pyOpenMS",
+                                    "description": "pyOpenMS bindings used for mzML decoding",
+                                    "uri": "https://openms.de",
+                                },
+                            ],
+                        },
+                        "qualityMetrics": metrics,
+                    }
                 ],
-            }, "qualityMetrics": metrics}],
-            "controlledVocabularies": [
-                {"name": "PSI-MS", "uri": "https://raw.githubusercontent.com/HUPO-PSI/psi-ms-CV/master/psi-ms.obo"},
-                {"name": "Unit Ontology", "uri": "http://purl.obolibrary.org/obo/uo.obo"},
-                {"name": "prideqc local vocabulary", "version": "1", "uri": local_cv.resolve().as_uri()},
-            ],
-        }}
+                "controlledVocabularies": [
+                    {
+                        "name": "PSI-MS",
+                        "uri": "https://raw.githubusercontent.com/HUPO-PSI/psi-ms-CV/master/psi-ms.obo",
+                    },
+                    {"name": "Unit Ontology", "uri": "http://purl.obolibrary.org/obo/uo.obo"},
+                    {
+                        "name": "prideqc local vocabulary",
+                        "version": "1",
+                        "uri": local_cv.resolve().as_uri(),
+                    },
+                ],
+            }
+        }
 
     def write(self, result: AnalysisResult, path: Path) -> None:
         cv_path = path.with_suffix(".obo")
@@ -506,12 +555,17 @@ class MzQCWriter:
         )
         with atomic_text(path) as handle:
             handle.write("format-version: 1.2\ndata-version: 1\nontology: prideqc\n")
-            for accession, name in (("QCPRIDE:SOFTWARE", "prideqc"), ("QCPRIDE:SOURCEFILE", "original vendor file")):
+            for accession, name in (
+                ("QCPRIDE:SOFTWARE", "prideqc"),
+                ("QCPRIDE:SOURCEFILE", "original vendor file"),
+            ):
                 handle.write(f"\n[Term]\nid: {accession}\nname: {name}\n")
             for term in terms:
                 if not term.accession.startswith("QCPRIDE:"):
                     continue
-                parent = {"scalar": "MS:4000003", "tuple": "MS:4000004", "table": "MS:4000005"}[term.shape]
+                parent = {"scalar": "MS:4000003", "tuple": "MS:4000004", "table": "MS:4000005"}[
+                    term.shape
+                ]
                 description = json.dumps(term.description)
                 handle.write(
                     f"\n[Term]\nid: {term.accession}\nname: {term.name}\ndef: {description} "
