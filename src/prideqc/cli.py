@@ -93,6 +93,11 @@ def parser() -> argparse.ArgumentParser:
         help="Collect centroid MS2/MS3 TMT channel evidence without inferring SDRF labels",
     )
     analyze.add_argument(
+        "--tmt-profile-reporter-evidence",
+        action="store_true",
+        help="Experimentally peak-pick profile MS2/MS3 for TMT evidence; never write SDRF labels",
+    )
+    analyze.add_argument(
         "--estimate-mass-error",
         action="store_true",
         help="Estimate repeat-spectrum precursor/fragment mass-error precision",
@@ -329,6 +334,7 @@ def _analyze(arguments: argparse.Namespace) -> int:
             workers=arguments.workers,
             diagnostics=arguments.diagnostics,
             tmt_reporter_evidence=arguments.tmt_reporter_evidence,
+            tmt_profile_reporter_evidence=arguments.tmt_profile_reporter_evidence,
             estimate_mass_error=arguments.estimate_mass_error,
             estimate_mass_shifts=arguments.estimate_mass_shifts,
             estimate_peak_type=arguments.estimate_peak_type,

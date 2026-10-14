@@ -45,6 +45,7 @@ from prideqc.refinement_packet import (
 )
 from prideqc.sdrf import SDRFChange, SDRFDocument
 from prideqc.tmt import TMTReporterCollector
+from prideqc.tmt_profile import TMTProfileReporterCollector
 from prideqc.validation import SDRFPipelinesValidator, SDRFValidator
 
 if TYPE_CHECKING:
@@ -120,6 +121,7 @@ class WorkflowOptions:
     workers: int = 1
     diagnostics: bool = False
     tmt_reporter_evidence: bool = False
+    tmt_profile_reporter_evidence: bool = False
     estimate_mass_error: bool = False
     estimate_mass_shifts: bool = False
     estimate_peak_type: bool = False
@@ -204,6 +206,8 @@ def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
             collectors.append(DiagnosticIonCollector())
         if options.tmt_reporter_evidence:
             collectors.append(TMTReporterCollector())
+        if options.tmt_profile_reporter_evidence:
+            collectors.append(TMTProfileReporterCollector())
         mass_error_collector: (
             NativeOpenMSMassErrorCollector | RepeatSpectrumMassErrorCollector | None
         ) = None

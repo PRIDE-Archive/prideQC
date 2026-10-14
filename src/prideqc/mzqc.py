@@ -322,6 +322,14 @@ ANNOTATION_DESCRIPTIONS = {
             "low-resolution regime."
         ),
     ),
+    "tmt_profile_reporter_evidence": (
+        "TMT experimental profile reporter-ion evidence",
+        (
+            "Identification-free per-channel OpenMS PeakPickerHiRes profile MS2/MS3 "
+            "reporter evidence, tracked separately from vendor centroid observations. "
+            "Experimental only; no verified labeling kit, sample mapping or SDRF writeback."
+        ),
+    ),
     "tmt_reporter_evidence": (
         "TMT reporter-ion channel evidence",
         (
