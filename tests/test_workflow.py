@@ -1034,6 +1034,29 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(worker.call_count, 1)
             self.assertEqual(manifest["unprocessed"], [str(second)])
 
+    def test_cli_local_project_accession_reaches_workflow(self):
+        manifest = {
+            "files": [{"status": "success", "error": None}],
+            "errors": [],
+            "unprocessed": [],
+            "success": True,
+        }
+        with patch("prideqc.pipeline.Workflow.run", return_value=manifest) as run:
+            self.assertEqual(
+                main(
+                    [
+                        "analyze",
+                        "example.raw",
+                        "-o",
+                        "results",
+                        "--project-accession",
+                        "PXD030342",
+                    ]
+                ),
+                0,
+            )
+        self.assertEqual(run.call_args.kwargs["project_accession"], "PXD030342")
+
     def test_cli_failed_run_returns_nonzero(self):
         with patch(
             "prideqc.pipeline.Workflow.run",
