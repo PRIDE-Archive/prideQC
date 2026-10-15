@@ -44,6 +44,8 @@ IFS=$'\x1f' read -r ROW_ID PXD EXPECTED_TASKS <<< "$ROW_PARSE"
 
 ACCESSION_ROOT="$RESULT_ROOT/$RUN_NAME/$PXD"
 FINAL_REPORT="$ACCESSION_ROOT/_multiqc"
+PER_RUN_ROOT="$ACCESSION_ROOT/repository-metadata"
+STUDY_ROOT="$ACCESSION_ROOT/_study"
 WORK_ROOT="$SCRATCH_ROOT/prideqc_report_${JOB_ID}_${TASK_ID}_${PXD}"
 LOCAL_SIF="$WORK_ROOT/$(basename "$SIF")"
 LOCAL_REPORT="$WORK_ROOT/report"
@@ -71,11 +73,15 @@ cp -a "$SIF" "$LOCAL_SIF"
     exit 2
 }
 
+test -d "$PER_RUN_ROOT" || {
+    echo "Per-run repository-metadata not found: $PER_RUN_ROOT" >&2
+    exit 2
+}
+# Scan only the authoritative per-run tree. Never rediscover _study/<PXD>.mzQC.
 mapfile -t MZQC_FILES < <(
-    find "$ACCESSION_ROOT" \
+    find "$PER_RUN_ROOT" \
       -type f \
       -name '*.mzQC' \
-      ! -path "$FINAL_REPORT/*" \
       -printf '%P\n' \
       | LC_ALL=C sort
 )
@@ -107,7 +113,7 @@ echo "==> Reporting software provenance"
 echo "==> Aggregate mzQC for $PXD"
 set +e
 "$CONTAINER_BIN" exec --cleanenv \
-    --bind "$ACCESSION_ROOT:/input:ro" \
+    --bind "$PER_RUN_ROOT:/input:ro" \
     --bind "$WORK_ROOT:/work" \
     --env "TMPDIR=/work/tmp" \
     --env "XDG_CACHE_HOME=/work/cache" \
@@ -124,6 +130,29 @@ set +e
     > >(tee "$RUN_LOG") 2> >(tee -a "$RUN_LOG" >&2)
 MULTIQC_STATUS=$?
 set -e
+
+# Preserve reporting against the original per-run files, not both originals
+# and their consolidated copy. Only publish a complete study artifact after
+# the file-array count and MultiQC success have both been verified.
+MERGE_STATUS=skipped
+if (( MULTIQC_STATUS == 0 && FOUND_MZQC == EXPECTED_TASKS )); then
+    echo "==> Consolidate $FOUND_MZQC per-run mzQC objects for $PXD"
+    mkdir -p "$STUDY_ROOT"
+    if "$CONTAINER_BIN" exec --cleanenv \
+        --bind "$PER_RUN_ROOT:/input:ro" \
+        --bind "$STUDY_ROOT:/study" \
+        "$LOCAL_SIF" \
+        prideqc mzqc merge \
+          --input-dir /input \
+          --output "/study/$PXD.mzQC" \
+          --accession "$PXD" \
+          --expected-runs "$EXPECTED_TASKS" \
+          --cv-uri "file://$STUDY_ROOT/$PXD.obo"; then
+        MERGE_STATUS=complete
+    else
+        MERGE_STATUS=failed
+    fi
+fi
 
 cp -a "$RUN_LOG" "$LOCAL_REPORT/multiqc.log"
 "$CONTAINER_BIN" exec "$LOCAL_SIF" cat /opt/prideqc/build-info.txt > "$LOCAL_REPORT/container-build-info.txt"
@@ -142,6 +171,10 @@ if [[ ! -s "$LOCAL_REPORT/multiqc_report.html" ]]; then
     REPORT_OUTCOME=failure
     REPORT_REASON=missing_multiqc_report
 fi
+if [[ "$MERGE_STATUS" == failed ]]; then
+    REPORT_OUTCOME=failure
+    REPORT_REASON=mzqc_study_merge_failed
+fi
 
 {
     echo "report_outcome=$REPORT_OUTCOME"
@@ -153,6 +186,8 @@ fi
     echo "run_name=$RUN_NAME"
     echo "expected_file_tasks=$EXPECTED_TASKS"
     echo "found_mzqc=$FOUND_MZQC"
+    echo "study_merge_status=$MERGE_STATUS"
+    echo "study_mzqc=$STUDY_ROOT/$PXD.mzQC"
     echo "require_complete=$PRIDEQC_REPORT_REQUIRE_COMPLETE"
     echo "sif=$SIF"
     echo "sif_sha256=$EXPECTED_SIF_SHA"

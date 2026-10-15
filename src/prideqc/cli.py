@@ -277,6 +277,17 @@ def parser() -> argparse.ArgumentParser:
     llm_adjudicate.add_argument("--request-timeout", type=float, default=900.0)
     llm_adjudicate.add_argument("--context-size", type=int, default=8192)
 
+    mzqc = commands.add_parser("mzqc", help="mzQC packaging and validation tools")
+    mzqc_commands = mzqc.add_subparsers(dest="mzqc_command", required=True)
+    merge = mzqc_commands.add_parser(
+        "merge", help="Combine per-run mzQC without aggregating metrics"
+    )
+    merge.add_argument("--input-dir", type=Path, required=True)
+    merge.add_argument("--output", type=Path, required=True)
+    merge.add_argument("--accession", required=True)
+    merge.add_argument("--expected-runs", type=int)
+    merge.add_argument("--cv-uri", help="URI to the published companion .obo file")
+
     fetch = commands.add_parser("fetch", help="Download an explicit PRIDE selection using pridepy")
     fetch.add_argument("accession")
     fetch.add_argument(
@@ -390,6 +401,7 @@ def _analyze(arguments: argparse.Namespace) -> int:
             arguments.output_dir,
             sdrf=arguments.sdrf,
             aliases=aliases,
+            project_accession=arguments.project_accession,
         )
     succeeded = sum(item["status"] == "success" for item in manifest["files"])
     total = len(manifest["files"]) + len(manifest.get("unprocessed", []))
@@ -517,6 +529,22 @@ def main(argv: list[str] | None = None) -> int:
             for issue in report.issues:
                 print(issue, file=sys.stderr)
             return 0 if report.valid else 1
+        if arguments.command == "mzqc":
+            from prideqc.mzqc_merge import merge_mzqc
+
+            if arguments.mzqc_command == "merge":
+                manifest = merge_mzqc(
+                    arguments.input_dir,
+                    arguments.output,
+                    accession=arguments.accession,
+                    expected_runs=arguments.expected_runs,
+                    cv_uri=arguments.cv_uri,
+                )
+                print(
+                    f"Merged {manifest['merged_runs']} runs into {arguments.output} "
+                    f"(status={manifest['status']})"
+                )
+                return 0
         if arguments.command == "refine-sdrf-qc":
             return _refine_sdrf_qc(arguments)
         if arguments.command == "llm":

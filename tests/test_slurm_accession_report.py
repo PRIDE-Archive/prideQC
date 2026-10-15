@@ -38,22 +38,29 @@ class SlurmAccessionReportTests(unittest.TestCase):
         self.assertIn("PRIDEQC_REPORT_REQUIRE_COMPLETE", text)
         self.assertIn("multiqc_report.html", text)
 
+    def test_study_merge_never_enters_multiqc_discovery(self) -> None:
+        text = self.report_wrapper().read_text(encoding="utf-8")
+        self.assertIn('PER_RUN_ROOT="$ACCESSION_ROOT/repository-metadata"', text)
+        self.assertIn('STUDY_ROOT="$ACCESSION_ROOT/_study"', text)
+        self.assertIn('find "$PER_RUN_ROOT"', text)
+        self.assertIn('--bind "$PER_RUN_ROOT:/input:ro"', text)
+        self.assertIn("prideqc mzqc merge", text)
+        self.assertIn('--expected-runs "$EXPECTED_TASKS"', text)
+        self.assertIn("MULTIQC_STATUS == 0 && FOUND_MZQC == EXPECTED_TASKS", text)
+        self.assertIn("study_merge_status=$MERGE_STATUS", text)
+        self.assertNotIn('find "$ACCESSION_ROOT"', text)
+
     def test_submitter_builds_one_report_task_per_accession(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             manifest = root / "run.tsv"
             manifest.write_text(
-                "task_id\tpxd_accession\n"
-                "1\tPXD000001\n"
-                "2\tPXD000001\n"
-                "3\tPXD000002\n",
+                "task_id\tpxd_accession\n1\tPXD000001\n2\tPXD000001\n3\tPXD000002\n",
                 encoding="utf-8",
             )
             sif = root / "prideqc.sif"
             sif.write_bytes(b"sif")
-            (root / "prideqc.sif.sha256").write_text(
-                "dummy  prideqc.sif\n", encoding="utf-8"
-            )
+            (root / "prideqc.sif.sha256").write_text("dummy  prideqc.sif\n", encoding="utf-8")
             launcher = root / "report.sbatch"
             launcher.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
 
@@ -62,9 +69,7 @@ class SlurmAccessionReportTests(unittest.TestCase):
             sbatch_log = root / "sbatch-args.txt"
             sbatch = fake_bin / "sbatch"
             sbatch.write_text(
-                "#!/usr/bin/env bash\n"
-                'printf "%s\\n" "$@" > "$SBATCH_LOG"\n'
-                'printf "12345\\n"\n',
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$SBATCH_LOG"\nprintf "12345\\n"\n',
                 encoding="utf-8",
             )
             sbatch.chmod(0o755)
