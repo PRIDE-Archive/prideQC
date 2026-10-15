@@ -63,7 +63,7 @@ class DownloadOptions:
     aspera_maximum_bandwidth: str = "100M"
 
     def __post_init__(self) -> None:
-        if self.protocol not in {"ftp", "aspera", "s3", "globus"}:
+        if self.protocol not in {"ftp", "aspera", "s3", "globus", "fire"}:
             raise ValueError("Unsupported pridepy transfer protocol.")
         if not self.aspera_maximum_bandwidth.strip():
             raise ValueError("Aspera bandwidth must be nonempty.")

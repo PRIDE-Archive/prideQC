@@ -28,7 +28,9 @@ def _download_arguments(command: argparse.ArgumentParser) -> None:
         dest="remote_files",
         help="Exact PRIDE filename; repeat for a subset",
     )
-    command.add_argument("--protocol", choices=["ftp", "aspera", "s3", "globus"], default="ftp")
+    command.add_argument(
+        "--protocol", choices=["ftp", "aspera", "s3", "globus", "fire"], default="ftp"
+    )
     command.add_argument(
         "--no-checksum-check",
         action="store_true",
