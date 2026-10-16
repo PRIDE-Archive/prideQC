@@ -80,19 +80,19 @@ class TechnicalAnnotator:
             annotations = [a for a in annotations if a.field not in {
                 "acquisition_method", "acquisition_method_evidence"
             }]
-            methods = list(dict.fromkeys(metadata.acquisition_methods))
+            recorded_methods = list(dict.fromkeys(metadata.acquisition_methods))
             inferred_label = (
                 str(inferred_acquisition.value)
                 if inferred_acquisition is not None and inferred_acquisition.value is not None
                 else None
             )
             conflicting = (
-                len(methods) == 1
+                len(recorded_methods) == 1
                 and inferred_label is not None
-                and inferred_label != methods[0].name
+                and inferred_label != recorded_methods[0].name
             )
             if conflicting:
-                term = methods[0]
+                term = recorded_methods[0]
                 annotations.append(Annotation(
                     "acquisition_method", None, UNAVAILABLE,
                     "conflict between recorded CV term and spectral inference",
@@ -107,8 +107,8 @@ class TechnicalAnnotator:
                     INFERRED, "recorded acquisition versus DDA/DIA spectral heuristic",
                     "The recorded term and spectral inference disagree; human review required.",
                 ))
-            elif len(methods) == 1:
-                term = methods[0]
+            elif len(recorded_methods) == 1:
+                term = recorded_methods[0]
                 annotations.append(Annotation(
                     "acquisition_method", term.name, OBSERVED,
                     "explicit mzML fileContent PRIDE acquisition CV term",
@@ -133,7 +133,7 @@ class TechnicalAnnotator:
                 ))
                 annotations.append(Annotation(
                     "acquisition_recorded_terms",
-                    [{"accession": t.accession, "name": t.name} for t in methods],
+                    [{"accession": t.accession, "name": t.name} for t in recorded_methods],
                     OBSERVED, "mzML fileContent CV terms",
                     "Conflict retained; no single acquisition method selected.",
                 ))
