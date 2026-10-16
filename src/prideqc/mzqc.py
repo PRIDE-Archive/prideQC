@@ -268,6 +268,32 @@ LEVEL_DEFINITIONS = {
 
 
 ANNOTATION_DESCRIPTIONS = {
+    "ionization": (
+        "ionization source CV evidence",
+        "Recorded ion source PSI-MS CV terms from instrument configuration; "
+        "not inferred from spectra or instrument model.",
+    ),
+    "mass_analyzers": (
+        "mass analyzer CV evidence",
+        "Recorded mass analyzer PSI-MS CV terms from instrument configuration; "
+        "all recorded configurations are preserved without guessing.",
+    ),
+    "acquisition_method_conflict": (
+        "acquisition method evidence conflict",
+        "Recorded acquisition CV term disagrees with scan-pattern DDA/DIA inference. "
+        "No automatic SDRF proposal can be made from this conflicting evidence.",
+    ),
+    "acquisition_method_evidence": (
+        "acquisition method inference evidence",
+        "Ontology-linked, conservative DDA/DIA inference from observed isolation windows "
+        "and cycles. Support, denominator and classifier version retained. "
+        "Not a verified instrument setting; no PRM/SRM/MRM inference from width alone.",
+    ),
+    "labeling_strategy_candidates": (
+        "labelling strategy candidate evidence",
+        "Exploratory TMT/iTRAQ reporter-ion evidence mapped to PRIDE family terms. "
+        "Non-exclusive; does not establish SILAC, label-free status, plex or SDRF channels.",
+    ),
     "estimated_precursor_mass_error_ppm": (
         "estimated precursor mass error precision",
         (
@@ -534,6 +560,13 @@ class MzQCWriter:
                         "uri": "https://raw.githubusercontent.com/HUPO-PSI/psi-ms-CV/master/psi-ms.obo",
                     },
                     {"name": "Unit Ontology", "uri": "http://purl.obolibrary.org/obo/uo.obo"},
+                    {
+                        "name": "PRIDE",
+                        "uri": (
+                            "https://raw.githubusercontent.com/PRIDE-Archive/"
+                            "pride-ontology/master/pride_cv.obo"
+                        ),
+                    },
                     {
                         "name": "prideqc local vocabulary",
                         "version": "1",

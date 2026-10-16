@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from prideqc import __version__
-from prideqc.annotations import DiagnosticIonCollector, TechnicalAnnotator
+from prideqc.annotations import DiagnosticIonCollector, TechnicalAnnotator, labeling_candidates
 from prideqc.cohort import (
     COHORT_OVERWRITE_FIELDS,
     COHORT_SDRF_FIELDS,
@@ -105,6 +105,9 @@ class Analyzer:
         annotations = self.annotator.annotate(metadata, summary)
         for collector in collectors:
             annotations.extend(collector.annotations())
+        candidates = labeling_candidates(annotations)
+        if candidates is not None:
+            annotations.append(candidates)
         return AnalysisResult(
             path,
             metadata,

@@ -15,6 +15,15 @@ import numpy as np
 
 from prideqc.models import CVTerm, Precursor, RunMetadata, Spectrum, SpectrumSink
 
+# Only explicitly recorded controlled terms are captured as observed acquisition
+# settings. Narrow-window scan patterns do not prove PRM versus SRM/MRM.
+RECORDED_ACQUISITION_TERMS = {
+    "PRIDE:0000627": "Data-dependent acquisition",
+    "PRIDE:0000450": "Data-independent acquisition",
+    "PRIDE:0000629": "Parallel reaction monitoring",
+    "PRIDE:0000630": "Selected reaction monitoring",
+}
+
 # OpenMS enum *names*, never unexplained integer constants across API releases.
 ACTIVATION = {
     "CID": CVTerm("MS:1000133", "collision-induced dissociation"),
@@ -100,6 +109,13 @@ def read_header(path: Path) -> RunMetadata:
                 continue
             if tag == "referenceableParamGroup":
                 groups[element.get("id", "")] = terms(element)
+            elif tag == "fileContent":
+                for term in terms(element):
+                    accession = term.get("accession", "")
+                    if accession in RECORDED_ACQUISITION_TERMS:
+                        metadata.acquisition_methods.append(
+                            CVTerm(accession, RECORDED_ACQUISITION_TERMS[accession])
+                        )
             elif tag == "sourceFile":
                 name = element.get("name")
                 if name:
@@ -124,7 +140,10 @@ def read_header(path: Path) -> RunMetadata:
                             ):
                                 target.append(CVTerm(term["accession"], term.get("name", "")))
                 element.clear()
-    for key in ("instruments", "analyzers", "ionization", "serial_numbers", "source_files"):
+    for key in (
+        "instruments", "analyzers", "ionization", "acquisition_methods",
+        "serial_numbers", "source_files",
+    ):
         setattr(metadata, key, list(dict.fromkeys(getattr(metadata, key))))
     return metadata
 

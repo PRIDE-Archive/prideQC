@@ -71,6 +71,85 @@ class TechnicalAnnotator:
                 ) if energies and level == 2 and summary.missing_collision_energy == 0 else None,
             ))
         annotations.extend(self._acquisition(run))
+        if metadata.acquisition_methods:
+            # An explicit term may be recorded, but disagreement with a supported
+            # scan-pattern inference blocks automatic classification/writeback.
+            inferred_acquisition = next(
+                (a for a in annotations if a.field == "acquisition_method"), None
+            )
+            annotations = [a for a in annotations if a.field not in {
+                "acquisition_method", "acquisition_method_evidence"
+            }]
+            methods = list(dict.fromkeys(metadata.acquisition_methods))
+            inferred_label = (
+                str(inferred_acquisition.value)
+                if inferred_acquisition is not None and inferred_acquisition.value is not None
+                else None
+            )
+            conflicting = (
+                len(methods) == 1
+                and inferred_label is not None
+                and inferred_label != methods[0].name
+            )
+            if conflicting:
+                term = methods[0]
+                annotations.append(Annotation(
+                    "acquisition_method", None, UNAVAILABLE,
+                    "conflict between recorded CV term and spectral inference",
+                    "No automatic SDRF writeback when the RAW-header method conflicts with "
+                    "the DDA/DIA isolation-pattern classifier.",
+                    sdrf_column="comment[proteomics data acquisition method]",
+                ))
+                annotations.append(Annotation(
+                    "acquisition_method_conflict",
+                    {"recorded": {"accession": term.accession, "name": term.name},
+                     "inferred": inferred_label},
+                    INFERRED, "recorded acquisition versus DDA/DIA spectral heuristic",
+                    "The recorded term and spectral inference disagree; human review required.",
+                ))
+            elif len(methods) == 1:
+                term = methods[0]
+                annotations.append(Annotation(
+                    "acquisition_method", term.name, OBSERVED,
+                    "explicit mzML fileContent PRIDE acquisition CV term",
+                    "Recorded header metadata, not a scan-pattern inference.",
+                    sdrf_column="comment[proteomics data acquisition method]",
+                    sdrf_value=term.sdrf_value(),
+                ))
+                annotations.append(Annotation(
+                    "acquisition_method_evidence",
+                    {"cv_term": {"accession": term.accession, "name": term.name},
+                     "classification": "OBSERVED_MZML_FILECONTENT",
+                     "evidence_source": "mzML fileContent CV term"},
+                    OBSERVED, "exact mzML fileContent CV term",
+                    "The file records this method; no scan-pattern inference used.",
+                ))
+            else:
+                annotations.append(Annotation(
+                    "acquisition_method", None, UNAVAILABLE,
+                    "conflicting mzML fileContent acquisition terms",
+                    "Multiple acquisition terms prevent automatic classification or SDRF fill.",
+                    sdrf_column="comment[proteomics data acquisition method]",
+                ))
+                annotations.append(Annotation(
+                    "acquisition_recorded_terms",
+                    [{"accession": t.accession, "name": t.name} for t in methods],
+                    OBSERVED, "mzML fileContent CV terms",
+                    "Conflict retained; no single acquisition method selected.",
+                ))
+        annotations.append(Annotation(
+            "labeling_strategy", None, UNAVAILABLE,
+            "No verified sample-channel label assignments in RAW spectrum metadata",
+            "Reporter-ion matches are candidate evidence only; SILAC, label-free status, "
+            "channel identities and multiplex design require submitter/SDRF evidence.",
+            sdrf_column="comment[label]",
+        ))
+        annotations.append(Annotation(
+            "chromatography_type", None, UNAVAILABLE,
+            "Chromatography separation chemistry is not inferable from scan RT alone",
+            "Run duration and chromatograms are QC measurements, not evidence for "
+            "reversed-phase, HILIC, SCX, LC flow regime or column type.",
+        ))
         for name, column in (
             ("precursor_mass_tolerance", "comment[precursor mass tolerance]"),
             ("fragment_mass_tolerance", "comment[fragment mass tolerance]"),
@@ -141,7 +220,7 @@ class TechnicalAnnotator:
             elif narrow_fraction >= 0.9 and unique_targets >= 500:
                 label, accession, support = "Data-dependent acquisition", "PRIDE:0000627", narrow
 
-        return [Annotation(
+        annotations = [Annotation(
             "acquisition_method", label, INFERRED if label else UNAVAILABLE,
             method,
             detail,
@@ -149,6 +228,89 @@ class TechnicalAnnotator:
             sdrf_column="comment[proteomics data acquisition method]",
             sdrf_value=CVTerm(accession, label).sdrf_value() if accession and label else None,
         )]
+        if accession and label:
+            annotations.append(Annotation(
+                "acquisition_method_evidence",
+                {
+                    "cv_term": {"accession": accession, "name": label},
+                    "evidence_source": "MS2 precursor isolation widths and acquisition-cycle structure",
+                    "supporting_scans": support,
+                    "assessed_ms2_scans": support_total,
+                    "classification": "INFERRED_NOT_OBSERVED",
+                    "classifier": "acquisition heuristic v2",
+                },
+                INFERRED, method,
+                "A data-derived run classification; not a recorded instrument acquisition setting. "
+                "PRM, SRM/MRM and narrow DIA are not inferred from narrow-window scans alone.",
+                support=support, total=support_total,
+            ))
+        return annotations
+
+
+def labeling_candidates(evidence: list[Annotation]) -> Annotation | None:
+    """Non-exclusive reporter-based candidate terms; never a verified sample label."""
+    candidates: list[dict[str, object]] = []
+    tmt = next((a for a in evidence if a.field in {
+        "tmt_reporter_evidence", "tmt_profile_reporter_evidence"
+    } and a.kind == INFERRED and isinstance(a.value, dict)), None)
+    if tmt is not None:
+        levels = tmt.value.get("levels", {})
+        matched: dict[str, int] = {}
+        if isinstance(levels, dict):
+            for level in levels.values():
+                if not isinstance(level, dict):
+                    continue
+                methods = level.get("methods", {})
+                if not isinstance(methods, dict):
+                    continue
+                for name, info in methods.items():
+                    if isinstance(info, dict):
+                        count = info.get("reporter_positive_spectra", 0)
+                        if isinstance(count, int) and count > 0:
+                            matched[name] = matched.get(name, 0) + count
+        if matched:
+            candidates.append({
+                "cv_term": {"accession": "PRIDE:0000314", "name": "TMT"},
+                "source": tmt.field,
+                "reporter_positive_spectra_per_nonexclusive_method": matched,
+            })
+    if not any(
+        item.get("source") in {"tmt_reporter_evidence", "tmt_profile_reporter_evidence"}
+        for item in candidates
+    ):
+        tmt_signature = next(
+            (a for a in evidence if a.field == "signature_TMT_family"
+             and a.kind == INFERRED and a.support is not None and a.support > 0),
+            None,
+        )
+        if tmt_signature is not None:
+            candidates.append({
+                "cv_term": {"accession": "PRIDE:0000314", "name": "TMT"},
+                "source": tmt_signature.field,
+                "matching_spectra": tmt_signature.support,
+                "eligible_spectra": tmt_signature.total,
+            })
+    itraq = next((a for a in evidence if a.field == "signature_iTRAQ_family"
+                 and a.kind == INFERRED and a.support is not None and a.support > 0), None)
+    if itraq is not None:
+        candidates.append({
+            "cv_term": {"accession": "PRIDE:0000313", "name": "iTRAQ"},
+            "source": itraq.field,
+            "matching_spectra": itraq.support,
+            "eligible_spectra": itraq.total,
+        })
+    if not candidates:
+        return None
+    return Annotation(
+        "labeling_strategy_candidates",
+        {"scientific_status": "CANDIDATE_ONLY_NOT_VERIFIED_SAMPLE_LABEL",
+         "candidate_terms": candidates,
+         "not_inferred": ["SILAC", "label-free", "TMT plex", "sample-to-channel assignment"]},
+        INFERRED,
+        "Optional ID-free reporter-ion collectors; non-exclusive candidate vocabulary mappings",
+        "Neither the chemical labelling strategy nor the biological sample/channel assignment "
+        "is established by reporter signals alone. No SDRF writeback.",
+    )
 
 
 class DiagnosticIonCollector:

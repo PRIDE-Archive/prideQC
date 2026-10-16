@@ -24,6 +24,12 @@ prideQC analyzes raw data into per-file QC evidence. The resulting mzQC files ca
 Install prideQC, analyze raw data, inspect outputs, and refine an SDRF.
 :::
 
+:::{grid-item-card} QC metrics reference
+:link: qc-metrics-reference
+:link-type: doc
+Browse all registered QC definitions, CV accessions, and evidence limitations.
+:::
+
 :::{grid-item-card} QC workflow
 :link: qc-workflow
 :link-type: doc
@@ -104,6 +110,7 @@ The first task is always primary. Metadata refinement is downstream of the measu
 :hidden:
 
 getting-started
+qc-metrics-reference
 qc-workflow
 measurement-evidence
 reporting

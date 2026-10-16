@@ -75,6 +75,7 @@ class RunMetadata:
     instruments: list[CVTerm] = field(default_factory=list)
     analyzers: list[CVTerm] = field(default_factory=list)
     ionization: list[CVTerm] = field(default_factory=list)
+    acquisition_methods: list[CVTerm] = field(default_factory=list)
     serial_numbers: list[str] = field(default_factory=list)
     source_files: list[str] = field(default_factory=list)
     started_at: str | None = None
@@ -116,6 +117,9 @@ class AnalysisResult:
             instruments=[CVTerm(**item) for item in metadata_data.get("instruments", [])],
             analyzers=[CVTerm(**item) for item in metadata_data.get("analyzers", [])],
             ionization=[CVTerm(**item) for item in metadata_data.get("ionization", [])],
+            acquisition_methods=[
+                CVTerm(**item) for item in metadata_data.get("acquisition_methods", [])
+            ],
             serial_numbers=list(metadata_data.get("serial_numbers", [])),
             source_files=list(metadata_data.get("source_files", [])),
             started_at=metadata_data.get("started_at"),
