@@ -5,7 +5,7 @@ process PRIDEQC_ANALYZE {
     scratch true
     publishDir { "${params.outdir}/${accession}/_run_status" },
         mode: 'copy', pattern: 'result/result.json', overwrite: true,
-        saveAs: { filename -> "${unit_dir.name}.json" }
+        saveAs: { _filename -> "${unit_dir.name}.json" }
     publishDir { "${params.outdir}/${accession}/_run_logs" },
         mode: 'copy', pattern: 'result/*.log', overwrite: true,
         saveAs: { filename -> "${unit_dir.name}/${filename.tokenize('/').last()}" }

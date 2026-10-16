@@ -180,7 +180,7 @@ def expand(source: Path, outdir: Path, *, max_bytes: int = MAX_BYTES,
             if not nested:
                 break
             for index, item in enumerate(nested):
-                dst = item.parent / ("_extracted_%s_%d" % (level, index))
+                dst = item.parent / f"_extracted_{level}_{index}"
                 _extract_archive(item, dst, budget, max_bytes)
                 item.unlink()
         # ZIPs sometimes contain individually gzipped Thermo runs.

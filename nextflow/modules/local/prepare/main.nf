@@ -5,7 +5,7 @@ process PRIDEQC_PREPARE {
     scratch true
     publishDir { "${params.outdir}/${accession}/_archive_status" },
         mode: 'copy', pattern: 'prepared/prepare-status.json', overwrite: true,
-        saveAs: { filename -> "${task_id}.prepare-status.json" }
+        saveAs: { _filename -> "${task_id}.prepare-status.json" }
     input:
     tuple val(accession), val(expected_archives), val(task_id), path(task_json)
     path prepare_script

@@ -40,7 +40,7 @@ workflow PRIDEQC_WORKFLOW {
         file("${projectDir}/bin/archive_units.py"))
 
     // Split each archive into one independent Slurm QC task per discovered run.
-    def logical_units = PRIDEQC_PREPARE.out.units.flatMap { accession, expected_archives, task_id, unit_dirs, prepare_status ->
+    def logical_units = PRIDEQC_PREPARE.out.units.flatMap { accession, _expected_archives, _task_id, unit_dirs, _prepare_status ->
         def units = unit_dirs instanceof List ? unit_dirs : [unit_dirs]
         units.collect { unit -> tuple(accession, unit) }
     }
@@ -49,7 +49,7 @@ workflow PRIDEQC_WORKFLOW {
     // Dynamic accession barrier: sum discovered units only after all expected
     // archive tasks finished. Failure sentinels still count, so nothing vanishes.
     def expected_counts = PRIDEQC_PREPARE.out.units
-        .map { accession, expected_archives, task_id, unit_dirs, prepare_status ->
+        .map { accession, expected_archives, _task_id, unit_dirs, _prepare_status ->
             def units = unit_dirs instanceof List ? unit_dirs : [unit_dirs]
             tuple(groupKey(accession, expected_archives), units.size())
         }
