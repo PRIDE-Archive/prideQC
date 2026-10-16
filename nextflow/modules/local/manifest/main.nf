@@ -5,12 +5,13 @@ process PRIDEQC_MANIFEST {
     input:
     path file_manifest
     path report_manifest
+    path planner
     output:
     path 'plan/tasks/*.json', emit: tasks
     path 'plan/plan.json', emit: plan
     script:
     """
-    plan_manifest.py \
+    python3 ${planner} \
       --manifest ${file_manifest} \
       --report-manifest ${report_manifest} \
       --outdir plan \

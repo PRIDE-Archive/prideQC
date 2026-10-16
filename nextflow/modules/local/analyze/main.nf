@@ -1,21 +1,23 @@
 process PRIDEQC_ANALYZE {
-    tag "${accession}:${task_id}"
+    tag "${accession}:${unit_dir.name}"
     label 'process_medium'
     container params.sif
-    publishDir { "${params.outdir}/${accession}/repository-metadata/${task_id}_${slug}" },
-        mode: 'copy', pattern: 'qc/*', overwrite: true,
-        saveAs: { filename -> filename.replaceFirst(/^qc\//, '') }
+    scratch true
+    publishDir { "${params.outdir}/${accession}/_run_status" },
+        mode: 'copy', pattern: 'result/result.json', overwrite: true,
+        saveAs: { filename -> "${unit_dir.name}.json" }
+    publishDir { "${params.outdir}/${accession}/_run_logs" },
+        mode: 'copy', pattern: 'result/*.log', overwrite: true,
+        saveAs: { filename -> "${unit_dir.name}/${filename.tokenize('/').last()}" }
     input:
-    tuple val(accession), val(expected), val(task_id), val(slug), path(task_json)
+    tuple val(accession), path(unit_dir)
+    path analyzer
     output:
-    tuple val(accession), val(expected), path('qc/*.mzQC'), path('qc/*.obo'), emit: run
+    tuple val(accession), path('result'), emit: unit_result
     script:
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
-    prideqc_run_file.py --task ${task_json} \
-      --protocol ${params.protocol} \
-      --output qc --download download \
-      ${params.checksum_check ? '' : '--no-checksum-check'} \
+    python3 ${analyzer} --unit ${unit_dir} --output result \
       ${params.estimate_mass_error ? '--estimate-mass-error' : ''} \
       ${params.estimate_mass_shifts ? '--estimate-mass-shifts' : ''}
     """

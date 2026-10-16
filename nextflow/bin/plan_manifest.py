@@ -13,7 +13,7 @@ from pathlib import Path
 ACCESSION = re.compile(r"PXD[0-9]{6,}$")
 # An explicit, narrow v1 name policy. No paths, traversal, shell syntax or whitespace.
 FILENAME = re.compile(r"[A-Za-z0-9_.+\-]+$")
-SUPPORTED = (".raw", ".mzml", ".mzml.gz", ".d.zip")
+SUPPORTED = (".raw", ".mzml", ".mzml.gz", ".zip", ".tar.gz", ".tgz", ".d", ".raw.gz")
 
 
 def read_tsv(path: Path, required: set[str]) -> list[dict[str, str]]:
@@ -107,7 +107,7 @@ def prepare(file_manifest: Path, report_manifest: Path, output: Path, accessions
                 "task_id": int(row["task_id"]),
                 "accession": pxd,
                 "archive_file": row["archive_file"],
-                "expected_runs": expected[pxd],
+                "expected_runs": expected[pxd],  # number of source archive tasks, not logical MS runs
                 "source_manifest": file_manifest.name,
             }
             (tasks / f"{pxd}__{int(row['task_id']):09d}.json").write_text(
