@@ -9,14 +9,14 @@ process PRIDEQC_ANALYZE {
     tuple val(accession), val(expected), val(task_id), val(slug), path(task_json)
     output:
     tuple val(accession), val(expected), path('qc/*.mzQC'), path('qc/*.obo'), emit: run
-    shell:
-    '''
+    script:
+    """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
-    prideqc_run_file.py --task !{task_json} \
-      --protocol !{params.protocol} \
+    prideqc_run_file.py --task ${task_json} \
+      --protocol ${params.protocol} \
       --output qc --download download \
-      !{params.checksum_check ? '' : '--no-checksum-check'} \
-      !{params.estimate_mass_error ? '--estimate-mass-error' : ''} \
-      !{params.estimate_mass_shifts ? '--estimate-mass-shifts' : ''}
-    '''
+      ${params.checksum_check ? '' : '--no-checksum-check'} \
+      ${params.estimate_mass_error ? '--estimate-mass-error' : ''} \
+      ${params.estimate_mass_shifts ? '--estimate-mass-shifts' : ''}
+    """
 }

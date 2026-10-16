@@ -10,14 +10,14 @@ process PRIDEQC_MERGE {
     output:
     tuple val(accession), path('study/*.mzQC'), path('study/*.obo'),
         path('study/*.manifest.json'), emit: study
-    shell:
-    '''
+    script:
+    """
     mkdir -p study
     prideqc mzqc merge \
       --input-dir input \
-      --output study/!{accession}.mzQC \
-      --accession !{accession} \
-      --expected-runs !{expected} \
-      --cv-uri 'file://!{params.outdir}/!{accession}/_study/!{accession}.obo'
-    '''
+      --output study/${accession}.mzQC \
+      --accession ${accession} \
+      --expected-runs ${expected} \
+      --cv-uri 'file://${params.outdir}/${accession}/_study/${accession}.obo'
+    """
 }

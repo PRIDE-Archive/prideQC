@@ -8,12 +8,12 @@ process PRIDEQC_MANIFEST {
     output:
     path 'plan/tasks/*.json', emit: tasks
     path 'plan/plan.json', emit: plan
-    shell:
-    '''
+    script:
+    """
     plan_manifest.py \
-      --manifest !{file_manifest} \
-      --report-manifest !{report_manifest} \
+      --manifest ${file_manifest} \
+      --report-manifest ${report_manifest} \
       --outdir plan \
-      !{params.accession ? '--accession '+params.accession : ''}
-    '''
+      ${params.accession ? '--accession '+params.accession : ''}
+    """
 }

@@ -23,8 +23,8 @@ workflow PRIDEQC_WORKFLOW {
     }
 
     PRIDEQC_MANIFEST(
-        Channel.fromPath(params.input, checkIfExists: true),
-        Channel.fromPath(params.report_manifest, checkIfExists: true)
+        channel.fromPath(params.input, checkIfExists: true),
+        channel.fromPath(params.report_manifest, checkIfExists: true)
     )
 
     def tasks = PRIDEQC_MANIFEST.out.tasks.flatten().map { task_file ->
