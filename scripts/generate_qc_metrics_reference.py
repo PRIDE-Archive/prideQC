@@ -10,6 +10,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "docs" / "metrics.tsv"
 DEST = ROOT / "docs" / "qc-metrics-reference.md"
+PRESENTATION = ROOT / "docs" / "metric-presentation.tsv"
+
+TIERS = ("core", "diagnostic", "extended")
+APPLICABILITY = ("all", "ms1", "ms2", "ms1_ms2", "cycles", "faims", "chromatograms")
+CORE_COUNT = 18
 
 ANNOTATIONS = [
     ("acquisition_method", "DDA/DIA/PRM/SRM run classification", "Explicit header CV or DDA/DIA inference; targeted scans abstain"),
@@ -51,26 +56,84 @@ def category(key: str) -> str:
     return "Other run-level QC"
 
 
-def render() -> str:
-    with REGISTRY.open(encoding="utf-8", newline="") as handle:
+def load_catalog(
+    registry: Path = REGISTRY, presentation: Path = PRESENTATION,
+) -> list[tuple[dict[str, str], dict[str, str]]]:
+    """Validate an exact, one-to-one display policy over the scientific registry.
+
+    The display metadata does not define CV terms, compute values or modify mzQC.
+    """
+    with registry.open(encoding="utf-8", newline="") as handle:
         entries = list(csv.DictReader(handle, delimiter="\t"))
+    with presentation.open(encoding="utf-8", newline="") as handle:
+        policies = list(csv.DictReader(handle, delimiter="\t"))
+
     keys = [row["key"] for row in entries]
-    if len(set(keys)) != len(keys):
-        raise ValueError("Duplicate keys in metrics.tsv")
-    for row in entries:
-        if not all(row.get(k) for k in ("key", "accession", "shape", "description")):
-            raise ValueError(f"Incomplete registry entry: {row}")
+    display_keys = [row["key"] for row in policies]
+    if len(set(keys)) != len(keys) or len(set(display_keys)) != len(display_keys):
+        raise ValueError("Duplicate metric keys in registry or presentation policy")
+    if keys != display_keys:
+        raise ValueError("Metric presentation must match the registry exactly, in order")
+    for metric, policy in zip(entries, policies, strict=True):
+        if not all(metric.get(k) for k in ("key", "accession", "shape", "description")):
+            raise ValueError(f"Incomplete metric definition: {metric}")
+        if policy.get("tier") not in TIERS:
+            raise ValueError(f"Unrecognized presentation tier for {metric['key']}")
+        if policy.get("applicability") not in APPLICABILITY:
+            raise ValueError(f"Unrecognized applicability for {metric['key']}")
+        if policy["tier"] == "core" and not all(policy.get(k) for k in ("label", "caveat")):
+            raise ValueError(f"Core metric lacks display label or caveat: {metric['key']}")
+    if sum(p["tier"] == "core" for p in policies) != CORE_COUNT:
+        raise ValueError(f"Expected exactly {CORE_COUNT} curated core metrics")
+    return list(zip(entries, policies, strict=True))
+
+
+def _cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")
+
+
+def render() -> str:
+    catalog = load_catalog()
+    counts = {tier: sum(p["tier"] == tier for _, p in catalog) for tier in TIERS}
     lines = [
         "# QC metrics and experimental annotations", "",
-        "This page is generated from the tracked `docs/metrics.tsv` registry. The",
-        "registered metrics below describe **QC measurements**; method/label",
-        "annotations are separate evidence fields and are not necessarily quantitative.",
-        "A registered metric can be absent from a particular mzQC when measurement",
-        "is unavailable; optional collectors require their respective CLI flags.", "",
-        f"**Registered core QC metric definitions: {len(entries)}.**", "",
+        "This page is generated from the tracked `docs/metrics.tsv` measurement",
+        "registry and `docs/metric-presentation.tsv` display policy. The latter",
+        "selects which existing mzQC metrics are prominently displayed; it does",
+        "**not** change acquisition, calculation, CV identity, serialization or merging.",
+        "Experimental method and label annotations are recorded separately.", "",
+        f"**Registered QC metric definitions: {len(catalog)}.**",
+        f"Presentation tiers: **{counts['core']} core**, **{counts['diagnostic']} diagnostic**,",
+        f"and **{counts['extended']} extended**. A registration is not a promise",
+        "that a value exists for every run. Metrics absent or undefined in the source",
+        "mzQC must remain absent/undefined; do not fill missing values with zero.", "",
+        "## Recommended PRIDE website overview", "",
+        "These 18 **core display candidates** cover run structure, signal and acquisition.",
+        "Show a value or visualization only when the run has the corresponding",
+        "stored mzQC metric. For SRM/MRM or other MS1-free acquisitions, MS1 and",
+        "MS1-delimited cycle entries may be inapplicable; this is not QC failure.", "",
+        "| Display | Registry key | Shape | Applies when | Interpretation / limitation |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for metric, policy in catalog:
+        if policy["tier"] == "core":
+            lines.append(
+                f"| {_cell(policy['label'])} | `{metric['key']}` | {metric['shape']} | "
+                f"{policy['applicability']} | {_cell(policy['caveat'])} |"
+            )
+    lines.extend([
+        "", "The counts include empty scans where stated by the registry. MS1/MS2",
+        "TIC values have arbitrary instrument-dependent intensity units and are",
+        "**not comparable across uncalibrated runs or instrument types**. Charge",
+        "fractions retain unknowns in the all-MS2 denominator. Quantile and table",
+        "metrics remain multivalued; the overview must not silently collapse",
+        "them into an undocumented scalar or recompute them from mzQC.", "",
+        "Acquisition method (DDA/DIA/PRM/SRM), labelling candidates, ionization,",
+        "instrument and LC annotations belong in the experimental-context section,",
+        "not in a numeric QC score. No universal composite QC score is defined.", "",
         "## Experimental and technical annotation fields", "",
         "| Field | Information | Evidence policy |", "| --- | --- | --- |",
-    ]
+    ])
     for field, meaning, evidence in ANNOTATIONS:
         lines.append(f"| `{field}` | {meaning} | {evidence} |")
     lines.extend(["", "The PRIDE ontology groups acquisition types under `PRIDE:0000659`",
@@ -85,22 +148,33 @@ def render() -> str:
                   "assignments. SILAC (`PRIDE:0000315`) cannot be inferred from",
                   "ordinary precursor charge/isotope information alone. No RAW-only",
                   "absence of signals is interpreted as label-free.", "",
-                  "## Registered quantitative QC metrics", ""])
-    groups: dict[str, list[dict[str, str]]] = {}
-    for entry in entries:
-        groups.setdefault(category(entry["key"]), []).append(entry)
+                  "## Registered quantitative QC metrics", "",
+                  "Tier and applicability are editorial display metadata, not additional",
+                  "scientific measurements or controlled vocabulary terms.", ""])
+    groups: dict[str, list[tuple[dict[str, str], dict[str, str]]]] = {}
+    for metric, policy in catalog:
+        groups.setdefault(category(metric["key"]), []).append((metric, policy))
     for name, rows in sorted(groups.items()):
-        lines.extend([f"### {name} ({len(rows)})", "", "| Key | CV accession | Shape | Definition |",
-                      "| --- | --- | --- | --- |"])
-        for row in rows:
-            desc = row["description"].replace("|", "\\|").replace("\n", " ")
-            lines.append(f"| `{row['key']}` | `{row['accession']}` | {row['shape']} | {desc} |")
+        lines.extend([f"### {name} ({len(rows)})", "",
+                      "| Key | CV accession | Shape | Tier | Applicability | Definition |",
+                      "| --- | --- | --- | --- | --- | --- |"])
+        for metric, policy in rows:
+            lines.append(f"| `{metric['key']}` | `{metric['accession']}` | "
+                         f"{metric['shape']} | {policy['tier']} | {policy['applicability']} | "
+                         f"{_cell(metric['description'])} |")
         lines.append("")
     lines.extend(["## Provenance and caveats", "",
-                  "Metrics are calculated per MS run and merged without recalculation.",
+                  "The complete set of calculated QC metrics remains in mzQC per run",
+                  "and in losslessly consolidated accession mzQC. A website or",
+                  "MongoDB projection may select **stored values only**, never generate",
+                  "report-only scientific measurements. Grouped spectrum counts, MS2/MS3",
+                  "representation, exploratory reporter-ion evidence and denominators",
+                  "must retain their original definitions. A missing measurement is",
+                  "not a zero value, low score, or proof that an experimental method",
+                  "was absent.", "",
                   "`NumberOfSpectra_MS1`, `NumberOfSpectra_MS2`,",
                   "`MS2_PrecursorCharge_Fractions`, `ChromatographyDuration`,",
-                  "and precursor isolation-width statistics are already part of the registry.",
+                  "and isolation-width statistics remain in the scientific registry.",
                   "Ion-source CV metadata are observed only if the reader supplies it.",
                   "RT/duration do not reveal LC separation chemistry. Label/channel",
                   "annotations require verified submitter/SDRF evidence for writeback.", "",
