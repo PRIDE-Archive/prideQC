@@ -14,6 +14,7 @@ UV_IMAGE="${PRIDEQC_UV_IMAGE:-ghcr.io/astral-sh/uv:0.12.11}"
 DOTNET_IMAGE="${PRIDEQC_DOTNET_IMAGE:-mcr.microsoft.com/dotnet/runtime:8.0.29-bookworm-slim}"
 PMULTIQC_GIT_URL="${PRIDEQC_PMULTIQC_GIT_URL:-https://github.com/singjc/pmultiqc.git}"
 PMULTIQC_GIT_REF="${PRIDEQC_PMULTIQC_GIT_REF:-c1820dd93cbbf6f918881d23eb85b9a060df7a3e}"
+PRIDEPY_GIT_REF="${PRIDEQC_PRIDEPY_GIT_REF:-b39a05b32111c07fd5bed336da415c7a0753c69b}"
 OPENMS_GIT_URL="${PRIDEQC_OPENMS_GIT_URL:-https://github.com/OpenMS/OpenMS.git}"
 OPENMS_GIT_REQUESTED_REF="${PRIDEQC_OPENMS_GIT_REF:-develop}"
 OPENMS_BUILD_JOBS="${PRIDEQC_OPENMS_BUILD_JOBS:-8}"
@@ -107,6 +108,7 @@ build_args=(
     --build-arg "DOTNET_IMAGE=$DOTNET_IMAGE"
     --build-arg "PMULTIQC_GIT_URL=$PMULTIQC_GIT_URL"
     --build-arg "PMULTIQC_GIT_REF=$PMULTIQC_GIT_REF"
+    --build-arg "PRIDEPY_GIT_REF=$PRIDEPY_GIT_REF"
 )
 
 if [[ "${PRIDEQC_DOCKER_NO_CACHE:-0}" == 1 ]]; then
@@ -123,6 +125,7 @@ docker buildx build "${build_args[@]}" --target "$TARGET" -t "$IMAGE" .
 
 echo "==> Runtime smoke tests"
 docker run --rm "$IMAGE" prideqc --version
+docker run --rm "$IMAGE" python -c 'from pridepy.pridepy import PROTOCOL_CHOICES; assert "fire" in PROTOCOL_CHOICES.choices'
 docker run --rm "$IMAGE" python -c \
   "import importlib.metadata as m, pyopenms as oms; print('Python/pyOpenMS:', m.version('pyopenms')); assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile'); assert hasattr(oms, 'IDFreeMassErrorEstimator'); assert oms.BrukerTimsFile.Config.CentroidAlgo.HILL_BASED is not None"
 docker run --rm "$IMAGE" dotnet --info >/dev/null

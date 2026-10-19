@@ -34,6 +34,7 @@ env:
   DOCKER_METADATA_SHORT_SHA_LENGTH: '12'
   PMULTIQC_GIT_URL: 'https://github.com/singjc/pmultiqc.git'
   PMULTIQC_GIT_REF: 'c1820dd93cbbf6f918881d23eb85b9a060df7a3e'
+  PRIDEPY_GIT_REF: 'b39a05b32111c07fd5bed336da415c7a0753c69b'
   OPENMS_GIT_URL: 'https://github.com/OpenMS/OpenMS.git'
   OPENMS_GIT_REF: 'develop'
 
@@ -168,6 +169,7 @@ jobs:
             OPENMS_GIT_URL=${{ env.OPENMS_GIT_URL }}
             OPENMS_GIT_REF=${{ steps.buildinfo.outputs.openms_sha }}
             OPENMS_GIT_REQUESTED_REF=${{ env.OPENMS_GIT_REF }}
+            PRIDEPY_GIT_REF=${{ env.PRIDEPY_GIT_REF }}
           cache-from: type=gha,scope=prideqc-container
           cache-to: type=gha,mode=max,scope=prideqc-container
 
@@ -197,6 +199,7 @@ jobs:
             OPENMS_GIT_URL=${{ env.OPENMS_GIT_URL }}
             OPENMS_GIT_REF=${{ steps.buildinfo.outputs.openms_sha }}
             OPENMS_GIT_REQUESTED_REF=${{ env.OPENMS_GIT_REF }}
+            PRIDEPY_GIT_REF=${{ env.PRIDEPY_GIT_REF }}
           cache-from: type=gha,scope=prideqc-container
           cache-to: type=gha,mode=max,scope=prideqc-container
           provenance: mode=max
@@ -229,6 +232,7 @@ jobs:
           pyopenms_pin_sha256=${{ steps.buildinfo.outputs.pyopenms_pin_hash }}
           pmultiqc_requested_ref=${{ env.PMULTIQC_GIT_REF }}
           pmultiqc_resolved_sha=${{ steps.buildinfo.outputs.pmultiqc_sha }}
+          pridepy_deployment_sha=${{ env.PRIDEPY_GIT_REF }}
           openms_requested_ref=${{ env.OPENMS_GIT_REF }}
           openms_resolved_sha=${{ steps.buildinfo.outputs.openms_sha }}
           platform=linux/amd64

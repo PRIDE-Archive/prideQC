@@ -106,12 +106,16 @@ RUN set -eux; \
 
 FROM ${PYTHON_IMAGE} AS python-builder
 ARG NANOBIND_BACKEND_VERSION
+# Deployment-only pin: retain the distributable prideQC/PyPI dependency and uv.lock.
+ARG PRIDEPY_GIT_REF=b39a05b32111c07fd5bed336da415c7a0753c69b
 ENV UV_PYTHON_DOWNLOADS=0 \
     UV_PROJECT_ENVIRONMENT=/opt/prideqc/.venv \
     UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     PATH=/opt/prideqc/.venv/bin:/usr/local/bin:/usr/bin:/bin
 COPY --from=uv-bin /uv /usr/local/bin/uv
+# uv needs Git for the immutable FIRE-capable pridepy checkout.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /src/prideqc
 
 # Cache the locked transitive environment separately from project source.
@@ -135,6 +139,17 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     /opt/prideqc/.venv/bin/python -c \
       "import nanobind_backend, pyopenms as oms; assert hasattr(oms, 'IDFreeMassErrorEstimator')" && \
     /opt/prideqc/.venv/bin/prideqc --version
+
+# The lock retains published pridepy 0.0.16 for packaging/CI compatibility.
+# The image deliberately replaces ONLY that package with the verified Git SHA.
+RUN set -eux; \
+    uv pip install --python /opt/prideqc/.venv/bin/python --no-deps \
+      "git+https://github.com/PRIDE-Archive/pridepy.git@${PRIDEPY_GIT_REF}"; \
+    PRIDEPY_EXPECTED_SHA="${PRIDEPY_GIT_REF}" /opt/prideqc/.venv/bin/python -c \
+      'import importlib.metadata as m, json, os; from pridepy.pridepy import PROTOCOL_CHOICES; from pridepy.download.client import Client; d=m.distribution("pridepy"); source=json.loads(d.read_text("direct_url.json") or "{}"); assert source.get("vcs_info", {}).get("commit_id") == os.environ["PRIDEPY_EXPECTED_SHA"], source; assert "fire" in PROTOCOL_CHOICES.choices; assert callable(Client().download_file_by_name); print("PRIDEPY_PIN_AND_FIRE=PASS")'; \
+    printf 'pridepy_git_url=%s\npridepy_resolved_sha=%s\n' \
+      'https://github.com/PRIDE-Archive/pridepy.git' "${PRIDEPY_GIT_REF}" \
+      > /opt/prideqc/pridepy-build-info.txt
 
 # Keep reporting isolated from the scientific runtime. The current pmultiqc
 # development branch constrains pyOpenMS independently of prideQC, so installing
@@ -172,12 +187,17 @@ RUN set -eux; \
 
 # Optional quality target. build_docker.sh can build this before runtime.
 FROM python-builder AS quality
+# `uv sync --group dev` restores locked pridepy 0.0.16: override it again.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --group dev --no-install-package pyopenms --no-editable && \
     uv pip install --python /opt/prideqc/.venv/bin/python --no-deps \
       "nanobind-backend==${NANOBIND_BACKEND_VERSION}" /opt/prideqc/wheels/*.whl && \
     /opt/prideqc/.venv/bin/python -c \
       "import nanobind_backend, pyopenms as oms; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile'); assert hasattr(oms, 'IDFreeMassErrorEstimator'); assert oms.BrukerTimsFile.Config.CentroidAlgo.HILL_BASED is not None" && \
+    uv pip install --python /opt/prideqc/.venv/bin/python --no-deps \
+      "git+https://github.com/PRIDE-Archive/pridepy.git@${PRIDEPY_GIT_REF}" && \
+    PRIDEPY_EXPECTED_SHA="${PRIDEPY_GIT_REF}" /opt/prideqc/.venv/bin/python -c \
+      'import importlib.metadata as m, json, os; from pridepy.pridepy import PROTOCOL_CHOICES; from pridepy.download.client import Client; d=m.distribution("pridepy"); source=json.loads(d.read_text("direct_url.json") or "{}"); assert source.get("vcs_info", {}).get("commit_id") == os.environ["PRIDEPY_EXPECTED_SHA"], source; assert "fire" in PROTOCOL_CHOICES.choices; assert callable(Client().download_file_by_name); print("PRIDEPY_PIN_AND_FIRE=PASS")' && \
     /opt/prideqc/.venv/bin/python -m compileall -q src tests && \
     PRIDE_QC_REQUIRE_INTEGRATION=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /opt/prideqc/.venv/bin/python -m unittest discover -s tests -v && \
     /opt/prideqc/.venv/bin/ruff check . && \
@@ -212,6 +232,7 @@ RUN apt-get update && \
 
 COPY --from=python-builder /opt/prideqc/.venv /opt/prideqc/.venv
 COPY --from=python-builder /opt/prideqc/openms-build-info.txt /opt/prideqc/openms-build-info.txt
+COPY --from=python-builder /opt/prideqc/pridepy-build-info.txt /opt/prideqc/pridepy-build-info.txt
 COPY --from=reporting-builder /opt/pmultiqc/.venv /opt/pmultiqc/.venv
 COPY --from=reporting-builder /out/pmultiqc-build-info.txt /opt/prideqc/pmultiqc-build-info.txt
 COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
@@ -254,6 +275,7 @@ RUN set -eux; \
       echo "openms_build_ref=${OPENMS_GIT_REF}"; \
       echo "nanobind_backend_version=${NANOBIND_BACKEND_VERSION}"; \
       cat /opt/prideqc/openms-build-info.txt; \
+      cat /opt/prideqc/pridepy-build-info.txt; \
       echo "cargo_lock_sha256=${CARGO_LOCK_HASH}"; \
       printf 'rustc_version='; cat /tmp/rustc-version.txt; \
       printf 'cargo_version='; cat /tmp/cargo-version.txt; \
@@ -270,6 +292,7 @@ RUN set -eux; \
     rm -f /tmp/rustc-version.txt /tmp/cargo-version.txt; \
     dotnet --info >/dev/null; \
     prideqc --version; \
+    python -c 'from pridepy.pridepy import PROTOCOL_CHOICES; assert "fire" in PROTOCOL_CHOICES.choices'; \
     python -c "import pyopenms as oms; assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile'); assert hasattr(oms, 'IDFreeMassErrorEstimator'); assert oms.BrukerTimsFile.Config.CentroidAlgo.HILL_BASED is not None"; \
     /opt/pmultiqc/.venv/bin/multiqc --version; \
     /opt/pmultiqc/.venv/bin/python -c "from pmultiqc.modules.mzqc import MzQCModule, parse_mzqc_document; print('pmultiqc mzQC module: OK')"; \
