@@ -300,11 +300,8 @@ class _Consumer:
         pass
 
     def consumeChromatogram(self, chromatogram: Any) -> None:
-        rt, _ = chromatogram.get_peaks()
-        self.sink.consume_chromatogram(
-            np.asarray(rt, dtype=float),
-            _enum_int(chromatogram.getChromatogramType()),
-        )
+        # Required by the pyOpenMS consumer interface; chromatograms are not QC inputs.
+        pass
 
     def consumeSpectrum(self, spectrum: Any) -> None:
         consume_native = getattr(self.sink, "consume_native_spectrum", None)
@@ -481,9 +478,6 @@ class PyOpenMSReader:
             consume_native=consume_native,
         )
         spectra_getter = getattr(experiment, "getSpectra", None) or getattr(experiment, "get_spectra", None)
-        chromatograms_getter = getattr(experiment, "getChromatograms", None) or getattr(
-            experiment, "get_chromatograms", None
-        )
         if callable(spectra_getter):
             spectra = spectra_getter()
         elif callable(getattr(experiment, "getNrSpectra", None)) and callable(
@@ -494,9 +488,6 @@ class PyOpenMSReader:
             spectra = experiment
         for spectrum in spectra:
             consumer.consumeSpectrum(spectrum)
-        if callable(chromatograms_getter):
-            for chromatogram in chromatograms_getter():
-                consumer.consumeChromatogram(chromatogram)
 
     @staticmethod
     def _extract_d_archive(path: Path) -> tuple[Any, Path]:

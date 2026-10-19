@@ -1,62 +1,21 @@
 key	tier	applicability	label	caveat
 NumberOfMSLevels	core	all	Run / MS levels	Distinct MS levels recorded; not a quality score.
-NumberOfSpectra	core	all	Total spectra	Counts every MS level including empty scans.
-NumberOfSpectralPeaks	diagnostic	all	NumberOfSpectralPeaks	See scientific registry definition.
 ChromatographyDuration	core	all	Run time (s)	RT span from spectra, not LC separation chemistry.
-NumberOfChromatograms	diagnostic	chromatograms	NumberOfChromatograms	See scientific registry definition.
-ChromatogramTypes	diagnostic	chromatograms	ChromatogramTypes	See scientific registry definition.
-ChromatogramRTRange	extended	chromatograms	ChromatogramRTRange	See scientific registry definition.
 FAIMS_CV_Values	diagnostic	faims	FAIMS_CV_Values	See scientific registry definition.
 FAIMS_CV_Count	diagnostic	faims	FAIMS_CV_Count	See scientific registry definition.
 FAIMS_CV_Range	diagnostic	faims	FAIMS_CV_Range	See scientific registry definition.
 NumberOfSpectra_MS1	core	ms1	MS1 spectra	Includes scans with no detected peaks.
-RtRange_MS1	diagnostic	ms1	RtRange_MS1	See scientific registry definition.
-EmptyScans_MS1	core	ms1	Empty MS1 scans	Zero-TIC scans; interpret alongside the MS1 count.
 PeakDensity_MS1_Quantiles	core	ms1	MS1 peaks per scan (quartiles)	Valid stored peaks per scan, not identified molecular features.
-BasePeak_MS1_Mean	extended	ms1	BasePeak_MS1_Mean	See scientific registry definition.
-TIC_MS1_Median	core	ms1	Median MS1 TIC	Arbitrary instrument units; do not compare without calibration.
-TIC_MS1_CV	core	ms1	MS1 TIC variability (CV)	Undefined if the mean TIC is zero or too few scans are available.
-TIC_MS1_Area	diagnostic	ms1	TIC_MS1_Area	See scientific registry definition.
-TIC_MS1_Area_RTQuantiles	extended	ms1	TIC_MS1_Area_RTQuantiles	See scientific registry definition.
-TIC_MS1_QuartileLogRatios	extended	ms1	TIC_MS1_QuartileLogRatios	See scientific registry definition.
-ScanRate_MS1	core	ms1	MS1 scan rate	Scans per minute over the MS1 RT span.
 FastestFrequency_MS1	extended	ms1	FastestFrequency_MS1	See scientific registry definition.
 RT_MS1_Quantiles	extended	ms1	RT_MS1_Quantiles	See scientific registry definition.
 ObservedMzRange_MS1	diagnostic	ms1	ObservedMzRange_MS1	See scientific registry definition.
-ScanWindow_MS1	diagnostic	ms1	ScanWindow_MS1	See scientific registry definition.
-PeakTypes_MS1	diagnostic	ms1	PeakTypes_MS1	See scientific registry definition.
-Polarity_MS1	diagnostic	ms1	Polarity_MS1	See scientific registry definition.
-InvalidPeakCount_MS1	diagnostic	ms1	InvalidPeakCount_MS1	See scientific registry definition.
-TIC_MS1_SignalJump10x_Count	diagnostic	ms1	TIC_MS1_SignalJump10x_Count	See scientific registry definition.
-TIC_MS1_SignalFall10x_Count	diagnostic	ms1	TIC_MS1_SignalFall10x_Count	See scientific registry definition.
 AvgCycleTime_MS1	diagnostic	ms1	AvgCycleTime_MS1	See scientific registry definition.
 RT_TIC_Quantiles	extended	ms1	RT_TIC_Quantiles	See scientific registry definition.
 NumberOfSpectra_MS2	core	ms2	MS2 spectra	Includes scans with no detected peaks.
-RtRange_MS2	diagnostic	ms2	RtRange_MS2	See scientific registry definition.
-EmptyScans_MS2	core	ms2	Empty MS2 scans	Zero-TIC scans; interpret alongside the MS2 count.
 PeakDensity_MS2_Quantiles	core	ms2	MS2 peaks per scan (quartiles)	Valid stored peaks per scan, not identified molecular features.
-BasePeak_MS2_Mean	extended	ms2	BasePeak_MS2_Mean	See scientific registry definition.
-TIC_MS2_Median	core	ms2	Median MS2 TIC	Arbitrary instrument units; do not compare without calibration.
-TIC_MS2_CV	diagnostic	ms2	TIC_MS2_CV	See scientific registry definition.
-TIC_MS2_Area	diagnostic	ms2	TIC_MS2_Area	See scientific registry definition.
-TIC_MS2_Area_RTQuantiles	extended	ms2	TIC_MS2_Area_RTQuantiles	See scientific registry definition.
-TIC_MS2_QuartileLogRatios	extended	ms2	TIC_MS2_QuartileLogRatios	See scientific registry definition.
-ScanRate_MS2	core	ms2	MS2 scan rate	Scans per minute over the MS2 RT span.
 FastestFrequency_MS2	extended	ms2	FastestFrequency_MS2	See scientific registry definition.
 RT_MS2_Quantiles	extended	ms2	RT_MS2_Quantiles	See scientific registry definition.
 ObservedMzRange_MS2	diagnostic	ms2	ObservedMzRange_MS2	See scientific registry definition.
-ScanWindow_MS2	diagnostic	ms2	ScanWindow_MS2	See scientific registry definition.
-PeakTypes_MS2	diagnostic	ms2	PeakTypes_MS2	See scientific registry definition.
-Polarity_MS2	diagnostic	ms2	Polarity_MS2	See scientific registry definition.
-InvalidPeakCount_MS2	diagnostic	ms2	InvalidPeakCount_MS2	See scientific registry definition.
-TIC_MS2_SignalJump10x_Count	diagnostic	ms2	TIC_MS2_SignalJump10x_Count	See scientific registry definition.
-TIC_MS2_SignalFall10x_Count	diagnostic	ms2	TIC_MS2_SignalFall10x_Count	See scientific registry definition.
-MzRange_MS2	extended	ms2	MzRange_MS2	See scientific registry definition.
-PrecursorMz_MS2_Median	diagnostic	ms2	PrecursorMz_MS2_Median	See scientific registry definition.
-PrecursorIntensity_MS2_Quantiles	extended	ms2	PrecursorIntensity_MS2_Quantiles	See scientific registry definition.
-PrecursorIntensity_MS2_Mean	extended	ms2	PrecursorIntensity_MS2_Mean	See scientific registry definition.
-PrecursorIntensity_MS2_Sd	extended	ms2	PrecursorIntensity_MS2_Sd	See scientific registry definition.
-PrecursorIntensity_MS2_MissingCount	diagnostic	ms2	PrecursorIntensity_MS2_MissingCount	See scientific registry definition.
 IsolationWidth_MS2_Median	core	ms2	Median MS2 isolation width	Requires positive recorded isolation offsets; absent is not zero.
 IsolationWidth_MS2_Quantiles	diagnostic	ms2	IsolationWidth_MS2_Quantiles	See scientific registry definition.
 IsolationWidth_MS2_Min	extended	ms2	IsolationWidth_MS2_Min	See scientific registry definition.

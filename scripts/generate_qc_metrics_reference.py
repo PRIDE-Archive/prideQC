@@ -14,7 +14,7 @@ PRESENTATION = ROOT / "docs" / "metric-presentation.tsv"
 
 TIERS = ("core", "diagnostic", "extended")
 APPLICABILITY = ("all", "ms1", "ms2", "ms1_ms2", "cycles", "faims", "chromatograms")
-CORE_COUNT = 18
+CORE_COUNT = 10
 
 ANNOTATIONS = [
     ("acquisition_method", "DDA/DIA/PRM/SRM run classification", "Explicit header CV or DDA/DIA inference; targeted scans abstain"),
@@ -108,7 +108,7 @@ def render() -> str:
         "that a value exists for every run. Metrics absent or undefined in the source",
         "mzQC must remain absent/undefined; do not fill missing values with zero.", "",
         "## Recommended PRIDE website overview", "",
-        "These 18 **core display candidates** cover run structure, signal and acquisition.",
+        "These 10 **core display candidates** cover run structure and acquisition.",
         "Show a value or visualization only when the run has the corresponding",
         "stored mzQC metric. For SRM/MRM or other MS1-free acquisitions, MS1 and",
         "MS1-delimited cycle entries may be inapplicable; this is not QC failure.", "",
@@ -124,9 +124,7 @@ def render() -> str:
                 f"{_cell(policy['caveat'])} |"
             )
     lines.extend([
-        "", "The counts include empty scans where stated by the registry. MS1/MS2",
-        "TIC values have arbitrary instrument-dependent intensity units and are",
-        "**not comparable across uncalibrated runs or instrument types**. Charge",
+        "", "Counts include empty scans where stated by the registry. Charge",
         "fractions retain unknowns in the all-MS2 denominator. Quantile and table",
         "metrics remain multivalued; the overview must not silently collapse",
         "them into an undocumented scalar or recompute them from mzQC.", "",
@@ -184,7 +182,7 @@ def render() -> str:
             ])
         lines.extend([":::", ""])
     lines.extend(["## Provenance and caveats", "",
-                  "The complete set of calculated QC metrics remains in mzQC per run",
+                  "The selected set of calculated QC metrics remains in mzQC per run",
                   "and in losslessly consolidated accession mzQC. A website or",
                   "MongoDB projection may select **stored values only**, never generate",
                   "report-only scientific measurements. Grouped spectrum counts, MS2/MS3",

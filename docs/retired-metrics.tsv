@@ -23,3 +23,44 @@ AcquisitionCycle_TargetOrderDistinctCount	QCPRIDE:971C73C2545A365A4D7E	Ordered t
 AcquisitionCycle_TargetOrderModalFraction	QCPRIDE:4A5FB670C1ACFB1FBDB2	Modal target-order fraction is experimental; assess robustness under staggered and variable-window DIA.
 ChargeMin	QCPRIDE:87C7AAEB9CFD9A6651E1	Charge minimum duplicates the charge histogram and is highly sensitive to one outlier.
 ChargeMax	QCPRIDE:7BEF7C9E6BFC65BFAB6D	Charge maximum duplicates histogram and is sensitive to misassigned extreme charges.
+BasePeak_MS1_Mean	QCPRIDE:D452DD102903397E2819	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+BasePeak_MS2_Mean	QCPRIDE:25C2A0E5AF8883957F5E	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+ChromatogramRTRange	QCPRIDE:DA479CE356AAFB988099	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+ChromatogramTypes	QCPRIDE:F6028B02FCB099FDD16A	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+EmptyScans_MS1	QCPRIDE:6F59F45176612D8C6992	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+EmptyScans_MS2	QCPRIDE:3BE75D0FF4AD59C42832	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+InvalidPeakCount_MS1	QCPRIDE:4ADF3C521FC5FF049772	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+InvalidPeakCount_MS2	QCPRIDE:0F8B65A410A572FEE4D7	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+MzRange_MS2	QCPRIDE:3432120DEC9FAE1739E7	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+NumberOfChromatograms	QCPRIDE:3A03550E7F73CC8BC2E7	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+NumberOfSpectra	QCPRIDE:8418755F449095444376	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+NumberOfSpectralPeaks	QCPRIDE:EED0065AF36234685A04	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+PeakTypes_MS1	QCPRIDE:658F0AF60FACA5FDD19E	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+PeakTypes_MS2	QCPRIDE:02BD471D53BE3411913F	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+Polarity_MS1	QCPRIDE:5D7B6DFCAC3E42EAF25F	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+Polarity_MS2	QCPRIDE:6A1C64BAB5CCF09A5DE3	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+PrecursorIntensity_MS2_Mean	QCPRIDE:36D2085F9869CE667625	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+PrecursorIntensity_MS2_MissingCount	QCPRIDE:37ABD88F90B17EAA841D	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+PrecursorIntensity_MS2_Quantiles	QCPRIDE:8FB2EFF7D173D0D4C3A2	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+PrecursorIntensity_MS2_Sd	QCPRIDE:AA281BF4225DD99B5942	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+PrecursorMz_MS2_Median	QCPRIDE:0DB185A646DB806298FC	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+RtRange_MS1	QCPRIDE:77A5ED9E8CB8C7F8CD4F	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+RtRange_MS2	QCPRIDE:55D96D3835BFEE5AD7AB	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+ScanRate_MS1	QCPRIDE:BC47FFC025E342B4AD8D	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+ScanRate_MS2	QCPRIDE:D3718560FE9B29568175	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+ScanWindow_MS1	QCPRIDE:05EB1DDF8CCEE51BE48C	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+ScanWindow_MS2	QCPRIDE:BBD580CB1663521C4976	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS1_Area	QCPRIDE:01859CE82042A7057DDF	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS1_Area_RTQuantiles	QCPRIDE:59BA94235C553AF4FDC6	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS1_CV	QCPRIDE:00C4C4D556C5B163B0FE	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS1_Median	QCPRIDE:C9C317E0A64A03006F7D	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS1_QuartileLogRatios	QCPRIDE:604EE74E7854759E05FC	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS1_SignalFall10x_Count	QCPRIDE:968FA11A94C7458E4F1C	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS1_SignalJump10x_Count	QCPRIDE:CC18B4EE12E3DE4D10CC	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS2_Area	QCPRIDE:9FD64B0DA7A59E8514E2	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS2_Area_RTQuantiles	QCPRIDE:E191EB22593B10C83302	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS2_CV	QCPRIDE:8AF7F9131561A60EDB62	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS2_Median	QCPRIDE:D249949F6A3F6A3EBF3E	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS2_QuartileLogRatios	QCPRIDE:80B75AE92157AF8E1090	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS2_SignalFall10x_Count	QCPRIDE:DCF0DBC8D6F83087ED6E	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+TIC_MS2_SignalJump10x_Count	QCPRIDE:4BE7DF39FCE21F9E3583	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.

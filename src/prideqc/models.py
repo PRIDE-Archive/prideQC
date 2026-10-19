@@ -161,8 +161,6 @@ class AnalysisResult:
 class SpectrumSink(Protocol):
     def consume_spectrum(self, spectrum: Spectrum) -> None: ...
 
-    def consume_chromatogram(self, rt: FloatArray, kind: int) -> None: ...
-
 
 class SpectrumReader(Protocol):
     """A vendor or open-format adapter streams into the same analysis sink."""

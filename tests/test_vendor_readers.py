@@ -54,9 +54,6 @@ class _Sink(SpectrumSink):
     def consume_spectrum(self, spectrum):
         pass
 
-    def consume_chromatogram(self, rt, kind):
-        pass
-
 
 class VendorReaderTests(unittest.TestCase):
     def test_thermo_reader_is_feature_detected_and_used(self):

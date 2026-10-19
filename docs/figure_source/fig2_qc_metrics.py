@@ -1,5 +1,5 @@
 """Figure 2 - how prideQC reduces a synthetic LC-MS run to compact QC metrics.
-Every number printed in the figure is produced by prideQC's own metrics.py on synthetic scans."""
+Scientific QC values in the figure are computed by prideQC; other traces are illustrative only."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def build() -> Fig:
         W,
         H,
         "How prideQC computes QC metrics from a spectrum stream",
-        "A synthetic 90 minute DDA LC-MS/MS run is reduced to TIC, base-peak, scan-rate, charge, isolation-window and "
+        "A synthetic 90 minute DDA LC-MS/MS run illustrates TIC and base-peak traces, plus published cycle, charge, isolation-window and "
         "repeated-target metrics. Formulas are those used in prideQC's metric code.",
     )
 
@@ -57,7 +57,7 @@ def build() -> Fig:
     f.text(
         60,
         82,
-        "Synthetic 90-minute DDA LC-MS/MS run. Every value shown is computed by prideQC's own metric code on the synthetic scans.",
+        "Synthetic 90-minute DDA LC-MS/MS run. TIC/base-peak plots illustrate signals; numerical QC values are taken from the registered metric code.",
         size=15,
         fill=MUTED,
         tag="title",
@@ -307,10 +307,10 @@ def build() -> Fig:
         cx,
         cy + ph + 112,
         [
-            "TIC area = Σ ΔRT × (TIC_i + TIC_i+1) / 2",
-            f"  run total {sci(M['TIC_MS1_Area'])} a.u.·s",
-            "CV = sample SD (n−1) / mean",
-            f"  TIC_MS1_CV = {M['TIC_MS1_CV']:.2f}",
+            "TIC trace is illustrative only",
+            "  (illustrative trace; not a registered metric)",
+            "Former TIC variability metric removed",
+            "  TIC variation is not exported as QC",
         ],
         BLUE,
     )
@@ -341,12 +341,12 @@ def build() -> Fig:
     )
     for t, v in list(zip(D["ms1_rt"], D["ms1_bp"], strict=False))[::2]:
         f.circle(bx(t), by_(v), 1.35, fill=BLUE, opacity=0.35)
-    mean_bp = M["BasePeak_MS1_Mean"]
+    mean_bp = float(np.mean(D["ms1_bp"]))  # figure-only illustration
     f.line(px2, by_(mean_bp), px2 + pw_ - 14, by_(mean_bp), AMBER, 2, dash="6 4")
     f.text(
         px2 + pw_ - 14,
         by_(mean_bp) - 8,
-        f"mean {sci(mean_bp)}",
+        f"illustrative mean {sci(mean_bp)}",
         size=13.5,
         weight="600",
         fill=AMBER,
@@ -371,7 +371,7 @@ def build() -> Fig:
         cy + ph + 112,
         [
             "base peak = max(intensity) per scan",
-            f"  BasePeak_MS1_Mean = {sci(mean_bp)}",
+            "  example-only mean; not exported to mzQC",
             "plotted maximum is an illustrative raw signal,",
             "  not an exported QC metric",
         ],
@@ -473,8 +473,8 @@ def build() -> Fig:
         cx,
         cy + ph + 112,
         [
-            "ScanRate = n scans / RT span × 60",
-            f"  MS1 {M['ScanRate_MS1']:.1f} scans/min",
+            "Mean MS1 cycle interval (seconds)",
+            f"  MS1 {M['AvgCycleTime_MS1']:.2f} seconds",
             "FastestFrequency = max scans in 60 s / 60",
             f"  MS2 {M['FastestFrequency_MS2']:.1f} Hz",
         ],

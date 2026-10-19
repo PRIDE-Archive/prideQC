@@ -147,7 +147,7 @@ class TechnicalAnnotator:
         annotations.append(Annotation(
             "chromatography_type", None, UNAVAILABLE,
             "Chromatography separation chemistry is not inferable from scan RT alone",
-            "Run duration and chromatograms are QC measurements, not evidence for "
+            "Run duration and scan counts are QC measurements, not evidence for "
             "reversed-phase, HILIC, SCX, LC flow regime or column type.",
         ))
         for name, column in (

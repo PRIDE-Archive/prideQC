@@ -32,7 +32,7 @@ from prideqc.mass_error import (
 )
 from prideqc.mass_shift import MassShiftCollector
 from prideqc.metrics import QCMetricCalculator, RunSummary
-from prideqc.models import AnalysisResult, EvidenceCollector, FloatArray, Spectrum, SpectrumReader
+from prideqc.models import AnalysisResult, EvidenceCollector, Spectrum, SpectrumReader
 from prideqc.mzqc import MzQCWriter
 from prideqc.qc_sdrf import write_qc_sdrf_proposals
 from prideqc.refinement_adjudication import (
@@ -67,9 +67,6 @@ class _AnalysisSink:
         self.summary.consume_spectrum(spectrum)
         for collector in self.collectors:
             collector.consume_spectrum(spectrum)
-
-    def consume_chromatogram(self, rt: FloatArray, kind: int) -> None:
-        self.summary.consume_chromatogram(rt, kind)
 
 
 class Analyzer:

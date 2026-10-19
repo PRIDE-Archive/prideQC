@@ -907,8 +907,9 @@ class SerializationTests(unittest.TestCase):
         )
 
     def test_cv_shape_stable_when_unavailable(self):
-        self.assertEqual(definition(Metric("MzRange_MS2", None)).shape, "tuple")
-        self.assertEqual(definition(Metric("MzRange_MS2", [400, 600])).shape, "tuple")
+        with self.assertRaisesRegex(ValueError, "Unregistered QC metric"):
+            definition(Metric("MzRange_MS2", None))
+
 
     def test_unknown_metric_cannot_be_mislabeled(self):
         with self.assertRaisesRegex(ValueError, "Unregistered"):

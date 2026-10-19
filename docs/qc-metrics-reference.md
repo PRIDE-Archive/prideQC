@@ -6,15 +6,15 @@ selects which existing mzQC metrics are prominently displayed; it does
 **not** change acquisition, calculation, CV identity, serialization or merging.
 Experimental method and label annotations are recorded separately.
 
-**Registered QC metric definitions: 80.**
-Presentation tiers: **18 core**, **36 diagnostic**,
-and **26 extended**. A registration is not a promise
+**Registered QC metric definitions: 39.**
+Presentation tiers: **10 core**, **14 diagnostic**,
+and **15 extended**. A registration is not a promise
 that a value exists for every run. Metrics absent or undefined in the source
 mzQC must remain absent/undefined; do not fill missing values with zero.
 
 ## Recommended PRIDE website overview
 
-These 18 **core display candidates** cover run structure, signal and acquisition.
+These 10 **core display candidates** cover run structure and acquisition.
 Show a value or visualization only when the run has the corresponding
 stored mzQC metric. For SRM/MRM or other MS1-free acquisitions, MS1 and
 MS1-delimited cycle entries may be inapplicable; this is not QC failure.
@@ -25,27 +25,17 @@ value shapes and definitions remain available in the sections below.
 | Core metric | Applies to | Interpretation / limitation |
 | --- | --- | --- |
 | Run / MS levels | all | Distinct MS levels recorded; not a quality score. |
-| Total spectra | all | Counts every MS level including empty scans. |
 | Run time (s) | all | RT span from spectra, not LC separation chemistry. |
 | MS1 spectra | ms1 | Includes scans with no detected peaks. |
-| Empty MS1 scans | ms1 | Zero-TIC scans; interpret alongside the MS1 count. |
 | MS1 peaks per scan (quartiles) | ms1 | Valid stored peaks per scan, not identified molecular features. |
-| Median MS1 TIC | ms1 | Arbitrary instrument units; do not compare without calibration. |
-| MS1 TIC variability (CV) | ms1 | Undefined if the mean TIC is zero or too few scans are available. |
-| MS1 scan rate | ms1 | Scans per minute over the MS1 RT span. |
 | MS2 spectra | ms2 | Includes scans with no detected peaks. |
-| Empty MS2 scans | ms2 | Zero-TIC scans; interpret alongside the MS2 count. |
 | MS2 peaks per scan (quartiles) | ms2 | Valid stored peaks per scan, not identified molecular features. |
-| Median MS2 TIC | ms2 | Arbitrary instrument units; do not compare without calibration. |
-| MS2 scan rate | ms2 | Scans per minute over the MS2 RT span. |
 | Median MS2 isolation width | ms2 | Requires positive recorded isolation offsets; absent is not zero. |
 | MS1/MS2 scan ratio | ms1_ms2 | Undefined when there are no MS2 scans; not a performance score. |
 | MS2 scans per acquisition cycle | cycles | MS1-delimited cycles only; not applicable to MS1-free targeted runs. |
 | MS2 precursor charge fractions | ms2 | Denominator is all MS2 scans; unknown charge is retained. |
 
-The counts include empty scans where stated by the registry. MS1/MS2
-TIC values have arbitrary instrument-dependent intensity units and are
-**not comparable across uncalibrated runs or instrument types**. Charge
+Counts include empty scans where stated by the registry. Charge
 fractions retain unknowns in the all-MS2 denominator. Quantile and table
 metrics remain multivalued; the overview must not silently collapse
 them into an undocumented scalar or recompute them from mzQC.
@@ -138,14 +128,11 @@ and the original metric descriptions.
 
 :::
 
-### Chromatography (4)
+### Chromatography (1)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
 | `ChromatographyDuration` | core | all |
-| `NumberOfChromatograms` | diagnostic | chromatograms |
-| `ChromatogramTypes` | diagnostic | chromatograms |
-| `ChromatogramRTRange` | extended | chromatograms |
 
 :::{dropdown} Full definitions and CV accessions — Chromatography
 
@@ -153,111 +140,19 @@ and the original metric descriptions.
   - CV: `MS:4000053`
   - Definition: Last minus first finite spectrum RT, over all MS levels.
 
-- **`NumberOfChromatograms`** — diagnostic; scalar; applies to chromatograms
-  - CV: `QCPRIDE:3A03550E7F73CC8BC2E7`
-  - Definition: Number of stored chromatograms.
-
-- **`ChromatogramTypes`** — diagnostic; table; applies to chromatograms
-  - CV: `QCPRIDE:F6028B02FCB099FDD16A`
-  - Definition: Counts grouped by OpenMS ChromatogramType enum value; engine version is recorded.
-
-- **`ChromatogramRTRange`** — extended; tuple; applies to chromatograms
-  - CV: `QCPRIDE:DA479CE356AAFB988099`
-  - Definition: Minimum and maximum finite chromatogram time, in seconds.
-
 :::
 
-### Ion intensity and TIC (17)
+### Ion intensity and TIC (1)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
-| `BasePeak_MS1_Mean` | extended | ms1 |
-| `TIC_MS1_Median` | core | ms1 |
-| `TIC_MS1_CV` | core | ms1 |
-| `TIC_MS1_Area` | diagnostic | ms1 |
-| `TIC_MS1_Area_RTQuantiles` | extended | ms1 |
-| `TIC_MS1_QuartileLogRatios` | extended | ms1 |
-| `TIC_MS1_SignalJump10x_Count` | diagnostic | ms1 |
-| `TIC_MS1_SignalFall10x_Count` | diagnostic | ms1 |
 | `RT_TIC_Quantiles` | extended | ms1 |
-| `BasePeak_MS2_Mean` | extended | ms2 |
-| `TIC_MS2_Median` | core | ms2 |
-| `TIC_MS2_CV` | diagnostic | ms2 |
-| `TIC_MS2_Area` | diagnostic | ms2 |
-| `TIC_MS2_Area_RTQuantiles` | extended | ms2 |
-| `TIC_MS2_QuartileLogRatios` | extended | ms2 |
-| `TIC_MS2_SignalJump10x_Count` | diagnostic | ms2 |
-| `TIC_MS2_SignalFall10x_Count` | diagnostic | ms2 |
 
 :::{dropdown} Full definitions and CV accessions — Ion intensity and TIC
-
-- **`BasePeak_MS1_Mean`** — extended; scalar; applies to ms1
-  - CV: `QCPRIDE:D452DD102903397E2819`
-  - Definition: Mean of per-spectrum maximum valid intensity, excluding scans with no valid peaks, MS1.
-
-- **`TIC_MS1_Median`** — core; scalar; applies to ms1
-  - CV: `QCPRIDE:C9C317E0A64A03006F7D`
-  - Definition: Median sum of valid peak intensities per scan, MS1.
-
-- **`TIC_MS1_CV`** — core; scalar; applies to ms1
-  - CV: `QCPRIDE:00C4C4D556C5B163B0FE`
-  - Definition: Sample standard deviation (ddof=1) divided by mean TIC, MS1.
-
-- **`TIC_MS1_Area`** — diagnostic; scalar; applies to ms1
-  - CV: `QCPRIDE:01859CE82042A7057DDF`
-  - Definition: Trapezoidal TIC integral against RT, stable time order, intensity times seconds, MS1.
-
-- **`TIC_MS1_Area_RTQuantiles`** — extended; tuple; applies to ms1
-  - CV: `QCPRIDE:59BA94235C553AF4FDC6`
-  - Definition: Four exact integrals of piecewise-linear TIC split at scan-RT quartiles, intensity times seconds, MS1.
-
-- **`TIC_MS1_QuartileLogRatios`** — extended; tuple; applies to ms1
-  - CV: `QCPRIDE:604EE74E7854759E05FC`
-  - Definition: Natural logs of TIC Q2/Q1, Q3/Q2, Q4/Q3 (Q4=max), MS1.
-
-- **`TIC_MS1_SignalJump10x_Count`** — diagnostic; scalar; applies to ms1
-  - CV: `QCPRIDE:CC18B4EE12E3DE4D10CC`
-  - Definition: Adjacent sorted-TIC ratios >=10, with strictly positive previous TIC, MS1.
-
-- **`TIC_MS1_SignalFall10x_Count`** — diagnostic; scalar; applies to ms1
-  - CV: `QCPRIDE:968FA11A94C7458E4F1C`
-  - Definition: Adjacent sorted-TIC ratios <=0.1, with strictly positive previous TIC; zero next TIC counts, MS1.
 
 - **`RT_TIC_Quantiles`** — extended; tuple; applies to ms1
   - CV: `MS:4000183`
   - Definition: Four intervals at first scan-wise cumulative MS1 TIC quartile crossings, divided by the MS1 time span; this uses accumulation, not integration.
-
-- **`BasePeak_MS2_Mean`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:25C2A0E5AF8883957F5E`
-  - Definition: Mean of per-spectrum maximum valid intensity, excluding scans with no valid peaks, MS2.
-
-- **`TIC_MS2_Median`** — core; scalar; applies to ms2
-  - CV: `QCPRIDE:D249949F6A3F6A3EBF3E`
-  - Definition: Median sum of valid peak intensities per scan, MS2.
-
-- **`TIC_MS2_CV`** — diagnostic; scalar; applies to ms2
-  - CV: `QCPRIDE:8AF7F9131561A60EDB62`
-  - Definition: Sample standard deviation (ddof=1) divided by mean TIC, MS2.
-
-- **`TIC_MS2_Area`** — diagnostic; scalar; applies to ms2
-  - CV: `QCPRIDE:9FD64B0DA7A59E8514E2`
-  - Definition: Trapezoidal TIC integral against RT, stable time order, intensity times seconds, MS2.
-
-- **`TIC_MS2_Area_RTQuantiles`** — extended; tuple; applies to ms2
-  - CV: `QCPRIDE:E191EB22593B10C83302`
-  - Definition: Four exact integrals of piecewise-linear TIC split at scan-RT quartiles, intensity times seconds, MS2.
-
-- **`TIC_MS2_QuartileLogRatios`** — extended; tuple; applies to ms2
-  - CV: `QCPRIDE:80B75AE92157AF8E1090`
-  - Definition: Natural logs of TIC Q2/Q1, Q3/Q2, Q4/Q3 (Q4=max), MS2.
-
-- **`TIC_MS2_SignalJump10x_Count`** — diagnostic; scalar; applies to ms2
-  - CV: `QCPRIDE:4BE7DF39FCE21F9E3583`
-  - Definition: Adjacent sorted-TIC ratios >=10, with strictly positive previous TIC, MS2.
-
-- **`TIC_MS2_SignalFall10x_Count`** — diagnostic; scalar; applies to ms2
-  - CV: `QCPRIDE:DCF0DBC8D6F83087ED6E`
-  - Definition: Adjacent sorted-TIC ratios <=0.1, with strictly positive previous TIC; zero next TIC counts, MS2.
 
 :::
 
@@ -285,53 +180,28 @@ and the original metric descriptions.
 
 :::
 
-### Other run-level QC (9)
+### Other run-level QC (4)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
-| `EmptyScans_MS1` | core | ms1 |
 | `ObservedMzRange_MS1` | diagnostic | ms1 |
-| `ScanWindow_MS1` | diagnostic | ms1 |
 | `AvgCycleTime_MS1` | diagnostic | ms1 |
-| `EmptyScans_MS2` | core | ms2 |
 | `ObservedMzRange_MS2` | diagnostic | ms2 |
-| `ScanWindow_MS2` | diagnostic | ms2 |
-| `MzRange_MS2` | extended | ms2 |
 | `MS1_to_MS2_Ratio` | core | ms1_ms2 |
 
 :::{dropdown} Full definitions and CV accessions — Other run-level QC
-
-- **`EmptyScans_MS1`** — core; scalar; applies to ms1
-  - CV: `QCPRIDE:6F59F45176612D8C6992`
-  - Definition: MS1 scans with no valid positive intensity (zero TIC).
 
 - **`ObservedMzRange_MS1`** — diagnostic; tuple; applies to ms1
   - CV: `QCPRIDE:2A7C646C00FBCB34F4F8`
   - Definition: Min/max valid peak m/z; this is an observed range, not the instrument scan window, MS1.
 
-- **`ScanWindow_MS1`** — diagnostic; tuple; applies to ms1
-  - CV: `QCPRIDE:05EB1DDF8CCEE51BE48C`
-  - Definition: Envelope of recorded scan-window bounds in Th (m/z), MS1.
-
 - **`AvgCycleTime_MS1`** — diagnostic; scalar; applies to ms1
   - CV: `QCPRIDE:2C6256D0D438E08FF913`
   - Definition: Mean strictly positive adjacent sorted MS1 RT differences, in seconds.
 
-- **`EmptyScans_MS2`** — core; scalar; applies to ms2
-  - CV: `QCPRIDE:3BE75D0FF4AD59C42832`
-  - Definition: MS2 scans with no valid positive intensity (zero TIC).
-
 - **`ObservedMzRange_MS2`** — diagnostic; tuple; applies to ms2
   - CV: `QCPRIDE:47E4D2D8B1F1F4D61C19`
   - Definition: Min/max valid peak m/z; this is an observed range, not the instrument scan window, MS2.
-
-- **`ScanWindow_MS2`** — diagnostic; tuple; applies to ms2
-  - CV: `QCPRIDE:BBD580CB1663521C4976`
-  - Definition: Envelope of recorded scan-window bounds in Th (m/z), MS2.
-
-- **`MzRange_MS2`** — extended; tuple; applies to ms2
-  - CV: `QCPRIDE:3432120DEC9FAE1739E7`
-  - Definition: Range of positive finite first-precursor m/z, not fragment peak m/z, MS2.
 
 - **`MS1_to_MS2_Ratio`** — core; scalar; applies to ms1_ms2
   - CV: `QCPRIDE:3E6B36C0810EEDA24D7A`
@@ -339,15 +209,10 @@ and the original metric descriptions.
 
 :::
 
-### Precursors and isolation (20)
+### Precursors and isolation (15)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
-| `PrecursorMz_MS2_Median` | diagnostic | ms2 |
-| `PrecursorIntensity_MS2_Quantiles` | extended | ms2 |
-| `PrecursorIntensity_MS2_Mean` | extended | ms2 |
-| `PrecursorIntensity_MS2_Sd` | extended | ms2 |
-| `PrecursorIntensity_MS2_MissingCount` | diagnostic | ms2 |
 | `IsolationWidth_MS2_Median` | core | ms2 |
 | `IsolationWidth_MS2_Quantiles` | diagnostic | ms2 |
 | `IsolationWidth_MS2_Min` | extended | ms2 |
@@ -365,26 +230,6 @@ and the original metric descriptions.
 | `ChargeRatio_4over2` | extended | ms2 |
 
 :::{dropdown} Full definitions and CV accessions — Precursors and isolation
-
-- **`PrecursorMz_MS2_Median`** — diagnostic; scalar; applies to ms2
-  - CV: `QCPRIDE:0DB185A646DB806298FC`
-  - Definition: Median positive finite first-precursor m/z, MS2.
-
-- **`PrecursorIntensity_MS2_Quantiles`** — extended; tuple; applies to ms2
-  - CV: `QCPRIDE:8FB2EFF7D173D0D4C3A2`
-  - Definition: Quartiles of recorded positive first-precursor intensity, MS2; no fragment-TIC substitution.
-
-- **`PrecursorIntensity_MS2_Mean`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:36D2085F9869CE667625`
-  - Definition: Mean recorded positive first-precursor intensity, MS2.
-
-- **`PrecursorIntensity_MS2_Sd`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:AA281BF4225DD99B5942`
-  - Definition: Sample SD of recorded positive first-precursor intensity (ddof=1), MS2.
-
-- **`PrecursorIntensity_MS2_MissingCount`** — diagnostic; scalar; applies to ms2
-  - CV: `QCPRIDE:37ABD88F90B17EAA841D`
-  - Definition: Scans lacking a positive finite first-precursor intensity, including the OpenMS unset default zero, MS2.
 
 - **`IsolationWidth_MS2_Median`** — core; scalar; applies to ms2
   - CV: `QCPRIDE:652589C44AB88BC96F40`
@@ -448,28 +293,16 @@ and the original metric descriptions.
 
 :::
 
-### Scan timing (8)
+### Scan timing (4)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
-| `RtRange_MS1` | diagnostic | ms1 |
-| `ScanRate_MS1` | core | ms1 |
 | `FastestFrequency_MS1` | extended | ms1 |
 | `RT_MS1_Quantiles` | extended | ms1 |
-| `RtRange_MS2` | diagnostic | ms2 |
-| `ScanRate_MS2` | core | ms2 |
 | `FastestFrequency_MS2` | extended | ms2 |
 | `RT_MS2_Quantiles` | extended | ms2 |
 
 :::{dropdown} Full definitions and CV accessions — Scan timing
-
-- **`RtRange_MS1`** — diagnostic; tuple; applies to ms1
-  - CV: `QCPRIDE:77A5ED9E8CB8C7F8CD4F`
-  - Definition: Minimum and maximum finite RT in seconds, MS1.
-
-- **`ScanRate_MS1`** — core; scalar; applies to ms1
-  - CV: `QCPRIDE:BC47FFC025E342B4AD8D`
-  - Definition: Count of finite-RT scans divided by that level's RT span, in scans per minute, MS1.
 
 - **`FastestFrequency_MS1`** — extended; scalar; applies to ms1
   - CV: `MS:4000065`
@@ -478,14 +311,6 @@ and the original metric descriptions.
 - **`RT_MS1_Quantiles`** — extended; tuple; applies to ms1
   - CV: `MS:4000184`
   - Definition: Four consecutive scan-RT quartile widths divided by the MS1 time span.
-
-- **`RtRange_MS2`** — diagnostic; tuple; applies to ms2
-  - CV: `QCPRIDE:55D96D3835BFEE5AD7AB`
-  - Definition: Minimum and maximum finite RT in seconds, MS2.
-
-- **`ScanRate_MS2`** — core; scalar; applies to ms2
-  - CV: `QCPRIDE:D3718560FE9B29568175`
-  - Definition: Count of finite-RT scans divided by that level's RT span, in scans per minute, MS2.
 
 - **`FastestFrequency_MS2`** — extended; scalar; applies to ms2
   - CV: `MS:4000066`
@@ -497,37 +322,21 @@ and the original metric descriptions.
 
 :::
 
-### Spectra and peak summaries (13)
+### Spectra and peak summaries (5)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
 | `NumberOfMSLevels` | core | all |
-| `NumberOfSpectra` | core | all |
-| `NumberOfSpectralPeaks` | diagnostic | all |
 | `NumberOfSpectra_MS1` | core | ms1 |
 | `PeakDensity_MS1_Quantiles` | core | ms1 |
-| `PeakTypes_MS1` | diagnostic | ms1 |
-| `Polarity_MS1` | diagnostic | ms1 |
-| `InvalidPeakCount_MS1` | diagnostic | ms1 |
 | `NumberOfSpectra_MS2` | core | ms2 |
 | `PeakDensity_MS2_Quantiles` | core | ms2 |
-| `PeakTypes_MS2` | diagnostic | ms2 |
-| `Polarity_MS2` | diagnostic | ms2 |
-| `InvalidPeakCount_MS2` | diagnostic | ms2 |
 
 :::{dropdown} Full definitions and CV accessions — Spectra and peak summaries
 
 - **`NumberOfMSLevels`** — core; scalar; applies to all
   - CV: `QCPRIDE:C782CFB84B18715F8D67`
   - Definition: Number of distinct observed MS levels.
-
-- **`NumberOfSpectra`** — core; scalar; applies to all
-  - CV: `QCPRIDE:8418755F449095444376`
-  - Definition: Total spectrum count over all levels.
-
-- **`NumberOfSpectralPeaks`** — diagnostic; scalar; applies to all
-  - CV: `QCPRIDE:EED0065AF36234685A04`
-  - Definition: Total valid stored peak data points over all levels; not chromatographic features.
 
 - **`NumberOfSpectra_MS1`** — core; scalar; applies to ms1
   - CV: `MS:4000059`
@@ -537,18 +346,6 @@ and the original metric descriptions.
   - CV: `MS:4000061`
   - Definition: 25th, 50th, 75th percentiles of valid peaks per MS1 spectrum; empty scans included.
 
-- **`PeakTypes_MS1`** — diagnostic; table; applies to ms1
-  - CV: `QCPRIDE:658F0AF60FACA5FDD19E`
-  - Definition: Counts of centroid, profile and unknown scan representations, MS1.
-
-- **`Polarity_MS1`** — diagnostic; table; applies to ms1
-  - CV: `QCPRIDE:5D7B6DFCAC3E42EAF25F`
-  - Definition: Counts by recorded polarity, including unknown, MS1.
-
-- **`InvalidPeakCount_MS1`** — diagnostic; scalar; applies to ms1
-  - CV: `QCPRIDE:4ADF3C521FC5FF049772`
-  - Definition: Count of excluded peaks with non-finite/nonpositive m/z or non-finite/negative intensity, MS1.
-
 - **`NumberOfSpectra_MS2`** — core; scalar; applies to ms2
   - CV: `MS:4000060`
   - Definition: Count of all MS2 spectra, including empty scans.
@@ -557,23 +354,11 @@ and the original metric descriptions.
   - CV: `MS:4000062`
   - Definition: 25th, 50th, 75th percentiles of valid peaks per MS2 spectrum; empty scans included.
 
-- **`PeakTypes_MS2`** — diagnostic; table; applies to ms2
-  - CV: `QCPRIDE:02BD471D53BE3411913F`
-  - Definition: Counts of centroid, profile and unknown scan representations, MS2.
-
-- **`Polarity_MS2`** — diagnostic; table; applies to ms2
-  - CV: `QCPRIDE:6A1C64BAB5CCF09A5DE3`
-  - Definition: Counts by recorded polarity, including unknown, MS2.
-
-- **`InvalidPeakCount_MS2`** — diagnostic; scalar; applies to ms2
-  - CV: `QCPRIDE:0F8B65A410A572FEE4D7`
-  - Definition: Count of excluded peaks with non-finite/nonpositive m/z or non-finite/negative intensity, MS2.
-
 :::
 
 ## Provenance and caveats
 
-The complete set of calculated QC metrics remains in mzQC per run
+The selected set of calculated QC metrics remains in mzQC per run
 and in losslessly consolidated accession mzQC. A website or
 MongoDB projection may select **stored values only**, never generate
 report-only scientific measurements. Grouped spectrum counts, MS2/MS3

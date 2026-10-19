@@ -122,9 +122,7 @@ class PyOpenMSIntegrationTests(unittest.TestCase):
                 metrics = {m.key: m.value for m in result.metrics}
                 self.assertEqual(metrics["NumberOfSpectra_MS1"], 2)
                 self.assertEqual(metrics["NumberOfSpectra_MS2"], 2)
-                self.assertEqual(metrics["TIC_MS1_Area"], 600.)
                 self.assertEqual(metrics["FAIMS_CV_Values"], [-45.])
-                self.assertEqual(metrics["Polarity_MS1"]["polarity"], ["positive"])
                 evidence = next(a for a in result.annotations if a.field == "dissociation_ms2")
                 self.assertIn("MS:1000422", evidence.sdrf_value)
 
@@ -136,7 +134,6 @@ class PyOpenMSIntegrationTests(unittest.TestCase):
         result = Analyzer().analyze(compressed)
         self.assertEqual(result.input_path, compressed)
         metrics = {m.key: m.value for m in result.metrics}
-        self.assertEqual(metrics["NumberOfSpectra"], 4)
         self.assertEqual(metrics["FAIMS_CV_Values"], [-45.])
 
     def test_serial_and_parallel_results_match(self):

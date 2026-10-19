@@ -102,11 +102,6 @@ STANDARD = {
 
 DEFINITIONS = {
     "NumberOfMSLevels": "Number of distinct observed MS levels.",
-    "NumberOfSpectra": "Total spectrum count over all levels.",
-    "NumberOfSpectralPeaks": "Total valid stored peak data points over all levels; not chromatographic features.",
-    "NumberOfChromatograms": "Number of stored chromatograms.",
-    "ChromatogramTypes": "Counts grouped by OpenMS ChromatogramType enum value; engine version is recorded.",
-    "ChromatogramRTRange": "Minimum and maximum finite chromatogram time, in seconds.",
     "FAIMS_CV_Values": "Distinct finite FAIMS compensation voltages, sorted, in volts; not drift times.",
     "FAIMS_CV_Count": "Number of distinct finite FAIMS compensation voltages.",
     "FAIMS_CV_Range": "Minimum and maximum finite FAIMS compensation voltages, in volts.",
@@ -151,51 +146,11 @@ DEFINITIONS = {
 
 LEVEL_DEFINITIONS = {
     "NumberOfSpectra_MS{n}": "Count of spectra at MS level {n}, including empty scans.",
-    "RtRange_MS{n}": "Minimum and maximum finite RT in seconds, MS{n}.",
-    "EmptyScans_MS{n}": "MS{n} scans with no valid positive intensity (zero TIC).",
     "PeakDensity_MS{n}_Quantiles": "25th, 50th, 75th percentiles of valid stored peak counts, including zero, MS{n}.",
-    "BasePeak_MS{n}_Mean": (
-        "Mean of per-spectrum maximum valid intensity, excluding scans with no valid peaks, MS{n}."
-    ),
-    "TIC_MS{n}_Median": "Median sum of valid peak intensities per scan, MS{n}.",
-    "TIC_MS{n}_CV": "Sample standard deviation (ddof=1) divided by mean TIC, MS{n}.",
-    "TIC_MS{n}_Area": (
-        "Trapezoidal TIC integral against RT, stable time order, intensity times seconds, MS{n}."
-    ),
-    "TIC_MS{n}_Area_RTQuantiles": (
-        "Four exact integrals of piecewise-linear TIC split at scan-RT quartiles, intensity "
-        "times seconds, MS{n}."
-    ),
-    "TIC_MS{n}_QuartileLogRatios": "Natural logs of TIC Q2/Q1, Q3/Q2, Q4/Q3 (Q4=max), MS{n}.",
-    "ScanRate_MS{n}": "Count of finite-RT scans divided by that level's RT span, in scans per minute, MS{n}.",
     "FastestFrequency_MS{n}": "Maximum scan count in a closed 60-second window divided by 60, in Hz, MS{n}.",
     "RT_MS{n}_Quantiles": "Four scan-RT quartile interval fractions of that level's RT span, MS{n}.",
     "ObservedMzRange_MS{n}": (
         "Min/max valid peak m/z; this is an observed range, not the instrument scan window, MS{n}."
-    ),
-    "ScanWindow_MS{n}": "Envelope of recorded scan-window bounds in Th (m/z), MS{n}.",
-    "PeakTypes_MS{n}": "Counts of centroid, profile and unknown scan representations, MS{n}.",
-    "Polarity_MS{n}": "Counts by recorded polarity, including unknown, MS{n}.",
-    "InvalidPeakCount_MS{n}": (
-        "Count of excluded peaks with non-finite/nonpositive m/z or non-finite/negative "
-        "intensity, MS{n}."
-    ),
-    "TIC_MS{n}_SignalJump10x_Count": "Adjacent sorted-TIC ratios >=10, with strictly positive previous TIC, MS{n}.",
-    "TIC_MS{n}_SignalFall10x_Count": (
-        "Adjacent sorted-TIC ratios <=0.1, with strictly positive previous TIC; zero next TIC "
-        "counts, MS{n}."
-    ),
-    "MzRange_MS{n}": "Range of positive finite first-precursor m/z, not fragment peak m/z, MS{n}.",
-    "PrecursorMz_MS{n}_Median": "Median positive finite first-precursor m/z, MS{n}.",
-    "PrecursorIntensity_MS{n}_Quantiles": (
-        "Quartiles of recorded positive first-precursor intensity, MS{n}; no fragment-TIC "
-        "substitution."
-    ),
-    "PrecursorIntensity_MS{n}_Mean": "Mean recorded positive first-precursor intensity, MS{n}.",
-    "PrecursorIntensity_MS{n}_Sd": "Sample SD of recorded positive first-precursor intensity (ddof=1), MS{n}.",
-    "PrecursorIntensity_MS{n}_MissingCount": (
-        "Scans lacking a positive finite first-precursor intensity, including the OpenMS unset "
-        "default zero, MS{n}."
     ),
     "IsolationWidth_MS{n}_Median": "Median positive first-precursor lower+upper isolation offsets in Th (m/z), MS{n}.",
     "IsolationWidth_MS{n}_Quantiles": "25th, 50th, 75th percentiles of positive first-precursor isolation widths in Th (m/z), MS{n}.",
@@ -389,11 +344,8 @@ def definition(metric: Metric) -> MetricDefinition:
     # Shape is a property of the term, not of a particular observed value.
     # In particular, an unavailable tuple must not become a scalar CV term.
     if metric.key in {
-        "ChromatogramTypes",
         "MS2_PrecursorCharge_Fractions",
-    } or metric.key.startswith(
-        ("PeakTypes_", "Polarity_"),
-    ):
+    }:
         shape = "table"
     elif metric.key == "FAIMS_CV_Values" or any(
         part in metric.key for part in ("Range", "Quantiles", "LogRatios", "ScanWindow")
