@@ -212,7 +212,7 @@ class TechnicalAnnotator:
 
             if wide_fraction >= 0.9:
                 label, accession, support = "Data-independent acquisition", "PRIDE:0000450", wide
-            elif stable_cycle and median_width >= 5:
+            elif stable_cycle and median_width >= 5 and order_modal_fraction is not None:
                 label, accession = "Data-independent acquisition", "PRIDE:0000450"
                 modal_cycles = int(round(order_modal_fraction * cycle_count))
                 support_total = total
