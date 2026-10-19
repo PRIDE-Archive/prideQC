@@ -171,7 +171,6 @@ jobs:
             OPENMS_GIT_REQUESTED_REF=${{ env.OPENMS_GIT_REF }}
             PRIDEPY_GIT_REF=${{ env.PRIDEPY_GIT_REF }}
           cache-from: type=gha,scope=prideqc-container
-          cache-to: type=gha,mode=max,scope=prideqc-container
 
       - name: Build and publish runtime image
         id: docker
