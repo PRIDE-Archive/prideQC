@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -44,9 +45,19 @@ STANDARD = {
         "Minimum and maximum widths of distinct DIA isolation windows, in m/z.",
         "tuple", MZ,
     ),
+    "ObservedMzRange_MS1": MetricDefinition(
+        "MS:4000222", "MS1 observed m/z bounds",
+        "Minimum and maximum valid observed MS1 peak m/z across the run.",
+        "tuple", MZ,
+    ),
+    "MedianCycleTime_MS1": MetricDefinition(
+        "MS:4000192", "MS1 median cycle time",
+        "Median positive elapsed time between adjacent MS1 spectra, seconds.",
+        unit=SECOND,
+    ),
     "ChromatographyDuration": MetricDefinition(
-        "MS:4000053",
-        "chromatography duration",
+        "MS:4000067",
+        "MS run duration",
         "Last minus first finite spectrum RT, over all MS levels.",
         unit=SECOND,
     ),
@@ -133,33 +144,8 @@ STANDARD = {
 }
 
 DEFINITIONS = {
-    "NumberOfMSLevels": "Number of distinct observed MS levels.",
-    "FAIMS_CV_Values": "Distinct finite FAIMS compensation voltages, sorted, in volts; not drift times.",
-    "FAIMS_CV_Count": "Number of distinct finite FAIMS compensation voltages.",
-    "FAIMS_CV_Range": "Minimum and maximum finite FAIMS compensation voltages, in volts.",
     "MS1_to_MS2_Ratio": "MS1 scan count divided by MS2 scan count; undefined when denominator is zero.",
-    "AcquisitionCycle_Count": (
-        "Count of MS1-delimited cycles containing at least one MS2 scan. MS2 scans before the "
-        "first MS1 are ignored; a trailing cycle is included when it contains MS2 scans."
-    ),
-    "AcquisitionCycle_MS2Count_Quantiles": (
-        "25th, 50th, 75th percentiles of MS2 scans per observed MS1-delimited cycle."
-    ),
-    "AcquisitionCycle_MS2Count_Mode": (
-        "Most frequent MS2 scan count per observed MS1-delimited cycle; lower count wins ties."
-    ),
-    "AcquisitionCycle_TargetCoverageFraction": (
-        "Fraction of MS2 scans inside observed MS1-delimited cycles with a finite positive first-"
-        "precursor m/z paired with a positive isolation width."
-    ),
-    "AcquisitionCycle_TargetEligibleFraction": (
-        "Fraction of observed MS1-delimited cycles eligible for target-set/order comparison."
-    ),
-    "AcquisitionCycle_UniqueTargetCount_Quantiles": (
-        "25th, 50th, 75th percentiles of unique first-precursor isolation targets per eligible "
-        "cycle after 0.1 Th quantization."
-    ),
-    "AvgCycleTime_MS1": "Mean strictly positive adjacent sorted MS1 RT differences, in seconds.",
+
 }
 
 LEVEL_DEFINITIONS = {
@@ -349,9 +335,7 @@ def definition(metric: Metric) -> MetricDefinition:
         raise ValueError(f"Unregistered QC metric: {metric.key}")
     # Shape is a property of the term, not of a particular observed value.
     # In particular, an unavailable tuple must not become a scalar CV term.
-    if metric.key == "FAIMS_CV_Values" or any(
-        part in metric.key for part in ("Range", "Quantiles", "LogRatios", "ScanWindow")
-    ):
+    if any(part in metric.key for part in ("Range", "Quantiles", "LogRatios", "ScanWindow")):
         shape = "tuple"
     else:
         shape = "scalar"
@@ -397,6 +381,14 @@ class MzQCWriter:
         properties: list[dict[str, Any]] = [
             {"accession": term.accession, "name": term.name} for term in result.metadata.instruments
         ]
+        for voltage in sorted(set(result.metadata.faims_compensation_voltages)):
+            if math.isfinite(voltage):
+                properties.append({
+                    "accession": "MS:1001581",
+                    "name": "FAIMS compensation voltage",
+                    "value": voltage,
+                    "unit": {"accession": "UO:0000218", "name": "volt"},
+                })
         if result.source_path:
             properties.append(
                 {

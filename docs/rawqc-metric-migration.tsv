@@ -1,5 +1,5 @@
 rawQC_key	prideqc_target	status	notes
-ChromatographyDuration	ChromatographyDuration	retained	See metric definition and documented invalid/missing-data policies.
+ChromatographyDuration	ChromatographyDuration	relabelled CV	MS run duration MS:4000067 replaces incorrectly labelled chromatography duration MS:4000053; internal key unchanged.
 NumberOfSpectra_MS1	NumberOfSpectra_MS1	retained	See metric definition and documented invalid/missing-data policies.
 NumberOfSpectra_MS2	NumberOfSpectra_MS2	retained	See metric definition and documented invalid/missing-data policies.
 PeakDensity_MS1_Q1	PeakDensity_MS1_Quantiles	grouped	Q1/Q2/Q3 elements in one tuple.
@@ -10,9 +10,9 @@ PeakDensity_MS2_Q2	PeakDensity_MS2_Quantiles	grouped	Q1/Q2/Q3 elements in one tu
 PeakDensity_MS2_Q3	PeakDensity_MS2_Quantiles	grouped	Q1/Q2/Q3 elements in one tuple.
 NumberOfSpectralPeaks	NumberOfSpectralPeaks	removed	Retired from prideQC QC output; update downstream reporting.
 NumberOfChromatogramDataPoints	NumberOfChromatogramDataPoints	removed	Retired from prideQC QC output; update downstream reporting.
-FAIMS_CV_Count	FAIMS_CV_Count	retained	See metric definition and documented invalid/missing-data policies.
-FAIMS_CV_Values	FAIMS_CV_Values	retained	See metric definition and documented invalid/missing-data policies.
-FAIMS_CV_Range	FAIMS_CV_Range	retained	See metric definition and documented invalid/missing-data policies.
+FAIMS_CV_Count		retired	Observed FAIMS voltage moved to CV MS:1001581 file metadata.
+FAIMS_CV_Values		retired	Observed FAIMS voltage moved to CV MS:1001581 file metadata.
+FAIMS_CV_Range		retired	Observed FAIMS voltage moved to CV MS:1001581 file metadata.
 EmptyScans_MS1	EmptyScans_MS1	removed	Retired from prideQC QC output; update downstream reporting.
 EmptyScans_MS2	EmptyScans_MS2	removed	Retired from prideQC QC output; update downstream reporting.
 MzRange_MS2	MzRange_MS2	removed	Retired from prideQC QC output; update downstream reporting.
@@ -60,14 +60,14 @@ TIC_MS1_Area	TIC_MS1_Area	removed	Retired from prideQC QC output; update downstr
 ExtentPrecursorIntensity_95over5_MS2	ExtentPrecursorIntensity_95over5_MS2	removed	Retired from prideQC QC output; update downstream reporting.
 MedianTIC_in_RT_MS1_IQR	MedianTIC_in_RT_MS1_IQR	removed	Retired from prideQC QC output; update downstream reporting.
 TIC_MS1_MedianInHalfRange	TIC_MS1_MedianInHalfRange	removed	Retired from prideQC QC output; update downstream reporting.
-NumberOfMSLevels	NumberOfMSLevels	retained	See metric definition and documented invalid/missing-data policies.
+NumberOfMSLevels		retired	Per-spectrum CV MS:1000511 already in mzML; aggregate count retired.
 Polarity_MS1_positive	Polarity_MS1	removed	Retired from prideQC QC output; update downstream reporting.
 Polarity_MS1_negative	Polarity_MS1	removed	Retired from prideQC QC output; update downstream reporting.
 Polarity_MS1_unknown	Polarity_MS1	removed	Retired from prideQC QC output; update downstream reporting.
 Polarity_MS2_positive	Polarity_MS2	removed	Retired from prideQC QC output; update downstream reporting.
 Polarity_MS2_negative	Polarity_MS2	removed	Retired from prideQC QC output; update downstream reporting.
 Polarity_MS2_unknown	Polarity_MS2	removed	Retired from prideQC QC output; update downstream reporting.
-AvgCycleTime_MS1	AvgCycleTime_MS1	retained	See metric definition and documented invalid/missing-data policies.
+AvgCycleTime_MS1	MedianCycleTime_MS1	changed	Mean replaced by median adjacent MS1 interval under MS:4000192; values are not historically interchangeable.
 NumberOfChromatograms	NumberOfChromatograms	removed	Retired from prideQC QC output; update downstream reporting.
 Chromatograms_TIC	ChromatogramTypes	removed	Retired from prideQC QC output; update downstream reporting.
 Chromatograms_BPC	ChromatogramTypes	removed	Retired from prideQC QC output; update downstream reporting.

@@ -84,6 +84,7 @@ class RunMetadata:
     serial_numbers: list[str] = field(default_factory=list)
     source_files: list[str] = field(default_factory=list)
     started_at: str | None = None
+    faims_compensation_voltages: list[float] = field(default_factory=list)
     # Native vendor readers expose some instrument fields as plain strings
     # rather than PSI-MS CV terms. Preserve those values without fabricating
     # accessions from model-name heuristics.
@@ -128,6 +129,7 @@ class AnalysisResult:
             serial_numbers=list(metadata_data.get("serial_numbers", [])),
             source_files=list(metadata_data.get("source_files", [])),
             started_at=metadata_data.get("started_at"),
+            faims_compensation_voltages=list(metadata_data.get("faims_compensation_voltages", [])),
             instrument_details=dict(metadata_data.get("instrument_details", {})),
         )
         metrics = [Metric(str(item["key"]), item.get("value")) for item in data.get("metrics", [])]

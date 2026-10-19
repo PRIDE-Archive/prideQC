@@ -57,7 +57,7 @@ cohort-level tolerance recommendations.
 |---|---|---|---|
 | `NumberOfSpectra_MS1` | `MS:4000059` | count (`UO:0000189`) | `comment[number of MS1 spectra]` |
 | `NumberOfSpectra_MS2` | `MS:4000060` | count (`UO:0000189`) | `comment[number of MS2 spectra]` |
-| `ChromatographyDuration` | `MS:4000053` | seconds (`UO:0000010`) | `comment[chromatography duration]` |
+| `ChromatographyDuration` | `MS:4000067` | seconds (`UO:0000010`) | `comment[MS run duration]` |
 
 The counts include empty spectra; zero is a valid count. Duration is the
 maximum minus minimum **finite observed spectrum retention time**, over all

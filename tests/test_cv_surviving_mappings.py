@@ -22,7 +22,7 @@ class SurvivingCvMappingTests(unittest.TestCase):
             "ChargeRatio_3over2": "MS:4000169",
             "ChargeRatio_4over2": "MS:4000171",
         }
-        self.assertEqual(len(rows), 30)
+        self.assertEqual(len(rows), 20)
         for key, accession in expected.items():
             with self.subTest(key=key):
                 term = definition(Metric(key, 2))
@@ -34,7 +34,7 @@ class SurvivingCvMappingTests(unittest.TestCase):
         retired = Path(__file__).resolve().parents[1] / "docs" / "retired-metrics.tsv"
         with retired.open(encoding="utf-8", newline="") as handle:
             retired_keys = {row["key"] for row in csv.DictReader(handle, delimiter="\t")}
-        self.assertEqual(len(retired_keys), 76)
+        self.assertEqual(len(retired_keys), 86)
         self.assertTrue(retired_keys.isdisjoint(rows))
         # Official terms belong to PSI-MS; the companion local OBO must not
         # redefine their former QCPRIDE accessions.

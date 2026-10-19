@@ -90,7 +90,7 @@ class QCSDRFProposalTests(unittest.TestCase):
         annotations = metric_annotations(_result("zero.raw"))
         self.assertEqual(
             [item.value["psi_ms_accession"] for item in annotations],
-            ["MS:4000059", "MS:4000060", "MS:4000053"],
+            ["MS:4000059", "MS:4000060", "MS:4000067"],
         )
         self.assertEqual([item.sdrf_value for item in annotations], ["0", "0", "0 s"])
         self.assertEqual(

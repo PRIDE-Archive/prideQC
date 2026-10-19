@@ -97,6 +97,7 @@ class Analyzer:
         collectors = tuple(collectors)
         summary = RunSummary()
         metadata = self.reader.read(path, _AnalysisSink(summary, collectors))
+        metadata.faims_compensation_voltages = sorted(summary.faims)
         annotations = self.annotator.annotate(metadata, summary)
         for collector in collectors:
             annotations.extend(collector.annotations())

@@ -14,7 +14,7 @@ PRESENTATION = ROOT / "docs" / "metric-presentation.tsv"
 
 TIERS = ("core", "diagnostic", "extended")
 APPLICABILITY = ("all", "ms1", "ms2", "ms1_ms2", "cycles", "faims", "chromatograms")
-CORE_COUNT = 10
+CORE_COUNT = 8
 
 ANNOTATIONS = [
     ("acquisition_method", "DDA/DIA/PRM/SRM run classification", "Explicit header CV or DDA/DIA inference; targeted scans abstain"),
@@ -108,10 +108,10 @@ def render() -> str:
         "that a value exists for every run. Metrics absent or undefined in the source",
         "mzQC must remain absent/undefined; do not fill missing values with zero.", "",
         "## Recommended PRIDE website overview", "",
-        "These 10 **core display candidates** cover run structure and acquisition.",
+        f"These {CORE_COUNT} **core display candidates** cover run structure and acquisition.",
         "Show a value or visualization only when the run has the corresponding",
         "stored mzQC metric. For SRM/MRM or other MS1-free acquisitions, MS1 and",
-        "MS1-delimited cycle entries may be inapplicable; this is not QC failure.", "",
+        "metrics may be inapplicable; this is not QC failure.", "",
         "The overview uses readable names; the full registry keys, CV accessions,",
         "value shapes and definitions remain available in the sections below.", "",
         "| Core metric | Applies to | Interpretation / limitation |",
@@ -131,6 +131,12 @@ def render() -> str:
         "Acquisition method (DDA/DIA/PRM/SRM), labelling candidates, ionization,",
         "instrument and LC annotations belong in the experimental-context section,",
         "not in a numeric QC score. No universal composite QC score is defined.", "",
+        "The number of distinct MS levels is no longer a QC metric: `MS:1000511`",
+        "is a per-spectrum level indicator, not a run-level count. Observed FAIMS",
+        "voltages are recorded individually as `MS:1001581` file metadata (volts).",
+        "The ramp endpoint terms `MS:1003450` and `MS:1003451` are not emitted",
+        "for stepped CV acquisitions. MS1-delimited cycle summaries remain internal",
+        "evidence for the conservative DDA/DIA classifier, not published QC metrics.", "",
         "## Experimental and technical annotation fields", "",
         "| Field | Information | Evidence policy |", "| --- | --- | --- |",
     ])

@@ -6,25 +6,24 @@ selects which existing mzQC metrics are prominently displayed; it does
 **not** change acquisition, calculation, CV identity, serialization or merging.
 Experimental method and label annotations are recorded separately.
 
-**Registered QC metric definitions: 30.**
-Presentation tiers: **10 core**, **10 diagnostic**,
-and **10 extended**. A registration is not a promise
+**Registered QC metric definitions: 20.**
+Presentation tiers: **8 core**, **4 diagnostic**,
+and **8 extended**. A registration is not a promise
 that a value exists for every run. Metrics absent or undefined in the source
 mzQC must remain absent/undefined; do not fill missing values with zero.
 
 ## Recommended PRIDE website overview
 
-These 10 **core display candidates** cover run structure and acquisition.
+These 8 **core display candidates** cover run structure and acquisition.
 Show a value or visualization only when the run has the corresponding
 stored mzQC metric. For SRM/MRM or other MS1-free acquisitions, MS1 and
-MS1-delimited cycle entries may be inapplicable; this is not QC failure.
+metrics may be inapplicable; this is not QC failure.
 
 The overview uses readable names; the full registry keys, CV accessions,
 value shapes and definitions remain available in the sections below.
 
 | Core metric | Applies to | Interpretation / limitation |
 | --- | --- | --- |
-| Run / MS levels | all | Distinct MS levels recorded; not a quality score. |
 | Run time (s) | all | RT span from spectra, not LC separation chemistry. |
 | MS1 spectra | ms1 | Includes scans with no detected peaks. |
 | MS1 peaks per scan (quartiles) | ms1 | Valid stored peaks per scan, not identified molecular features. |
@@ -33,7 +32,6 @@ value shapes and definitions remain available in the sections below.
 | DIA isolation windows | ms2 | Distinct window geometries; not rounded precursor-target count. DIA evidence and complete metadata required. |
 | DIA window widths (min/max) | ms2 | Minimum and maximum distinct window widths in m/z; not individual scalar extrema. |
 | MS1/MS2 scan ratio | ms1_ms2 | Undefined when there are no MS2 scans; not a performance score. |
-| MS2 scans per acquisition cycle | cycles | MS1-delimited cycles only; not applicable to MS1-free targeted runs. |
 
 Counts include empty scans where stated by the registry. Charge
 statistics and DIA windows are reported only when supported. Quantile
@@ -43,6 +41,13 @@ them into an undocumented scalar or recompute them from mzQC.
 Acquisition method (DDA/DIA/PRM/SRM), labelling candidates, ionization,
 instrument and LC annotations belong in the experimental-context section,
 not in a numeric QC score. No universal composite QC score is defined.
+
+The number of distinct MS levels is no longer a QC metric: `MS:1000511`
+is a per-spectrum level indicator, not a run-level count. Observed FAIMS
+voltages are recorded individually as `MS:1001581` file metadata (volts).
+The ramp endpoint terms `MS:1003450` and `MS:1003451` are not emitted
+for stepped CV acquisitions. MS1-delimited cycle summaries remain internal
+evidence for the conservative DDA/DIA classifier, not published QC metrics.
 
 ## Experimental and technical annotation fields
 
@@ -89,45 +94,6 @@ Browse the compact three-column indexes by category, then expand
 a category's definitions to see full CV accessions, value shapes
 and the original metric descriptions.
 
-### Acquisition cycles (6)
-
-| Registry metric | Tier | Applies to |
-| --- | --- | --- |
-| `AcquisitionCycle_Count` | diagnostic | cycles |
-| `AcquisitionCycle_MS2Count_Quantiles` | core | cycles |
-| `AcquisitionCycle_MS2Count_Mode` | diagnostic | cycles |
-| `AcquisitionCycle_TargetCoverageFraction` | diagnostic | cycles |
-| `AcquisitionCycle_TargetEligibleFraction` | extended | cycles |
-| `AcquisitionCycle_UniqueTargetCount_Quantiles` | extended | cycles |
-
-:::{dropdown} Full definitions and CV accessions — Acquisition cycles
-
-- **`AcquisitionCycle_Count`** — diagnostic; scalar; applies to cycles
-  - CV: `QCPRIDE:E5D44EF02DD0C112FCCD`
-  - Definition: Count of MS1-delimited cycles containing at least one MS2 scan. MS2 scans before the first MS1 are ignored; a trailing cycle is included when it contains MS2 scans.
-
-- **`AcquisitionCycle_MS2Count_Quantiles`** — core; tuple; applies to cycles
-  - CV: `QCPRIDE:CB0E144250E9279F1725`
-  - Definition: 25th, 50th, 75th percentiles of MS2 scans per observed MS1-delimited cycle.
-
-- **`AcquisitionCycle_MS2Count_Mode`** — diagnostic; scalar; applies to cycles
-  - CV: `QCPRIDE:38064FE0BC760341F5CE`
-  - Definition: Most frequent MS2 scan count per observed MS1-delimited cycle; lower count wins ties.
-
-- **`AcquisitionCycle_TargetCoverageFraction`** — diagnostic; scalar; applies to cycles
-  - CV: `QCPRIDE:1E7E0C9468F1B503778C`
-  - Definition: Fraction of MS2 scans inside observed MS1-delimited cycles with a finite positive first-precursor m/z paired with a positive isolation width.
-
-- **`AcquisitionCycle_TargetEligibleFraction`** — extended; scalar; applies to cycles
-  - CV: `QCPRIDE:0EA9DB6C9708D5F09586`
-  - Definition: Fraction of observed MS1-delimited cycles eligible for target-set/order comparison.
-
-- **`AcquisitionCycle_UniqueTargetCount_Quantiles`** — extended; tuple; applies to cycles
-  - CV: `QCPRIDE:EAE7AB20278D155810C1`
-  - Definition: 25th, 50th, 75th percentiles of unique first-precursor isolation targets per eligible cycle after 0.1 Th quantization.
-
-:::
-
 ### Chromatography (1)
 
 | Registry metric | Tier | Applies to |
@@ -137,8 +103,8 @@ and the original metric descriptions.
 :::{dropdown} Full definitions and CV accessions — Chromatography
 
 - **`ChromatographyDuration`** — core; scalar; applies to all
-  - CV: `MS:4000053`
-  - Definition: Last minus first finite spectrum RT, over all MS levels.
+  - CV: `MS:4000067`
+  - Definition: Last minus first finite spectrum RT across all MS levels (MS run duration), seconds.
 
 :::
 
@@ -156,48 +122,24 @@ and the original metric descriptions.
 
 :::
 
-### Ion mobility / FAIMS (3)
-
-| Registry metric | Tier | Applies to |
-| --- | --- | --- |
-| `FAIMS_CV_Values` | diagnostic | faims |
-| `FAIMS_CV_Count` | diagnostic | faims |
-| `FAIMS_CV_Range` | diagnostic | faims |
-
-:::{dropdown} Full definitions and CV accessions — Ion mobility / FAIMS
-
-- **`FAIMS_CV_Values`** — diagnostic; tuple; applies to faims
-  - CV: `QCPRIDE:E69917C56F3DCCD6D0EE`
-  - Definition: Distinct finite FAIMS compensation voltages, sorted, in volts; not drift times.
-
-- **`FAIMS_CV_Count`** — diagnostic; scalar; applies to faims
-  - CV: `QCPRIDE:0FF9AAA5ADA010E8801C`
-  - Definition: Number of distinct finite FAIMS compensation voltages.
-
-- **`FAIMS_CV_Range`** — diagnostic; tuple; applies to faims
-  - CV: `QCPRIDE:3C721D04BCC72F40C1A0`
-  - Definition: Minimum and maximum finite FAIMS compensation voltages, in volts.
-
-:::
-
 ### Other run-level QC (4)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
 | `ObservedMzRange_MS1` | diagnostic | ms1 |
-| `AvgCycleTime_MS1` | diagnostic | ms1 |
+| `MedianCycleTime_MS1` | diagnostic | ms1 |
 | `ObservedMzRange_MS2` | diagnostic | ms2 |
 | `MS1_to_MS2_Ratio` | core | ms1_ms2 |
 
 :::{dropdown} Full definitions and CV accessions — Other run-level QC
 
 - **`ObservedMzRange_MS1`** — diagnostic; tuple; applies to ms1
-  - CV: `QCPRIDE:2A7C646C00FBCB34F4F8`
+  - CV: `MS:4000222`
   - Definition: Min/max valid peak m/z; this is an observed range, not the instrument scan window, MS1.
 
-- **`AvgCycleTime_MS1`** — diagnostic; scalar; applies to ms1
-  - CV: `QCPRIDE:2C6256D0D438E08FF913`
-  - Definition: Mean strictly positive adjacent sorted MS1 RT differences, in seconds.
+- **`MedianCycleTime_MS1`** — diagnostic; scalar; applies to ms1
+  - CV: `MS:4000192`
+  - Definition: Median strictly positive adjacent sorted MS1 RT differences, seconds.
 
 - **`ObservedMzRange_MS2`** — diagnostic; tuple; applies to ms2
   - CV: `QCPRIDE:47E4D2D8B1F1F4D61C19`
@@ -277,21 +219,16 @@ and the original metric descriptions.
 
 :::
 
-### Spectra and peak summaries (5)
+### Spectra and peak summaries (4)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
-| `NumberOfMSLevels` | core | all |
 | `NumberOfSpectra_MS1` | core | ms1 |
 | `PeakDensity_MS1_Quantiles` | core | ms1 |
 | `NumberOfSpectra_MS2` | core | ms2 |
 | `PeakDensity_MS2_Quantiles` | core | ms2 |
 
 :::{dropdown} Full definitions and CV accessions — Spectra and peak summaries
-
-- **`NumberOfMSLevels`** — core; scalar; applies to all
-  - CV: `QCPRIDE:C782CFB84B18715F8D67`
-  - Definition: Number of distinct observed MS levels.
 
 - **`NumberOfSpectra_MS1`** — core; scalar; applies to ms1
   - CV: `MS:4000059`

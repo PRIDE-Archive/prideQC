@@ -1,15 +1,11 @@
 key	tier	applicability	label	caveat
-NumberOfMSLevels	core	all	Run / MS levels	Distinct MS levels recorded; not a quality score.
 ChromatographyDuration	core	all	Run time (s)	RT span from spectra, not LC separation chemistry.
-FAIMS_CV_Values	diagnostic	faims	FAIMS_CV_Values	See scientific registry definition.
-FAIMS_CV_Count	diagnostic	faims	FAIMS_CV_Count	See scientific registry definition.
-FAIMS_CV_Range	diagnostic	faims	FAIMS_CV_Range	See scientific registry definition.
 NumberOfSpectra_MS1	core	ms1	MS1 spectra	Includes scans with no detected peaks.
 PeakDensity_MS1_Quantiles	core	ms1	MS1 peaks per scan (quartiles)	Valid stored peaks per scan, not identified molecular features.
 FastestFrequency_MS1	extended	ms1	FastestFrequency_MS1	See scientific registry definition.
 RT_MS1_Quantiles	extended	ms1	RT_MS1_Quantiles	See scientific registry definition.
 ObservedMzRange_MS1	diagnostic	ms1	ObservedMzRange_MS1	See scientific registry definition.
-AvgCycleTime_MS1	diagnostic	ms1	AvgCycleTime_MS1	See scientific registry definition.
+MedianCycleTime_MS1	diagnostic	ms1	MS1 median cycle time	Median positive adjacent MS1 scan-RT intervals, not the mean.
 RT_TIC_Quantiles	extended	ms1	RT_TIC_Quantiles	See scientific registry definition.
 NumberOfSpectra_MS2	core	ms2	MS2 spectra	Includes scans with no detected peaks.
 PeakDensity_MS2_Quantiles	core	ms2	MS2 peaks per scan (quartiles)	Valid stored peaks per scan, not identified molecular features.
@@ -19,12 +15,6 @@ ObservedMzRange_MS2	diagnostic	ms2	ObservedMzRange_MS2	See scientific registry d
 DIAIsolationWindowCount	core	ms2	DIA isolation windows	Distinct window geometries; not rounded precursor-target count. DIA evidence and complete metadata required.
 DIAIsolationWindowWidths	core	ms2	DIA window widths (min/max)	Minimum and maximum distinct window widths in m/z; not individual scalar extrema.
 MS1_to_MS2_Ratio	core	ms1_ms2	MS1/MS2 scan ratio	Undefined when there are no MS2 scans; not a performance score.
-AcquisitionCycle_Count	diagnostic	cycles	AcquisitionCycle_Count	See scientific registry definition.
-AcquisitionCycle_MS2Count_Quantiles	core	cycles	MS2 scans per acquisition cycle	MS1-delimited cycles only; not applicable to MS1-free targeted runs.
-AcquisitionCycle_MS2Count_Mode	diagnostic	cycles	AcquisitionCycle_MS2Count_Mode	See scientific registry definition.
-AcquisitionCycle_TargetCoverageFraction	diagnostic	cycles	AcquisitionCycle_TargetCoverageFraction	See scientific registry definition.
-AcquisitionCycle_TargetEligibleFraction	extended	cycles	AcquisitionCycle_TargetEligibleFraction	See scientific registry definition.
-AcquisitionCycle_UniqueTargetCount_Quantiles	extended	cycles	AcquisitionCycle_UniqueTargetCount_Quantiles	See scientific registry definition.
 ChargeMean	extended	ms2	ChargeMean	See scientific registry definition.
 ChargeMedian	diagnostic	ms2	ChargeMedian	See scientific registry definition.
 ChargeRatio_3over2	extended	ms2	ChargeRatio_3over2	See scientific registry definition.

@@ -185,11 +185,11 @@ class TechnicalAnnotator:
             wide_fraction = wide / widths.size
             median_width = float(np.median(widths))
 
-            cycle = run.acquisition_cycles.metrics()
-            cycle_count = int(cycle["AcquisitionCycle_Count"] or 0)
-            cycle_mode = int(cycle["AcquisitionCycle_MS2Count_Mode"] or 0)
-            target_coverage = cycle["AcquisitionCycle_TargetCoverageFraction"]
-            target_eligible_fraction = cycle["AcquisitionCycle_TargetEligibleFraction"]
+            cycle = run.acquisition_cycles.classifier_features()
+            cycle_count = int(cycle["count"] or 0)
+            cycle_mode = int(cycle["mode"] or 0)
+            target_coverage = cycle["target_coverage"]
+            target_eligible_fraction = cycle["eligible_fraction"]
             cycle_modal_fraction, set_modal_fraction, order_modal_fraction = (
                 run.acquisition_cycles.classifier_consensus()
             )

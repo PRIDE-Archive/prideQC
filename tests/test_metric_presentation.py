@@ -22,12 +22,12 @@ from scripts.generate_qc_metrics_reference import (
 class MetricPresentationTests(unittest.TestCase):
     def test_exact_registry_bijection_and_counts(self):
         catalog = load_catalog()
-        self.assertEqual(len(catalog), 30)
+        self.assertEqual(len(catalog), 20)
         self.assertEqual(
             Counter(policy["tier"] for _, policy in catalog),
-            {"core": 10, "diagnostic": 10, "extended": 10},
+            {"core": 8, "diagnostic": 4, "extended": 8},
         )
-        self.assertEqual(CORE_COUNT, 10)
+        self.assertEqual(CORE_COUNT, 8)
         self.assertEqual({metric["shape"] for metric, _ in catalog},
                          {"scalar", "tuple"})
 
@@ -36,22 +36,18 @@ class MetricPresentationTests(unittest.TestCase):
         for key in (
             "NumberOfSpectra_MS1", "NumberOfSpectra_MS2",
             "ChromatographyDuration", "DIAIsolationWindowCount",
-            "DIAIsolationWindowWidths", "AcquisitionCycle_MS2Count_Quantiles",
+            "DIAIsolationWindowWidths",
         ):
             with self.subTest(key=key):
                 self.assertEqual(policies[key]["tier"], "core")
-        self.assertEqual(policies["AcquisitionCycle_MS2Count_Quantiles"]["applicability"],
-                         "cycles")
         self.assertEqual(policies["DIAIsolationWindowCount"]["applicability"], "ms2")
-        self.assertEqual(policies["FAIMS_CV_Values"]["tier"], "diagnostic")
-        self.assertEqual(policies["FAIMS_CV_Values"]["applicability"], "faims")
 
     def test_display_policy_cannot_change_source_accessions_or_definitions(self):
         with REGISTRY.open(encoding="utf-8", newline="") as handle:
             raw = list(csv.DictReader(handle, delimiter="\t"))
         catalog = load_catalog()
         self.assertEqual(raw, [metric for metric, _ in catalog])
-        # All 30 definitions, including extended entries, remain in the reference.
+        # All 20 definitions, including extended entries, remain in the reference.
         doc = render()
         for metric in raw:
             self.assertIn(f"`{metric['accession']}`", doc)
@@ -77,7 +73,7 @@ class MetricPresentationTests(unittest.TestCase):
         retired = {line.split("\t", 1)[0] for line in
                    (Path(__file__).resolve().parents[1] / "docs" / "retired-metrics.tsv")
                    .read_text(encoding="utf-8").splitlines()[1:]}
-        self.assertEqual(len(retired), 76)
+        self.assertEqual(len(retired), 86)
         keys = {metric["key"] for metric, _ in load_catalog()}
         self.assertTrue(retired.isdisjoint(keys))
         new_keys = {metric.key for metric in QCMetricCalculator().calculate(RunSummary())}
@@ -88,9 +84,9 @@ class MetricPresentationTests(unittest.TestCase):
 
     def test_generated_document_is_current(self):
         self.assertEqual(DEST.read_text(encoding="utf-8"), render())
-        self.assertIn("**10 core**", render())
-        self.assertIn("**10 diagnostic**", render())
-        self.assertIn("**10 extended**", render())
+        self.assertIn("**8 core**", render())
+        self.assertIn("**4 diagnostic**", render())
+        self.assertIn("**8 extended**", render())
 
     def test_duplicate_or_missing_policy_fails_closed(self):
         with tempfile.TemporaryDirectory() as temp:

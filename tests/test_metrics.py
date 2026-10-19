@@ -69,13 +69,13 @@ class MetricTests(unittest.TestCase):
             for target in [400.0, 425.0, 450.0, 475.0]:
                 items.append(spectrum(rt, [1], 2, charge=2, width=20, precursor_mz=target))
                 rt += 1
-        metrics, _ = calculate(items)
-        self.assertEqual(metrics["AcquisitionCycle_Count"], 3)
-        self.assertEqual(metrics["AcquisitionCycle_MS2Count_Quantiles"], [4.0, 4.0, 4.0])
-        self.assertEqual(metrics["AcquisitionCycle_MS2Count_Mode"], 4)
-        self.assertEqual(metrics["AcquisitionCycle_TargetCoverageFraction"], 1.0)
-        self.assertEqual(metrics["AcquisitionCycle_TargetEligibleFraction"], 1.0)
-        self.assertEqual(metrics["AcquisitionCycle_UniqueTargetCount_Quantiles"], [4.0, 4.0, 4.0])
+        metrics, summary = calculate(items)
+        cycle = summary.acquisition_cycles.classifier_features()
+        self.assertEqual(cycle["count"], 3)
+        self.assertEqual(cycle["mode"], 4)
+        self.assertEqual(cycle["target_coverage"], 1.0)
+        self.assertEqual(cycle["eligible_fraction"], 1.0)
+        self.assertFalse(any(k.startswith("AcquisitionCycle_") for k in metrics))
 
     def test_acquisition_cycle_dynamic_targets_do_not_look_like_fixed_grid(self):
         items = []
@@ -86,9 +86,10 @@ class MetricTests(unittest.TestCase):
             for target in targets:
                 items.append(spectrum(rt, [1], 2, charge=2, width=2, precursor_mz=target))
                 rt += 1
-        metrics, _ = calculate(items)
-        self.assertEqual(metrics["AcquisitionCycle_Count"], 3)
-        self.assertEqual(metrics["AcquisitionCycle_MS2Count_Mode"], 2)
+        _, summary = calculate(items)
+        cycle = summary.acquisition_cycles.classifier_features()
+        self.assertEqual(cycle["count"], 3)
+        self.assertEqual(cycle["mode"], 2)
 
     def test_acquisition_cycle_target_metrics_require_complete_metadata(self):
         items = [
@@ -96,11 +97,11 @@ class MetricTests(unittest.TestCase):
             spectrum(1, [1], 2, charge=2, width=20, precursor_mz=400.0),
             Spectrum(2, 2, np.array([100.0]), np.array([1.0]), ()),
         ]
-        metrics, _ = calculate(items)
-        self.assertEqual(metrics["AcquisitionCycle_Count"], 1)
-        self.assertEqual(metrics["AcquisitionCycle_TargetCoverageFraction"], 0.5)
-        self.assertEqual(metrics["AcquisitionCycle_TargetEligibleFraction"], 0.0)
-        self.assertIsNone(metrics["AcquisitionCycle_UniqueTargetCount_Quantiles"])
+        _, summary = calculate(items)
+        cycle = summary.acquisition_cycles.classifier_features()
+        self.assertEqual(cycle["count"], 1)
+        self.assertEqual(cycle["target_coverage"], 0.5)
+        self.assertEqual(cycle["eligible_fraction"], 0.0)
 
     def test_acquisition_cycle_metrics_ignore_ms2_before_first_ms1(self):
         items = [
@@ -108,10 +109,11 @@ class MetricTests(unittest.TestCase):
             spectrum(1, [10]),
             spectrum(2, [1], 2, charge=2, width=20, precursor_mz=400.0),
         ]
-        metrics, _ = calculate(items)
-        self.assertEqual(metrics["AcquisitionCycle_Count"], 1)
-        self.assertEqual(metrics["AcquisitionCycle_MS2Count_Mode"], 1)
-        self.assertEqual(metrics["AcquisitionCycle_TargetCoverageFraction"], 1.0)
+        _, summary = calculate(items)
+        cycle = summary.acquisition_cycles.classifier_features()
+        self.assertEqual(cycle["count"], 1)
+        self.assertEqual(cycle["mode"], 1)
+        self.assertEqual(cycle["target_coverage"], 1.0)
 
     def test_multiple_precursor_rule_is_visible(self):
         item = Spectrum(2, 0, np.array([100.]), np.array([1.]),
@@ -128,8 +130,14 @@ class MetricTests(unittest.TestCase):
 
     def test_faims_is_not_drift_time(self):
         item = Spectrum(1, 0, np.array([]), np.array([]), faims_cv=-45)
-        metrics, _ = calculate([item])
-        self.assertEqual(metrics["FAIMS_CV_Values"], [-45])
+        metrics, summary = calculate([item])
+        self.assertEqual(sorted(summary.faims), [-45])
+        self.assertFalse(any(key.startswith("FAIMS_CV_") for key in metrics))
+
+    def test_median_ms1_cycle_time_not_mean(self):
+        metrics, _ = calculate([spectrum(t, [1]) for t in (0, 1, 2, 10)])
+        self.assertEqual(metrics["MedianCycleTime_MS1"], 1.0)
+        self.assertNotIn("AvgCycleTime_MS1", metrics)
 
     def test_summary_does_not_retain_peak_arrays(self):
         import gc

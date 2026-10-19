@@ -53,9 +53,9 @@ QC_SDRF_PROPOSALS = (
     ),
     QCSDRFMetric(
         "ChromatographyDuration",
-        "MS:4000053",
-        "chromatography duration",
-        "comment[chromatography duration]",
+        "MS:4000067",
+        "MS run duration",
+        "comment[MS run duration]",
         "UO:0000010",
         "second",
         "nonnegative_duration_seconds",

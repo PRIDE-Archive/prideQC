@@ -139,7 +139,6 @@ class AcquisitionCycleTracker:
     """
 
     ms2_counts: list[int] = field(default_factory=list)
-    unique_target_counts: list[int] = field(default_factory=list)
     target_set_signatures: Counter[bytes] = field(default_factory=Counter)
     target_order_signatures: Counter[bytes] = field(default_factory=Counter)
     target_observations: int = 0
@@ -177,40 +176,27 @@ class AcquisitionCycleTracker:
         if len(self.current_targets) != self.current_ms2_count:
             return
         unique_targets = sorted(set(self.current_targets))
-        self.unique_target_counts.append(len(unique_targets))
         self.target_set_signatures[_integer_signature(unique_targets)] += 1
         self.target_order_signatures[_integer_signature(self.current_targets)] += 1
 
-    def metrics(self) -> dict[str, Any]:
+    def classifier_features(self) -> dict[str, float | int | None]:
+        """Private acquisition evidence; not exported as mzQC QC metrics."""
         ms2_counts = list(self.ms2_counts)
-        unique_counts = list(self.unique_target_counts)
         target_observations = self.target_observations
-
+        eligible_count = sum(self.target_set_signatures.values())
         if self.started and self.current_ms2_count > 0:
             ms2_counts.append(self.current_ms2_count)
             target_observations += len(self.current_targets)
             if len(self.current_targets) == self.current_ms2_count:
-                unique_targets = sorted(set(self.current_targets))
-                unique_counts.append(len(unique_targets))
-
-        cycle_count = len(ms2_counts)
-        eligible_count = len(unique_counts)
-        total_ms2 = sum(ms2_counts)
+                eligible_count += 1
+        count = len(ms2_counts)
         mode, _ = _mode_and_fraction(ms2_counts)
-        ms2_array = np.asarray(ms2_counts, dtype=float)
-        unique_array = np.asarray(unique_counts, dtype=float)
-
+        total = sum(ms2_counts)
         return {
-            "AcquisitionCycle_Count": cycle_count,
-            "AcquisitionCycle_MS2Count_Quantiles": _quantiles(ms2_array),
-            "AcquisitionCycle_MS2Count_Mode": mode,
-            "AcquisitionCycle_TargetCoverageFraction": (
-                target_observations / total_ms2 if total_ms2 else None
-            ),
-            "AcquisitionCycle_TargetEligibleFraction": (
-                eligible_count / cycle_count if cycle_count else None
-            ),
-            "AcquisitionCycle_UniqueTargetCount_Quantiles": _quantiles(unique_array),
+            "count": count,
+            "mode": mode,
+            "target_coverage": target_observations / total if total else None,
+            "eligible_fraction": eligible_count / count if count else None,
         }
 
     def classifier_consensus(self) -> tuple[float | None, float | None, float | None]:
@@ -335,19 +321,14 @@ class QCMetricCalculator:
         summaries = list(run.levels.values())
         ranges = [_range(_finite(s.rt)) for s in summaries]
         finite_ranges = [r for r in ranges if r is not None]
-        values["NumberOfMSLevels"] = len(summaries)
         values["ChromatographyDuration"] = (
             max(r[1] for r in finite_ranges) - min(r[0] for r in finite_ranges)
             if finite_ranges else None
         )
-        values["FAIMS_CV_Values"] = sorted(run.faims)
-        values["FAIMS_CV_Count"] = len(run.faims)
-        values["FAIMS_CV_Range"] = [min(run.faims), max(run.faims)] if run.faims else None
         for level in sorted(set(run.levels) | {1, 2}):
             values.update(self._level(level, run.levels.get(level, LevelSummary())))
         n1, n2 = values["NumberOfSpectra_MS1"], values["NumberOfSpectra_MS2"]
         values["MS1_to_MS2_Ratio"] = n1 / n2 if n2 else None
-        values.update(run.acquisition_cycles.metrics())
         values.update(self._charge_metrics(run.levels.get(2, LevelSummary())))
         if dia:
             values.update(run.dia_window_metrics())
@@ -378,7 +359,10 @@ class QCMetricCalculator:
         }
         if level == 1:
             differences = np.diff(rts)
-            result["AvgCycleTime_MS1"] = _mean(differences[differences > 0])
+            positive_differences = differences[differences > 0]
+            result["MedianCycleTime_MS1"] = (
+                float(np.median(positive_differences)) if positive_differences.size else None
+            )
             if rt.size > 1 and rt[-1] > rt[0] and tic.sum() > 0:
                 cumulative = np.cumsum(tic)
                 indices = np.searchsorted(cumulative, cumulative[-1] * np.array([0.25, 0.5, 0.75]))

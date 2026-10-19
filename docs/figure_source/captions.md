@@ -26,7 +26,7 @@ refine and validate SDRF metadata. Uncertain evidence abstains.
 
 **Caption:** A synthetic 90-minute DDA run is reduced to compact metrics. (A) TIC trace and a 20 s zoom of MS1 and MS2 scans,
 MS2 coloured by precursor charge. (B) Illustrative TIC trace (not an exported TIC metric). (C) Base-peak
-intensity per MS1 scan. (D) Scan rate, fastest 60 s window and MS1 cycle time. (E) Illustrative precursor charge distribution, with the published 3+/2+ ratio.
+intensity per MS1 scan. (D) Scan rate, fastest 60 s window and **median** MS1 cycle time. (E) Illustrative precursor charge distribution, with the published 3+/2+ ratio.
 (F) DDA isolation widths used as acquisition-classification evidence only, not exported DIA QC metrics.
 (G) Repeated-target behaviour contrasted with a fixed target list. Only annotated QC values are exported;
 DIA window count and width-range metrics require complete geometry on supported DIA runs.

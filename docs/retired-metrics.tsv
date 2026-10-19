@@ -75,3 +75,13 @@ IsolationPrecursorMz_MS2_MaxRepeatFraction	QCPRIDE:AAE8B64F7E3D2B6C4D9A	Supersed
 IsolationPrecursorMz_MS2_RepeatedFraction	QCPRIDE:8D2E4B9C7A1F6E5B3C0D	Superseded by official DIA window geometry metrics MS:4000194/MS:4000195; not equivalent to rounded-target or per-scan summaries.
 MultiplePrecursors_MS2_Count	QCPRIDE:82C9F41E70F7A9F93FCC	Removed from the public QC registry; multi-precursor warnings remain internal.
 MS2_PrecursorCharge_Fractions	QCPRIDE:EF3BCB4B9E83C77AAC5B	Removed charge-fraction table; existing PSI-MS charge summary and ratio metrics remain.
+NumberOfMSLevels	QCPRIDE:C782CFB84B18715F8D67	Moved to CV-backed instrument/scan metadata
+FAIMS_CV_Values	QCPRIDE:E69917C56F3DCCD6D0EE	Moved to CV-backed instrument/scan metadata
+FAIMS_CV_Count	QCPRIDE:0FF9AAA5ADA010E8801C	Moved to CV-backed instrument/scan metadata
+FAIMS_CV_Range	QCPRIDE:3C721D04BCC72F40C1A0	Moved to CV-backed instrument/scan metadata
+AcquisitionCycle_Count	QCPRIDE:E5D44EF02DD0C112FCCD	No longer published; classifier uses internal non-mzQC evidence
+AcquisitionCycle_MS2Count_Quantiles	QCPRIDE:CB0E144250E9279F1725	No longer published; classifier uses internal non-mzQC evidence
+AcquisitionCycle_MS2Count_Mode	QCPRIDE:38064FE0BC760341F5CE	No longer published; classifier uses internal non-mzQC evidence
+AcquisitionCycle_TargetCoverageFraction	QCPRIDE:1E7E0C9468F1B503778C	No longer published; classifier uses internal non-mzQC evidence
+AcquisitionCycle_TargetEligibleFraction	QCPRIDE:0EA9DB6C9708D5F09586	No longer published; classifier uses internal non-mzQC evidence
+AcquisitionCycle_UniqueTargetCount_Quantiles	QCPRIDE:EAE7AB20278D155810C1	No longer published; classifier uses internal non-mzQC evidence

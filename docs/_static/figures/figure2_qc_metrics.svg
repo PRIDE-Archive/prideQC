@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1486" width="1400" height="1486" role="img" aria-labelledby="t d">
 <title id="t">How prideQC computes QC metrics from a spectrum stream</title>
-<desc id="d">A synthetic 90 minute DDA LC-MS/MS run illustrates TIC and base-peak traces, published cycle and charge-ratio metrics, and contextual isolation-window/target behaviour.</desc>
+<desc id="d">A synthetic 90 minute DDA LC-MS/MS run illustrates TIC and base-peak traces, median MS1 cycle time and charge-ratio metrics, and contextual isolation-window/target behaviour.</desc>
 <defs></defs>
 <rect id="background" width="1400" height="1486" fill="#FFFFFF"/>
 <text x="60.00" y="54.00" font-family="Arial, 'Helvetica Neue', Helvetica, 'Liberation Sans', 'Nimbus Sans', 'DejaVu Sans', sans-serif" font-size="28" font-weight="700" fill="#17212B" text-anchor="start">From a spectrum stream to compact QC metrics</text>
@@ -1738,12 +1738,12 @@
 <rect x="1295.20" y="962.00" width="8.93" height="0.00" fill="#D3EBEA" stroke="#157A7A" stroke-width="1"/>
 <rect x="1305.73" y="962.00" width="8.93" height="0.00" fill="#D3EBEA" stroke="#157A7A" stroke-width="1"/>
 <rect x="1316.27" y="962.00" width="8.93" height="0.00" fill="#D3EBEA" stroke="#157A7A" stroke-width="1"/>
-<line x1="1135.25" y1="900.00" x2="1135.25" y2="962.00" stroke="#B9650B" stroke-width="2" stroke-linecap="butt" stroke-dasharray="6 4"/>
-<text x="1142.25" y="912.00" font-family="Arial, 'Helvetica Neue', Helvetica, 'Liberation Sans', 'Nimbus Sans', 'DejaVu Sans', sans-serif" font-size="13" font-weight="600" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="4.5" stroke-linejoin="round" text-anchor="start" aria-hidden="true">mean 1.91 s</text>
-<text x="1142.25" y="912.00" font-family="Arial, 'Helvetica Neue', Helvetica, 'Liberation Sans', 'Nimbus Sans', 'DejaVu Sans', sans-serif" font-size="13" font-weight="600" fill="#B9650B" text-anchor="start">mean 1.91 s</text>
+<line x1="1186.51" y1="900.00" x2="1186.51" y2="962.00" stroke="#B9650B" stroke-width="2" stroke-linecap="butt" stroke-dasharray="6 4"/>
+<text x="1193.51" y="912.00" font-family="Arial, 'Helvetica Neue', Helvetica, 'Liberation Sans', 'Nimbus Sans', 'DejaVu Sans', sans-serif" font-size="13" font-weight="600" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="4.5" stroke-linejoin="round" text-anchor="start" aria-hidden="true">median 2.21 s</text>
+<text x="1193.51" y="912.00" font-family="Arial, 'Helvetica Neue', Helvetica, 'Liberation Sans', 'Nimbus Sans', 'DejaVu Sans', sans-serif" font-size="13" font-weight="600" fill="#B9650B" text-anchor="start">median 2.21 s</text>
 <rect x="940.00" y="997.00" width="3.50" height="76.00" fill="#157A7A" stroke="none" stroke-width="1"/>
-<text x="954.00" y="1012.00" font-family="Menlo, Consolas, 'Liberation Mono', 'Courier New', 'DejaVu Sans Mono', monospace" font-size="13.2" font-weight="400" fill="#17212B" text-anchor="start">Mean MS1 cycle interval (seconds)</text>
-<text x="954.00" y="1032.00" font-family="Menlo, Consolas, 'Liberation Mono', 'Courier New', 'DejaVu Sans Mono', monospace" font-size="13.2" font-weight="400" fill="#17212B" text-anchor="start">  MS1 1.91 seconds</text>
+<text x="954.00" y="1012.00" font-family="Menlo, Consolas, 'Liberation Mono', 'Courier New', 'DejaVu Sans Mono', monospace" font-size="13.2" font-weight="400" fill="#17212B" text-anchor="start">Median MS1 cycle interval (seconds)</text>
+<text x="954.00" y="1032.00" font-family="Menlo, Consolas, 'Liberation Mono', 'Courier New', 'DejaVu Sans Mono', monospace" font-size="13.2" font-weight="400" fill="#17212B" text-anchor="start">  MS1 2.21 seconds</text>
 <text x="954.00" y="1052.00" font-family="Menlo, Consolas, 'Liberation Mono', 'Courier New', 'DejaVu Sans Mono', monospace" font-size="13.2" font-weight="400" fill="#17212B" text-anchor="start">FastestFrequency = max scans in 60 s / 60</text>
 <text x="954.00" y="1072.00" font-family="Menlo, Consolas, 'Liberation Mono', 'Courier New', 'DejaVu Sans Mono', monospace" font-size="13.2" font-weight="400" fill="#17212B" text-anchor="start">  MS2 5.1 Hz</text>
 <text x="60.00" y="1110.00" font-family="Arial, 'Helvetica Neue', Helvetica, 'Liberation Sans', 'Nimbus Sans', 'DejaVu Sans', sans-serif" font-size="21" font-weight="700" fill="#17212B" text-anchor="start">E</text>

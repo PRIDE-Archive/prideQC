@@ -46,7 +46,7 @@ def build() -> Fig:
         W,
         H,
         "How prideQC computes QC metrics from a spectrum stream",
-        "A synthetic 90 minute DDA LC-MS/MS run illustrates TIC and base-peak traces, published cycle and charge-ratio metrics, and contextual isolation-window/target behaviour.",
+        "A synthetic 90 minute DDA LC-MS/MS run illustrates TIC and base-peak traces, median MS1 cycle time and charge-ratio metrics, and contextual isolation-window/target behaviour.",
     )
 
     # ---------------------------------------------------------------- header
@@ -456,12 +456,12 @@ def build() -> Fig:
             sw=1,
         )
     f.line(
-        hx(M["AvgCycleTime_MS1"]), h0 - 4, hx(M["AvgCycleTime_MS1"]), h0 + 58, AMBER, 2, dash="6 4"
+        hx(M["MedianCycleTime_MS1"]), h0 - 4, hx(M["MedianCycleTime_MS1"]), h0 + 58, AMBER, 2, dash="6 4"
     )
     f.text(
-        hx(M["AvgCycleTime_MS1"]) + 7,
+        hx(M["MedianCycleTime_MS1"]) + 7,
         h0 + 8,
-        f"mean {M['AvgCycleTime_MS1']:.2f} s",
+        f"median {M['MedianCycleTime_MS1']:.2f} s",
         size=13,
         weight="600",
         fill=AMBER,
@@ -472,8 +472,8 @@ def build() -> Fig:
         cx,
         cy + ph + 112,
         [
-            "Mean MS1 cycle interval (seconds)",
-            f"  MS1 {M['AvgCycleTime_MS1']:.2f} seconds",
+            "Median MS1 cycle interval (seconds)",
+            f"  MS1 {M['MedianCycleTime_MS1']:.2f} seconds",
             "FastestFrequency = max scans in 60 s / 60",
             f"  MS2 {M['FastestFrequency_MS2']:.1f} Hz",
         ],

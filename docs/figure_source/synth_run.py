@@ -119,15 +119,10 @@ if __name__ == "__main__":
         "ChromatographyDuration",
         "FastestFrequency_MS1",
         "FastestFrequency_MS2",
-        "AvgCycleTime_MS1",
+        "MedianCycleTime_MS1",
         "ChargeRatio_3over2",
-        "AcquisitionCycle_Count",
-        "AcquisitionCycle_MS2Count_Mode",
         "MS1_to_MS2_Ratio",
     ):
         print(k, m[k])
-    fv, grid = fixed_target_metrics()
-    print("--- fixed")
-    for k in (
-    ):
-        print(k, fv[k])
+    _, grid = fixed_target_metrics()
+    print("synthetic fixed target count", len(grid))
