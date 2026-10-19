@@ -98,6 +98,26 @@ STANDARD = {
         "tuple",
         FRACTION,
     ),
+    "ChargeMean": MetricDefinition(
+        "MS:4000173",
+        "mean MS2 precursor charge in all spectra",
+        "Mean of recorded positive first-precursor MS2 charge states; unknown charges excluded.",
+    ),
+    "ChargeMedian": MetricDefinition(
+        "MS:4000175",
+        "median MS2 precursor charge in all spectra",
+        "Median of recorded positive first-precursor MS2 charge states; unknown charges excluded.",
+    ),
+    "ChargeRatio_3over2": MetricDefinition(
+        "MS:4000169",
+        "ratio of 3+ over 2+ of all MS2 known precursor charges",
+        "MS2 count at charge 3 divided by count at charge 2; unavailable if either charge is absent.",
+    ),
+    "ChargeRatio_4over2": MetricDefinition(
+        "MS:4000171",
+        "ratio of 4+ over 2+ of all MS2 known precursor charges",
+        "MS2 count at charge 4 divided by count at charge 2; unavailable if either charge is absent.",
+    ),
 }
 
 DEFINITIONS = {
@@ -131,16 +151,6 @@ DEFINITIONS = {
     "MS2_PrecursorCharge_Fractions": (
         "Counts and fractions of first-precursor charges, denominator all MS2 scans; missing "
         "or nonpositive charge is unknown."
-    ),
-    "ChargeMean": "Mean positive first-precursor MS2 charge; unknown charges excluded.",
-    "ChargeMedian": "Median positive first-precursor MS2 charge; unknown charges excluded.",
-    "ChargeRatio_3over2": (
-        "Count of MS2 charge 3 divided by charge 2; unavailable unless both are present (rawQC "
-        "convention)."
-    ),
-    "ChargeRatio_4over2": (
-        "Count of MS2 charge 4 divided by charge 2; unavailable unless both are present (rawQC "
-        "convention)."
     ),
 }
 

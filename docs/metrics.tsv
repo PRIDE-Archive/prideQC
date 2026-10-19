@@ -34,7 +34,7 @@ AcquisitionCycle_TargetCoverageFraction	QCPRIDE:1E7E0C9468F1B503778C	scalar	Frac
 AcquisitionCycle_TargetEligibleFraction	QCPRIDE:0EA9DB6C9708D5F09586	scalar	Fraction of observed MS1-delimited cycles eligible for target-set/order comparison.
 AcquisitionCycle_UniqueTargetCount_Quantiles	QCPRIDE:EAE7AB20278D155810C1	tuple	25th, 50th, 75th percentiles of unique first-precursor isolation targets per eligible cycle after 0.1 Th quantization.
 MS2_PrecursorCharge_Fractions	QCPRIDE:EF3BCB4B9E83C77AAC5B	table	Counts and fractions of first-precursor charges, denominator all MS2 scans; missing or nonpositive charge is unknown.
-ChargeMean	QCPRIDE:E303A6C9571AC1DD9AD6	scalar	Mean positive first-precursor MS2 charge; unknown charges excluded.
-ChargeMedian	QCPRIDE:3E06B5777AC79EC2AAC6	scalar	Median positive first-precursor MS2 charge; unknown charges excluded.
-ChargeRatio_3over2	QCPRIDE:3263CF93B552C37EE7C0	scalar	Count of MS2 charge 3 divided by charge 2; unavailable unless both are present (rawQC convention).
-ChargeRatio_4over2	QCPRIDE:D916EC99E4BD5371D2AE	scalar	Count of MS2 charge 4 divided by charge 2; unavailable unless both are present (rawQC convention).
+ChargeMean	MS:4000173	scalar	Mean positive first-precursor MS2 charge; unknown charges excluded.
+ChargeMedian	MS:4000175	scalar	Median positive first-precursor MS2 charge; unknown charges excluded.
+ChargeRatio_3over2	MS:4000169	scalar	Count of MS2 charge 3 divided by charge 2; unavailable unless both are present (rawQC convention).
+ChargeRatio_4over2	MS:4000171	scalar	Count of MS2 charge 4 divided by charge 2; unavailable unless both are present (rawQC convention).

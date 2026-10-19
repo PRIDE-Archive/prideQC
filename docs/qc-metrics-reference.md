@@ -276,19 +276,19 @@ and the original metric descriptions.
   - Definition: Counts and fractions of first-precursor charges, denominator all MS2 scans; missing or nonpositive charge is unknown.
 
 - **`ChargeMean`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:E303A6C9571AC1DD9AD6`
+  - CV: `MS:4000173`
   - Definition: Mean positive first-precursor MS2 charge; unknown charges excluded.
 
 - **`ChargeMedian`** — diagnostic; scalar; applies to ms2
-  - CV: `QCPRIDE:3E06B5777AC79EC2AAC6`
+  - CV: `MS:4000175`
   - Definition: Median positive first-precursor MS2 charge; unknown charges excluded.
 
 - **`ChargeRatio_3over2`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:3263CF93B552C37EE7C0`
+  - CV: `MS:4000169`
   - Definition: Count of MS2 charge 3 divided by charge 2; unavailable unless both are present (rawQC convention).
 
 - **`ChargeRatio_4over2`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:D916EC99E4BD5371D2AE`
+  - CV: `MS:4000171`
   - Definition: Count of MS2 charge 4 divided by charge 2; unavailable unless both are present (rawQC convention).
 
 :::
