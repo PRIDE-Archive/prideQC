@@ -139,6 +139,12 @@ jobs:
           apptainer exec "$SIF_BASE" prideqc --version
           apptainer exec "$SIF_BASE" python -c 'from pridepy.pridepy import PROTOCOL_CHOICES; assert "fire" in PROTOCOL_CHOICES.choices'
           apptainer exec "$SIF_BASE" grep -Fx 'pridepy_resolved_sha=b39a05b32111c07fd5bed336da415c7a0753c69b' /opt/prideqc/build-info.txt
+          if apptainer exec "$SIF_BASE" grep -Fxq 'pyopenms_provider=verified_vendor_wheel' /opt/prideqc/openms-build-info.txt; then
+            apptainer exec "$SIF_BASE" grep -Fx 'pyopenms_wheel_sha256=0f5316f05e2c37fc9d24b4d68cbc0ab8000301f5ec4bf4496f71924ef2653403' /opt/prideqc/openms-build-info.txt
+          else
+            apptainer exec "$SIF_BASE" grep -Fx 'pyopenms_provider=source_build' /opt/prideqc/openms-build-info.txt
+            apptainer exec "$SIF_BASE" grep -Eq '^openms_resolved_sha=[0-9a-f]{40}$' /opt/prideqc/openms-build-info.txt
+          fi
           apptainer exec "$SIF_BASE" python -c \
             "import importlib.metadata as m, pyopenms as oms; print(m.version('pyopenms')); assert hasattr(oms, 'ThermoRawFile'); assert hasattr(oms, 'BrukerTimsFile')"
           apptainer exec "$SIF_BASE" multiqc --version

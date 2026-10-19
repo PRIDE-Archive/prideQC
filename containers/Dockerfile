@@ -12,6 +12,8 @@ ARG OPENMS_GIT_REQUESTED_REF=develop
 ARG OPENMS_MANYLINUX_IMAGE=quay.io/pypa/manylinux_2_34_x86_64
 ARG OPENMS_BUILD_JOBS=8
 ARG NANOBIND_BACKEND_VERSION=1.0.0
+# Select the GitHub Release wheel by default. Use pyopenms-builder for source fallback.
+ARG PYOPENMS_BUILDER_STAGE=pyopenms-wheel-builder
 
 FROM ${UV_IMAGE} AS uv-bin
 
@@ -80,9 +82,62 @@ RUN set -eux; \
     wheel_sha="$(sha256sum "$repaired" | awk '{print $1}')"; \
     { \
       cat /tmp/openms-build-info.txt; \
+      echo "pyopenms_provider=source_build"; \
       echo "pyopenms_wheel=$(basename "$repaired")"; \
       echo "pyopenms_wheel_sha256=${wheel_sha}"; \
     } > /out/openms-build-info.txt
+
+# Fast lane: preserve the exact upstream nightly already mirrored as a PRIDEQC
+# vendor release. No OpenMS C++ compilation and no floating wheel index.
+# The download is independently sha256-verified at build time.
+FROM ${PYTHON_IMAGE} AS pyopenms-wheel-builder
+COPY containers/pyopenms.requirements.txt /tmp/pyopenms.requirements.txt
+RUN python - <<'PYOPENMS_DOWNLOAD'
+from hashlib import sha256
+from pathlib import Path
+from urllib.parse import urldefrag, urlsplit
+from urllib.request import Request, urlopen
+import re
+
+lines = [line.strip() for line in Path('/tmp/pyopenms.requirements.txt').read_text().splitlines()
+         if line.strip() and not line.lstrip().startswith('#')]
+if len(lines) != 1 or not lines[0].startswith('pyopenms @ '):
+    raise ValueError('Expected exactly one directly pinned pyopenms requirement')
+url, fragment = urldefrag(lines[0].split(' @ ', 1)[1])
+if not re.fullmatch(r'sha256=[0-9a-f]{64}', fragment):
+    raise ValueError('Wheel URL must carry an exact SHA256 fragment')
+expected = fragment.split('=', 1)[1]
+filename = Path(urlsplit(url).path).name
+if filename != 'pyopenms-3.7.0.dev20261019-cp311-abi3-manylinux_2_34_x86_64.whl':
+    raise ValueError('Unexpected wheel name/platform: ' + filename)
+if not url.startswith('https://github.com/PRIDE-Archive/prideQC/releases/download/vendor-pyopenms-3.7.0.dev20261019/'):
+    raise ValueError('Unexpected distribution origin')
+wheel_dir = Path('/out/wheels')
+wheel_dir.mkdir(parents=True, exist_ok=True)
+wheel_path = wheel_dir / filename
+hasher = sha256()
+request = Request(url, headers={'User-Agent': 'PRIDEQC-wheel-build/1.0'})
+with urlopen(request, timeout=180) as upstream, wheel_path.open('wb') as sink:
+    while chunk := upstream.read(1024 * 1024):
+        hasher.update(chunk)
+        sink.write(chunk)
+actual = hasher.hexdigest()
+if actual != expected:
+    wheel_path.unlink(missing_ok=True)
+    raise ValueError(f'Wheel sha256 mismatch expected={expected} actual={actual}')
+Path('/out/openms-build-info.txt').write_text(
+    'pyopenms_provider=verified_vendor_wheel\n'
+    f'pyopenms_wheel_url={url}\n'
+    f'pyopenms_wheel={filename}\n'
+    f'pyopenms_wheel_sha256={actual}\n'
+    'openms_source_sha=not_provided_by_upstream_wheel\n'
+)
+print(f'PYOPENMS_WHEEL_CHECKSUM=PASS {actual}')
+PYOPENMS_DOWNLOAD
+
+# Exactly one provider is used by downstream stages. With BuildKit the unused
+# pyopenms-builder C++ stage is NOT executed in the wheel lane.
+FROM ${PYOPENMS_BUILDER_STAGE} AS selected-pyopenms-builder
 
 # prideQC is currently Python-only. This stage is intentionally future-proof:
 # if Cargo.toml is added later, release binaries are built with the committed
@@ -123,8 +178,8 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project --no-install-package pyopenms --no-editable
 
-COPY --from=pyopenms-builder /out/wheels/ /opt/prideqc/wheels/
-COPY --from=pyopenms-builder /out/openms-build-info.txt /opt/prideqc/openms-build-info.txt
+COPY --from=selected-pyopenms-builder /out/wheels/ /opt/prideqc/wheels/
+COPY --from=selected-pyopenms-builder /out/openms-build-info.txt /opt/prideqc/openms-build-info.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /opt/prideqc/.venv/bin/python --no-deps "nanobind-backend==${NANOBIND_BACKEND_VERSION}" && \
     uv pip install --python /opt/prideqc/.venv/bin/python --no-deps /opt/prideqc/wheels/*.whl && \
@@ -214,6 +269,7 @@ ARG BUILD_ID=unknown
 ARG OPENMS_GIT_URL=https://github.com/OpenMS/OpenMS.git
 ARG OPENMS_GIT_REF=unknown
 ARG OPENMS_GIT_REQUESTED_REF=unknown
+ARG PYOPENMS_BUILDER_STAGE=pyopenms-wheel-builder
 ARG NANOBIND_BACKEND_VERSION=1.0.0
 ARG PYTHON_IMAGE=python:3.12.14-slim-bookworm
 ARG RUST_IMAGE=rust:1.98.1-slim-bookworm
@@ -272,7 +328,8 @@ RUN set -eux; \
       echo "pyopenms_version=${PYOPENMS_VERSION}"; \
       echo "openms_git_url=${OPENMS_GIT_URL}"; \
       echo "openms_requested_ref=${OPENMS_GIT_REQUESTED_REF}"; \
-      echo "openms_build_ref=${OPENMS_GIT_REF}"; \
+      echo "openms_fallback_ref=${OPENMS_GIT_REF}"; \
+      echo "pyopenms_builder_stage=${PYOPENMS_BUILDER_STAGE}"; \
       echo "nanobind_backend_version=${NANOBIND_BACKEND_VERSION}"; \
       cat /opt/prideqc/openms-build-info.txt; \
       cat /opt/prideqc/pridepy-build-info.txt; \

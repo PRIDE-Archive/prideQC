@@ -19,6 +19,12 @@ OPENMS_GIT_URL="${PRIDEQC_OPENMS_GIT_URL:-https://github.com/OpenMS/OpenMS.git}"
 OPENMS_GIT_REQUESTED_REF="${PRIDEQC_OPENMS_GIT_REF:-develop}"
 OPENMS_BUILD_JOBS="${PRIDEQC_OPENMS_BUILD_JOBS:-8}"
 NANOBIND_BACKEND_VERSION="${PRIDEQC_NANOBIND_BACKEND_VERSION:-1.0.0}"
+PYOPENMS_BUILDER_STAGE="${PRIDEQC_PYOPENMS_BUILDER_STAGE:-pyopenms-wheel-builder}"
+
+if [[ "$PYOPENMS_BUILDER_STAGE" != "pyopenms-wheel-builder" && "$PYOPENMS_BUILDER_STAGE" != "pyopenms-builder" ]]; then
+    echo "Unsupported PRIDEQC_PYOPENMS_BUILDER_STAGE=$PYOPENMS_BUILDER_STAGE" >&2
+    exit 2
+fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -30,7 +36,9 @@ test -f uv.lock
 command -v git >/dev/null 2>&1 || { echo "git is required to resolve the OpenMS source ref" >&2; exit 2; }
 command -v uv >/dev/null 2>&1 || { echo "uv is required to resolve the Hatch-VCS project version" >&2; exit 2; }
 
-if [[ "$OPENMS_GIT_REQUESTED_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+if [[ "$PYOPENMS_BUILDER_STAGE" == "pyopenms-wheel-builder" ]]; then
+    OPENMS_GIT_REF=not-used-vendor-wheel
+elif [[ "$OPENMS_GIT_REQUESTED_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
     OPENMS_GIT_REF="${OPENMS_GIT_REQUESTED_REF,,}"
 else
     OPENMS_GIT_REF="$(
@@ -42,11 +50,15 @@ else
         | awk 'NR == 1 {print tolower($1)}'
     )"
 fi
-[[ "$OPENMS_GIT_REF" =~ ^[0-9a-f]{40}$ ]] || {
-    echo "Could not resolve OpenMS ref '$OPENMS_GIT_REQUESTED_REF' from $OPENMS_GIT_URL" >&2
-    exit 2
-}
-echo "OpenMS source: $OPENMS_GIT_URL $OPENMS_GIT_REQUESTED_REF -> $OPENMS_GIT_REF"
+if [[ "$PYOPENMS_BUILDER_STAGE" == "pyopenms-builder" ]]; then
+    [[ "$OPENMS_GIT_REF" =~ ^[0-9a-f]{40}$ ]] || {
+        echo "Could not resolve OpenMS ref '$OPENMS_GIT_REQUESTED_REF' from $OPENMS_GIT_URL" >&2
+        exit 2
+    }
+    echo "OpenMS source fallback: $OPENMS_GIT_URL $OPENMS_GIT_REQUESTED_REF -> $OPENMS_GIT_REF"
+else
+    echo "OpenMS source compile: SKIPPED (pinned, verified pyOpenMS wheel)"
+fi
 
 PROJECT_VERSION="$(uvx --from hatch --with hatch-vcs hatch version)"
 [[ -n "$PROJECT_VERSION" ]] || {
@@ -102,6 +114,7 @@ build_args=(
     --build-arg "OPENMS_GIT_REQUESTED_REF=$OPENMS_GIT_REQUESTED_REF"
     --build-arg "OPENMS_BUILD_JOBS=$OPENMS_BUILD_JOBS"
     --build-arg "NANOBIND_BACKEND_VERSION=$NANOBIND_BACKEND_VERSION"
+    --build-arg "PYOPENMS_BUILDER_STAGE=$PYOPENMS_BUILDER_STAGE"
     --build-arg "PYTHON_IMAGE=$PYTHON_IMAGE"
     --build-arg "RUST_IMAGE=$RUST_IMAGE"
     --build-arg "UV_IMAGE=$UV_IMAGE"
