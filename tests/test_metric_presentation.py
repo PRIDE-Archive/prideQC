@@ -13,6 +13,7 @@ from scripts.generate_qc_metrics_reference import (
     DEST,
     PRESENTATION,
     REGISTRY,
+    category,
     load_catalog,
     render,
 )
@@ -58,6 +59,18 @@ class MetricPresentationTests(unittest.TestCase):
             self.assertIn(f"`{metric['accession']}`", doc)
         self.assertIn("MS2/MS3", doc)
         self.assertIn("not comparable across uncalibrated runs", doc)
+
+    def test_reference_tables_are_compact_and_definitions_accessible(self):
+        doc = render()
+        self.assertIn("| Core metric | Applies to | Interpretation / limitation |", doc)
+        self.assertIn("| Registry metric | Tier | Applies to |", doc)
+        self.assertNotIn("| Key | CV accession | Shape | Tier | Applicability | Definition |", doc)
+        categories = {category(metric["key"]) for metric, _ in load_catalog()}
+        self.assertEqual(doc.count(":::{dropdown} Full definitions and CV accessions"),
+                         len(categories))
+        self.assertEqual(doc.count("\n:::\n"), len(categories))
+        for metric, _ in load_catalog():
+            self.assertEqual(doc.count(f"CV: `{metric['accession']}`"), 1)
 
     def test_generated_document_is_current(self):
         self.assertEqual(DEST.read_text(encoding="utf-8"), render())

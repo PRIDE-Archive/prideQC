@@ -56,3 +56,14 @@ figure.doc-figure figcaption {
 .note-grid .sd-card {
   height: 100%;
 }
+
+/* Keep long metric keys legible without forcing technical tables wider than
+   the available reading column. Furo's code spans otherwise avoid wrapping. */
+.content table.docutils td code.literal {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.content table.docutils td {
+  vertical-align: top;
+}

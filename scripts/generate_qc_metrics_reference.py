@@ -112,14 +112,16 @@ def render() -> str:
         "Show a value or visualization only when the run has the corresponding",
         "stored mzQC metric. For SRM/MRM or other MS1-free acquisitions, MS1 and",
         "MS1-delimited cycle entries may be inapplicable; this is not QC failure.", "",
-        "| Display | Registry key | Shape | Applies when | Interpretation / limitation |",
-        "| --- | --- | --- | --- | --- |",
+        "The overview uses readable names; the full registry keys, CV accessions,",
+        "value shapes and definitions remain available in the sections below.", "",
+        "| Core metric | Applies to | Interpretation / limitation |",
+        "| --- | --- | --- |",
     ]
-    for metric, policy in catalog:
+    for _metric, policy in catalog:
         if policy["tier"] == "core":
             lines.append(
-                f"| {_cell(policy['label'])} | `{metric['key']}` | {metric['shape']} | "
-                f"{policy['applicability']} | {_cell(policy['caveat'])} |"
+                f"| {_cell(policy['label'])} | {policy['applicability']} | "
+                f"{_cell(policy['caveat'])} |"
             )
     lines.extend([
         "", "The counts include empty scans where stated by the registry. MS1/MS2",
@@ -150,19 +152,37 @@ def render() -> str:
                   "absence of signals is interpreted as label-free.", "",
                   "## Registered quantitative QC metrics", "",
                   "Tier and applicability are editorial display metadata, not additional",
-                  "scientific measurements or controlled vocabulary terms.", ""])
+                  "scientific measurements or controlled vocabulary terms.",
+                  "Browse the compact three-column indexes by category, then expand",
+                  "a category's definitions to see full CV accessions, value shapes",
+                  "and the original metric descriptions.", ""])
     groups: dict[str, list[tuple[dict[str, str], dict[str, str]]]] = {}
     for metric, policy in catalog:
         groups.setdefault(category(metric["key"]), []).append((metric, policy))
     for name, rows in sorted(groups.items()):
-        lines.extend([f"### {name} ({len(rows)})", "",
-                      "| Key | CV accession | Shape | Tier | Applicability | Definition |",
-                      "| --- | --- | --- | --- | --- | --- |"])
+        lines.extend([
+            f"### {name} ({len(rows)})", "",
+            "| Registry metric | Tier | Applies to |",
+            "| --- | --- | --- |",
+        ])
         for metric, policy in rows:
-            lines.append(f"| `{metric['key']}` | `{metric['accession']}` | "
-                         f"{metric['shape']} | {policy['tier']} | {policy['applicability']} | "
-                         f"{_cell(metric['description'])} |")
-        lines.append("")
+            lines.append(
+                f"| `{metric['key']}` | {policy['tier']} | "
+                f"{policy['applicability']} |"
+            )
+        lines.extend([
+            "", ":::{dropdown} Full definitions and CV accessions — " + name,
+            "",
+        ])
+        for metric, policy in rows:
+            lines.extend([
+                f"- **`{metric['key']}`** — {policy['tier']}; "
+                f"{metric['shape']}; applies to {policy['applicability']}",
+                f"  - CV: `{metric['accession']}`",
+                f"  - Definition: {metric['description']}",
+                "",
+            ])
+        lines.extend([":::", ""])
     lines.extend(["## Provenance and caveats", "",
                   "The complete set of calculated QC metrics remains in mzQC per run",
                   "and in losslessly consolidated accession mzQC. A website or",
