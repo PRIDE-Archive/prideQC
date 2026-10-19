@@ -125,8 +125,8 @@ def render() -> str:
             )
     lines.extend([
         "", "Counts include empty scans where stated by the registry. Charge",
-        "fractions retain unknowns in the all-MS2 denominator. Quantile and table",
-        "metrics remain multivalued; the overview must not silently collapse",
+        "statistics and DIA windows are reported only when supported. Quantile",
+        "and tuple metrics remain multivalued; the overview must not silently collapse",
         "them into an undocumented scalar or recompute them from mzQC.", "",
         "Acquisition method (DDA/DIA/PRM/SRM), labelling candidates, ionization,",
         "instrument and LC annotations belong in the experimental-context section,",
@@ -191,8 +191,8 @@ def render() -> str:
                   "not a zero value, low score, or proof that an experimental method",
                   "was absent.", "",
                   "`NumberOfSpectra_MS1`, `NumberOfSpectra_MS2`,",
-                  "`MS2_PrecursorCharge_Fractions`, `ChromatographyDuration`,",
-                  "and isolation-width statistics remain in the scientific registry.",
+                  "`DIAIsolationWindowWidths`, `ChromatographyDuration`,",
+                  "and the supported DIA window statistics remain in the scientific registry.",
                   "Ion-source CV metadata are observed only if the reader supplies it.",
                   "RT/duration do not reveal LC separation chemistry. Label/channel",
                   "annotations require verified submitter/SDRF evidence for writeback.", "",

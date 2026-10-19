@@ -89,7 +89,6 @@ def _result(
         metadata=RunMetadata(instruments=[CVTerm("MS:1002416", "Orbitrap Fusion")]),
         metrics=[
             Metric("ChromatographyDuration", duration),
-            Metric("IsolationWidth_MS2_Median", 1.6),
             Metric("NumberOfSpectra_MS1", 4000),
             Metric("NumberOfSpectra_MS2", 40000),
         ],

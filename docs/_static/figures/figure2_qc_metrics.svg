@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1486" width="1400" height="1486" role="img" aria-labelledby="t d">
 <title id="t">How prideQC computes QC metrics from a spectrum stream</title>
-<desc id="d">A synthetic 90 minute DDA LC-MS/MS run illustrates TIC and base-peak traces, plus published cycle, charge, isolation-window and repeated-target metrics. Formulas are those used in prideQC's metric code.</desc>
+<desc id="d">A synthetic 90 minute DDA LC-MS/MS run illustrates TIC and base-peak traces, published cycle and charge-ratio metrics, and contextual isolation-window/target behaviour.</desc>
 <defs></defs>
 <rect id="background" width="1400" height="1486" fill="#FFFFFF"/>
 <text x="60.00" y="54.00" font-family="Arial, 'Helvetica Neue', Helvetica, 'Liberation Sans', 'Nimbus Sans', 'DejaVu Sans', sans-serif" font-size="28" font-weight="700" fill="#17212B" text-anchor="start">From a spectrum stream to compact QC metrics</text>
@@ -1826,7 +1826,7 @@
 <line x1="803.39" y1="1162.00" x2="803.39" y2="1292.00" stroke="#B9650B" stroke-width="1.6" stroke-linecap="butt" stroke-dasharray="5 4"/>
 <rect x="500.00" y="1337.00" width="3.50" height="76.00" fill="#157A7A" stroke="none" stroke-width="1"/>
 <text x="514.00" y="1352.00" font-family="Menlo, Consolas, 'Liberation Mono', 'Courier New', 'DejaVu Sans Mono', monospace" font-size="13.2" font-weight="400" fill="#17212B" text-anchor="start">window histogram illustrates acquisition settings</text>
-<text x="514.00" y="1372.00" font-family="Menlo, Consolas, 'Liberation Mono', 'Courier New', 'DejaVu Sans Mono', monospace" font-size="13.2" font-weight="400" fill="#17212B" text-anchor="start">  median exported width = 1.6 Th</text>
+<text x="514.00" y="1372.00" font-family="Menlo, Consolas, 'Liberation Mono', 'Courier New', 'DejaVu Sans Mono', monospace" font-size="13.2" font-weight="400" fill="#17212B" text-anchor="start">  DDA width histogram: contextual only</text>
 <text x="514.00" y="1392.00" font-family="Menlo, Consolas, 'Liberation Mono', 'Courier New', 'DejaVu Sans Mono', monospace" font-size="13.2" font-weight="400" fill="#17212B" text-anchor="start">narrow ≤3 Th and wide ≥15 Th are the</text>
 <text x="514.00" y="1412.00" font-family="Menlo, Consolas, 'Liberation Mono', 'Courier New', 'DejaVu Sans Mono', monospace" font-size="13.2" font-weight="400" fill="#17212B" text-anchor="start">  limits the acquisition heuristic uses</text>
 <text x="940.00" y="1110.00" font-family="Arial, 'Helvetica Neue', Helvetica, 'Liberation Sans', 'Nimbus Sans', 'DejaVu Sans', sans-serif" font-size="21" font-weight="700" fill="#17212B" text-anchor="start">G</text>

@@ -53,30 +53,6 @@ def _interval_fractions(rt: FloatArray, span: float) -> list[float] | None:
     return (np.diff(np.quantile(rt, [0, 0.25, 0.5, 0.75, 1])) / span).tolist()
 
 
-def _quantized_counts(values: Any, decimal_places: int = 1) -> np.ndarray:
-    values = _finite(values)
-    if not values.size:
-        return np.array([], dtype=np.float64)
-    return np.round(values, decimal_places)
-
-
-def _max_repeat_fraction(values: Any, decimal_places: int = 1) -> float | None:
-    quantized = _quantized_counts(values, decimal_places)
-    if not quantized.size:
-        return None
-    _, counts = np.unique(quantized, return_counts=True)
-    return float(counts.max() / quantized.size)
-
-
-def _repeated_fraction(values: Any, decimal_places: int = 1) -> float | None:
-    quantized = _quantized_counts(values, decimal_places)
-    if not quantized.size:
-        return None
-    _, counts = np.unique(quantized, return_counts=True)
-    repeated = counts[counts >= 2].sum() if np.any(counts >= 2) else 0
-    return float(repeated / quantized.size)
-
-
 def _mode_and_fraction(values: list[int]) -> tuple[int | None, float | None]:
     if not values:
         return None, None
@@ -263,11 +239,67 @@ class RunSummary:
         self.levels: dict[int, LevelSummary] = {}
         self.acquisition_cycles = AcquisitionCycleTracker()
         self.faims: set[float] = set()
+        # Boundaries, FAIMS CV and window ion mobility define a DIA window.
+        # Count distinct geometries, never rounded precursor centres.
+        self.dia_windows: set[tuple[float | None, ...]] = set()
+        self.dia_window_incomplete = False
+        self.dia_faims_present: set[bool] = set()
+        self.dia_im_present: set[bool] = set()
+
+    def _record_dia_window(self, spectrum: Spectrum) -> None:
+        if spectrum.ms_level != 2:
+            return
+        self.dia_faims_present.add(spectrum.faims_cv is not None)
+        if len(spectrum.precursors) != 1 or spectrum.unresolved_ion_mobility:
+            self.dia_window_incomplete = True
+            return
+        precursor = spectrum.precursors[0]
+        target, low, high = (
+            precursor.mz, precursor.isolation_lower_offset,
+            precursor.isolation_upper_offset,
+        )
+        im_low, im_high = precursor.ion_mobility_lower, precursor.ion_mobility_upper
+        self.dia_im_present.add(im_low is not None or im_high is not None)
+        if low is None or high is None:
+            self.dia_window_incomplete = True
+            return
+        if (not all(math.isfinite(v) for v in (target, low, high))
+            or target <= 0 or low < 0 or high < 0 or low + high <= 0
+            or ((im_low is None) != (im_high is None))
+            or (im_low is not None and im_high is not None
+                and (not math.isfinite(im_low) or not math.isfinite(im_high)
+                     or im_low >= im_high))
+            or (spectrum.faims_cv is not None and not math.isfinite(spectrum.faims_cv))
+        ):
+            self.dia_window_incomplete = True
+            return
+        self.dia_windows.add(tuple(
+            round(v, 6) if v is not None else None
+            for v in (target - low, target + high, spectrum.faims_cv, im_low, im_high)
+        ))
+
+    def dia_window_metrics(self) -> dict[str, Any]:
+        """Only complete, unambiguous MS2 geometry can produce PSI-MS DIA metrics."""
+        if (not self.dia_windows or self.dia_window_incomplete
+            or len(self.dia_faims_present) > 1 or len(self.dia_im_present) > 1):
+            return {}
+        widths: list[float] = []
+        for window in self.dia_windows:
+            if window[0] is None or window[1] is None:
+                return {}
+            widths.append(window[1] - window[0])
+        if not widths:
+            return {}
+        return {
+            "DIAIsolationWindowCount": len(self.dia_windows),
+            "DIAIsolationWindowWidths": [min(widths), max(widths)],
+        }
 
     def consume_spectrum(self, spectrum: Spectrum) -> None:
         if spectrum.ms_level < 1:
             raise ValueError(f"Invalid MS level: {spectrum.ms_level}")
         self.acquisition_cycles.consume(spectrum)
+        self._record_dia_window(spectrum)
         if spectrum.ms_level not in self.levels:
             self.levels[spectrum.ms_level] = LevelSummary()
         self.levels[spectrum.ms_level].consume(spectrum)
@@ -298,7 +330,7 @@ class RunSummary:
 class QCMetricCalculator:
     """Pure calculations; no file access, CV serialization, or SDRF mutation."""
 
-    def calculate(self, run: RunSummary) -> list[Metric]:
+    def calculate(self, run: RunSummary, *, dia: bool = False) -> list[Metric]:
         values: dict[str, Any] = {}
         summaries = list(run.levels.values())
         ranges = [_range(_finite(s.rt)) for s in summaries]
@@ -317,6 +349,8 @@ class QCMetricCalculator:
         values["MS1_to_MS2_Ratio"] = n1 / n2 if n2 else None
         values.update(run.acquisition_cycles.metrics())
         values.update(self._charge_metrics(run.levels.get(2, LevelSummary())))
+        if dia:
+            values.update(run.dia_window_metrics())
         return [Metric(key, value) for key, value in values.items()]
 
     def _level(self, level: int, summary: LevelSummary) -> dict[str, Any]:
@@ -352,29 +386,6 @@ class QCMetricCalculator:
                 result["RT_TIC_Quantiles"] = (np.diff(boundaries) / (rt[-1] - rt[0])).tolist()
             else:
                 result["RT_TIC_Quantiles"] = None
-        if level > 1:
-            widths = _finite(summary.isolation_widths)
-            result.update({
-                f"IsolationWidth_{label}_Median": float(np.median(widths)) if widths.size else None,
-                f"IsolationWidth_{label}_Quantiles": _quantiles(widths),
-                f"IsolationWidth_{label}_Min": float(widths.min()) if widths.size else None,
-                f"IsolationWidth_{label}_Max": float(widths.max()) if widths.size else None,
-                f"IsolationWidth_{label}_Count": int(widths.size),
-                f"IsolationPrecursorMz_{label}_UniqueCount": (
-                    int(np.unique(np.round(np.asarray(summary.isolation_precursor_mz), 1)).size)
-                    if summary.isolation_precursor_mz else 0
-                ),
-                f"IsolationPrecursorMz_{label}_UniqueFraction": (
-                    float(
-                        np.unique(np.round(np.asarray(summary.isolation_precursor_mz), 1)).size
-                        / len(summary.isolation_precursor_mz)
-                    )
-                    if summary.isolation_precursor_mz else None
-                ),
-                f"IsolationPrecursorMz_{label}_MaxRepeatFraction": _max_repeat_fraction(summary.isolation_precursor_mz),
-                f"IsolationPrecursorMz_{label}_RepeatedFraction": _repeated_fraction(summary.isolation_precursor_mz),
-                f"MultiplePrecursors_{label}_Count": summary.multiple_precursors,
-            })
         return result
 
     def _charge_metrics(self, summary: LevelSummary) -> dict[str, Any]:
@@ -383,11 +394,6 @@ class QCMetricCalculator:
         bins = [int(np.count_nonzero(charges == k)) for k in range(1, 6)]
         bins.extend([int(np.count_nonzero(charges >= 6)), int(np.count_nonzero(charges <= 0))])
         return {
-            "MS2_PrecursorCharge_Fractions": {
-                "charge_state": ["1", "2", "3", "4", "5", ">=6", "unknown"],
-                "count": bins,
-                "fraction": [n / summary.count if summary.count else None for n in bins],
-            },
             "ChargeMean": _mean(known),
             "ChargeMedian": float(np.median(known)) if known.size else None,
             "ChargeRatio_3over2": bins[2] / bins[1] if bins[1] and bins[2] else None,

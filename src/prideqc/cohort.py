@@ -38,12 +38,11 @@ COHORT_SDRF_FIELDS = frozenset(
 )
 COHORT_OVERWRITE_FIELDS = frozenset({COHORT_PRECURSOR_FIELD, COHORT_FRAGMENT_FIELD})
 
-_NUMERIC_FEATURES = ("precursor", "fragment", "rt", "isolation", "ms1", "ms2")
+_NUMERIC_FEATURES = ("precursor", "fragment", "rt", "ms1", "ms2")
 _SEPARATION_THRESHOLDS = {
     "precursor": 1.50,
     "fragment": 1.50,
     "rt": 1.15,
-    "isolation": 1.20,
     "ms1": 1.25,
     "ms2": 1.25,
 }
@@ -51,7 +50,6 @@ _FEATURE_NAMES = {
     "precursor": "precursor tolerance",
     "fragment": "fragment tolerance",
     "rt": "chromatography duration",
-    "isolation": "MS2 isolation width",
     "ms1": "MS1 spectra",
     "ms2": "MS2 spectra",
 }
@@ -189,7 +187,6 @@ def _result_features(result: AnalysisResult) -> dict[str, Any]:
         "fragment_unit": "ppm" if fragment_ppm else "Da" if fragment_da else "",
         "fragment_regime": str(fragment.get("resolution_regime") or "") if fragment else "",
         "rt": _metric(result, "ChromatographyDuration"),
-        "isolation": _metric(result, "IsolationWidth_MS2_Median"),
         "ms1": _metric(result, "NumberOfSpectra_MS1"),
         "ms2": _metric(result, "NumberOfSpectra_MS2"),
         "instrument": ";".join(instruments),
@@ -702,7 +699,7 @@ def synthesize_cohort(
                     (
                         "Grouping uses compatible fragment units/regimes, instrument/acquisition "
                         "metadata when complete, and robustly scaled precursor tolerance, fragment "
-                        "tolerance, chromatography duration, MS2 isolation width and MS1/MS2 "
+                        "tolerance, chromatography duration and MS1/MS2 "
                         "counts. Strong, well-separated chromatography-duration regimes are "
                         "split before multivariate clustering. It indicates acquisition "
                         "heterogeneity and is not proof of separate biological experiments."

@@ -16,16 +16,8 @@ PeakDensity_MS2_Quantiles	MS:4000062	tuple	25th, 50th, 75th percentiles of valid
 FastestFrequency_MS2	MS:4000066	scalar	Maximum scan count in a closed 60-second window divided by 60, including short runs.
 RT_MS2_Quantiles	MS:4000185	tuple	Four consecutive scan-RT quartile widths divided by the MS2 time span.
 ObservedMzRange_MS2	QCPRIDE:47E4D2D8B1F1F4D61C19	tuple	Min/max valid peak m/z; this is an observed range, not the instrument scan window, MS2.
-IsolationWidth_MS2_Median	QCPRIDE:652589C44AB88BC96F40	scalar	Median positive first-precursor lower+upper isolation offsets in Th (m/z), MS2.
-IsolationWidth_MS2_Quantiles	QCPRIDE:482962258BA982FED6BB	tuple	25th, 50th, 75th percentiles of positive first-precursor isolation widths in Th (m/z), MS2.
-IsolationWidth_MS2_Min	QCPRIDE:228CD009EF66CB6342FD	scalar	Minimum positive first-precursor isolation width in Th (m/z), MS2.
-IsolationWidth_MS2_Max	QCPRIDE:E0ADF25D530854F3543D	scalar	Maximum positive first-precursor isolation width in Th (m/z), MS2.
-IsolationWidth_MS2_Count	QCPRIDE:0F163ECB26874F0C65C7	scalar	Count of first-precursor isolation widths with a finite positive value, MS2.
-IsolationPrecursorMz_MS2_UniqueCount	QCPRIDE:C98D3B2F6D4A5E4D3E1B	scalar	Count of unique first-precursor m/z values after rounding to 0.1 Th, MS2.
-IsolationPrecursorMz_MS2_UniqueFraction	QCPRIDE:B7B2C4A7F8F6D1A4C6E9	scalar	Unique first-precursor m/z target count divided by paired isolation-width observations, after 0.1 Th rounding, MS2.
-IsolationPrecursorMz_MS2_MaxRepeatFraction	QCPRIDE:AAE8B64F7E3D2B6C4D9A	scalar	Largest fraction of paired isolation-width observations sharing one rounded (0.1 Th) first-precursor m/z target, MS2.
-IsolationPrecursorMz_MS2_RepeatedFraction	QCPRIDE:8D2E4B9C7A1F6E5B3C0D	scalar	Fraction of paired isolation-width observations whose rounded (0.1 Th) first-precursor m/z target occurs at least twice, MS2.
-MultiplePrecursors_MS2_Count	QCPRIDE:82C9F41E70F7A9F93FCC	scalar	Scans with multiple precursors; first precursor supplies precursor-distribution metrics, MS2.
+DIAIsolationWindowCount	MS:4000194	scalar	Number of distinct DIA MS2 isolation windows by low/high m/z boundaries and available FAIMS and ion mobility window settings; emitted only for complete, DIA-supported observations.
+DIAIsolationWindowWidths	MS:4000195	tuple	Minimum and maximum width in m/z across distinct DIA MS2 isolation windows; fixed-width DIA repeats the same value twice.
 MS1_to_MS2_Ratio	QCPRIDE:3E6B36C0810EEDA24D7A	scalar	MS1 scan count divided by MS2 scan count; undefined when denominator is zero.
 AcquisitionCycle_Count	QCPRIDE:E5D44EF02DD0C112FCCD	scalar	Count of MS1-delimited cycles containing at least one MS2 scan. MS2 scans before the first MS1 are ignored; a trailing cycle is included when it contains MS2 scans.
 AcquisitionCycle_MS2Count_Quantiles	QCPRIDE:CB0E144250E9279F1725	tuple	25th, 50th, 75th percentiles of MS2 scans per observed MS1-delimited cycle.
@@ -33,7 +25,6 @@ AcquisitionCycle_MS2Count_Mode	QCPRIDE:38064FE0BC760341F5CE	scalar	Most frequent
 AcquisitionCycle_TargetCoverageFraction	QCPRIDE:1E7E0C9468F1B503778C	scalar	Fraction of MS2 scans inside observed MS1-delimited cycles with a finite positive first-precursor m/z paired with a positive isolation width.
 AcquisitionCycle_TargetEligibleFraction	QCPRIDE:0EA9DB6C9708D5F09586	scalar	Fraction of observed MS1-delimited cycles eligible for target-set/order comparison.
 AcquisitionCycle_UniqueTargetCount_Quantiles	QCPRIDE:EAE7AB20278D155810C1	tuple	25th, 50th, 75th percentiles of unique first-precursor isolation targets per eligible cycle after 0.1 Th quantization.
-MS2_PrecursorCharge_Fractions	QCPRIDE:EF3BCB4B9E83C77AAC5B	table	Counts and fractions of first-precursor charges, denominator all MS2 scans; missing or nonpositive charge is unknown.
 ChargeMean	MS:4000173	scalar	Mean positive first-precursor MS2 charge; unknown charges excluded.
 ChargeMedian	MS:4000175	scalar	Median positive first-precursor MS2 charge; unknown charges excluded.
 ChargeRatio_3over2	MS:4000169	scalar	Count of MS2 charge 3 divided by charge 2; unavailable unless both are present (rawQC convention).

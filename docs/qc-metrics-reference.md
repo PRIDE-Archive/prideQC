@@ -6,9 +6,9 @@ selects which existing mzQC metrics are prominently displayed; it does
 **not** change acquisition, calculation, CV identity, serialization or merging.
 Experimental method and label annotations are recorded separately.
 
-**Registered QC metric definitions: 39.**
-Presentation tiers: **10 core**, **14 diagnostic**,
-and **15 extended**. A registration is not a promise
+**Registered QC metric definitions: 30.**
+Presentation tiers: **10 core**, **10 diagnostic**,
+and **10 extended**. A registration is not a promise
 that a value exists for every run. Metrics absent or undefined in the source
 mzQC must remain absent/undefined; do not fill missing values with zero.
 
@@ -30,14 +30,14 @@ value shapes and definitions remain available in the sections below.
 | MS1 peaks per scan (quartiles) | ms1 | Valid stored peaks per scan, not identified molecular features. |
 | MS2 spectra | ms2 | Includes scans with no detected peaks. |
 | MS2 peaks per scan (quartiles) | ms2 | Valid stored peaks per scan, not identified molecular features. |
-| Median MS2 isolation width | ms2 | Requires positive recorded isolation offsets; absent is not zero. |
+| DIA isolation windows | ms2 | Distinct window geometries; not rounded precursor-target count. DIA evidence and complete metadata required. |
+| DIA window widths (min/max) | ms2 | Minimum and maximum distinct window widths in m/z; not individual scalar extrema. |
 | MS1/MS2 scan ratio | ms1_ms2 | Undefined when there are no MS2 scans; not a performance score. |
 | MS2 scans per acquisition cycle | cycles | MS1-delimited cycles only; not applicable to MS1-free targeted runs. |
-| MS2 precursor charge fractions | ms2 | Denominator is all MS2 scans; unknown charge is retained. |
 
 Counts include empty scans where stated by the registry. Charge
-fractions retain unknowns in the all-MS2 denominator. Quantile and table
-metrics remain multivalued; the overview must not silently collapse
+statistics and DIA windows are reported only when supported. Quantile
+and tuple metrics remain multivalued; the overview must not silently collapse
 them into an undocumented scalar or recompute them from mzQC.
 
 Acquisition method (DDA/DIA/PRM/SRM), labelling candidates, ionization,
@@ -209,21 +209,12 @@ and the original metric descriptions.
 
 :::
 
-### Precursors and isolation (15)
+### Precursors and isolation (6)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
-| `IsolationWidth_MS2_Median` | core | ms2 |
-| `IsolationWidth_MS2_Quantiles` | diagnostic | ms2 |
-| `IsolationWidth_MS2_Min` | extended | ms2 |
-| `IsolationWidth_MS2_Max` | extended | ms2 |
-| `IsolationWidth_MS2_Count` | diagnostic | ms2 |
-| `IsolationPrecursorMz_MS2_UniqueCount` | extended | ms2 |
-| `IsolationPrecursorMz_MS2_UniqueFraction` | diagnostic | ms2 |
-| `IsolationPrecursorMz_MS2_MaxRepeatFraction` | extended | ms2 |
-| `IsolationPrecursorMz_MS2_RepeatedFraction` | extended | ms2 |
-| `MultiplePrecursors_MS2_Count` | diagnostic | ms2 |
-| `MS2_PrecursorCharge_Fractions` | core | ms2 |
+| `DIAIsolationWindowCount` | core | ms2 |
+| `DIAIsolationWindowWidths` | core | ms2 |
 | `ChargeMean` | extended | ms2 |
 | `ChargeMedian` | diagnostic | ms2 |
 | `ChargeRatio_3over2` | extended | ms2 |
@@ -231,49 +222,13 @@ and the original metric descriptions.
 
 :::{dropdown} Full definitions and CV accessions — Precursors and isolation
 
-- **`IsolationWidth_MS2_Median`** — core; scalar; applies to ms2
-  - CV: `QCPRIDE:652589C44AB88BC96F40`
-  - Definition: Median positive first-precursor lower+upper isolation offsets in Th (m/z), MS2.
+- **`DIAIsolationWindowCount`** — core; scalar; applies to ms2
+  - CV: `MS:4000194`
+  - Definition: Number of distinct DIA MS2 isolation windows by low/high m/z boundaries and available FAIMS and ion mobility window settings; emitted only for complete, DIA-supported observations.
 
-- **`IsolationWidth_MS2_Quantiles`** — diagnostic; tuple; applies to ms2
-  - CV: `QCPRIDE:482962258BA982FED6BB`
-  - Definition: 25th, 50th, 75th percentiles of positive first-precursor isolation widths in Th (m/z), MS2.
-
-- **`IsolationWidth_MS2_Min`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:228CD009EF66CB6342FD`
-  - Definition: Minimum positive first-precursor isolation width in Th (m/z), MS2.
-
-- **`IsolationWidth_MS2_Max`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:E0ADF25D530854F3543D`
-  - Definition: Maximum positive first-precursor isolation width in Th (m/z), MS2.
-
-- **`IsolationWidth_MS2_Count`** — diagnostic; scalar; applies to ms2
-  - CV: `QCPRIDE:0F163ECB26874F0C65C7`
-  - Definition: Count of first-precursor isolation widths with a finite positive value, MS2.
-
-- **`IsolationPrecursorMz_MS2_UniqueCount`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:C98D3B2F6D4A5E4D3E1B`
-  - Definition: Count of unique first-precursor m/z values after rounding to 0.1 Th, MS2.
-
-- **`IsolationPrecursorMz_MS2_UniqueFraction`** — diagnostic; scalar; applies to ms2
-  - CV: `QCPRIDE:B7B2C4A7F8F6D1A4C6E9`
-  - Definition: Unique first-precursor m/z target count divided by paired isolation-width observations, after 0.1 Th rounding, MS2.
-
-- **`IsolationPrecursorMz_MS2_MaxRepeatFraction`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:AAE8B64F7E3D2B6C4D9A`
-  - Definition: Largest fraction of paired isolation-width observations sharing one rounded (0.1 Th) first-precursor m/z target, MS2.
-
-- **`IsolationPrecursorMz_MS2_RepeatedFraction`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:8D2E4B9C7A1F6E5B3C0D`
-  - Definition: Fraction of paired isolation-width observations whose rounded (0.1 Th) first-precursor m/z target occurs at least twice, MS2.
-
-- **`MultiplePrecursors_MS2_Count`** — diagnostic; scalar; applies to ms2
-  - CV: `QCPRIDE:82C9F41E70F7A9F93FCC`
-  - Definition: Scans with multiple precursors; first precursor supplies precursor-distribution metrics, MS2.
-
-- **`MS2_PrecursorCharge_Fractions`** — core; table; applies to ms2
-  - CV: `QCPRIDE:EF3BCB4B9E83C77AAC5B`
-  - Definition: Counts and fractions of first-precursor charges, denominator all MS2 scans; missing or nonpositive charge is unknown.
+- **`DIAIsolationWindowWidths`** — core; tuple; applies to ms2
+  - CV: `MS:4000195`
+  - Definition: Minimum and maximum width in m/z across distinct DIA MS2 isolation windows; fixed-width DIA repeats the same value twice.
 
 - **`ChargeMean`** — extended; scalar; applies to ms2
   - CV: `MS:4000173`
@@ -368,8 +323,8 @@ not a zero value, low score, or proof that an experimental method
 was absent.
 
 `NumberOfSpectra_MS1`, `NumberOfSpectra_MS2`,
-`MS2_PrecursorCharge_Fractions`, `ChromatographyDuration`,
-and isolation-width statistics remain in the scientific registry.
+`DIAIsolationWindowWidths`, `ChromatographyDuration`,
+and the supported DIA window statistics remain in the scientific registry.
 Ion-source CV metadata are observed only if the reader supplies it.
 RT/duration do not reveal LC separation chemistry. Label/channel
 annotations require verified submitter/SDRF evidence for writeback.

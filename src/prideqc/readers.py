@@ -309,6 +309,9 @@ class _Consumer:
             consume_native(spectrum)
         mz, intensity = spectrum.get_peaks()
         precursors = []
+        spectrum_im_lower = _meta_number(spectrum, ("ion mobility lower limit",))
+        spectrum_im_upper = _meta_number(spectrum, ("ion mobility upper limit",))
+        unwindowed_precursor_mobility = False
         for precursor in spectrum.getPrecursors():
             methods = tuple(
                 ACTIVATION[name]
@@ -327,14 +330,39 @@ class _Consumer:
             collision = (normalized, "NCE") if normalized is not None else (
                 (energy, "eV") if energy is not None else None
             )
-            width = float(
-                precursor.getIsolationWindowLowerOffset() + precursor.getIsolationWindowUpperOffset(),
-            )
+            lower = float(precursor.getIsolationWindowLowerOffset())
+            upper = float(precursor.getIsolationWindowUpperOffset())
+            width = lower + upper
+            im_lower = _meta_number(precursor, ("ion mobility lower limit",))
+            im_upper = _meta_number(precursor, ("ion mobility upper limit",))
+            if im_lower is None:
+                im_lower = spectrum_im_lower
+            if im_upper is None:
+                im_upper = spectrum_im_upper
+            if im_lower is None and im_upper is None:
+                # pyOpenMS may instead expose a precursor drift-time window.
+                # A drift-time position alone does not define a window.
+                drift_getter = getattr(precursor, "getDriftTime", None)
+                lo_getter = getattr(precursor, "getDriftTimeWindowLowerOffset", None)
+                hi_getter = getattr(precursor, "getDriftTimeWindowUpperOffset", None)
+                if callable(drift_getter):
+                    im_target = float(drift_getter())
+                    if math.isfinite(im_target) and im_target >= 0:
+                        im_lo = float(lo_getter()) if callable(lo_getter) else 0.0
+                        im_hi = float(hi_getter()) if callable(hi_getter) else 0.0
+                        if (math.isfinite(im_lo) and math.isfinite(im_hi)
+                            and im_lo >= 0 and im_hi >= 0 and im_lo + im_hi > 0):
+                            im_lower, im_upper = im_target - im_lo, im_target + im_hi
+                        else:
+                            unwindowed_precursor_mobility = True
             precursors.append(Precursor(
                 mz=float(precursor.getMZ()), charge=int(precursor.getCharge()),
                 intensity=float(precursor.getIntensity()),
                 isolation_width=width if math.isfinite(width) and width > 0 else None,
                 activation=methods, collision_energy=collision,
+                isolation_lower_offset=lower if math.isfinite(lower) else None,
+                isolation_upper_offset=upper if math.isfinite(upper) else None,
+                ion_mobility_lower=im_lower, ion_mobility_upper=im_upper,
             ))
         settings = spectrum.getInstrumentSettings()
         polarity = self.polarities.get(_enum_int(settings.getPolarity()), "unknown").lower()
@@ -353,6 +381,29 @@ class _Consumer:
         if faims is None and self.faims_unit is not None:
             if _enum_int(spectrum.getDriftTimeUnit()) == _enum_int(self.faims_unit):
                 faims = float(spectrum.getDriftTime())
+        # A single non-FAIMS drift-time position is not an ion-mobility
+        # isolation range. Do not silently merge diaPASEF slices by m/z alone.
+        drift_getter = getattr(spectrum, "getDriftTime", None)
+        drift = float(drift_getter()) if callable(drift_getter) else -1.0
+        drift_unit_getter = getattr(spectrum, "getDriftTimeUnit", None)
+        drift_unit = _enum_int(drift_unit_getter()) if callable(drift_unit_getter) else None
+        is_faims = self.faims_unit is not None and drift_unit == _enum_int(self.faims_unit)
+        float_array_getter = getattr(spectrum, "getFloatDataArrays", None)
+        ion_mobility_array = False
+        if callable(float_array_getter):
+            ion_mobility_array = any(
+                "ion mobility" in str(item.getName()).lower()
+                or "inverse reduced" in str(item.getName()).lower()
+                for item in float_array_getter()
+            )
+        complete_mobility_window = bool(precursors) and all(
+            p.ion_mobility_lower is not None and p.ion_mobility_upper is not None
+            for p in precursors
+        )
+        unresolved_mobility = unwindowed_precursor_mobility or (
+            (math.isfinite(drift) and drift > 0 and not is_faims or ion_mobility_array)
+            and not complete_mobility_window
+        )
         self.sink.consume_spectrum(Spectrum(
             ms_level=int(spectrum.getMSLevel()), rt=float(spectrum.getRT()),
             mz=np.asarray(mz, dtype=float), intensity=np.asarray(intensity, dtype=float),
@@ -360,6 +411,7 @@ class _Consumer:
             scan_windows=tuple((float(w.begin), float(w.end)) for w in settings.getScanWindows()),
             faims_cv=faims, native_id=str(spectrum.getNativeID()),
             estimated_representation=estimated,
+            unresolved_ion_mobility=unresolved_mobility,
         ))
 
 

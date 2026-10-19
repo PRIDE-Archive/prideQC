@@ -51,6 +51,10 @@ class Precursor:
     isolation_width: float | None = None
     activation: tuple[CVTerm, ...] = ()
     collision_energy: tuple[float, str] | None = None
+    isolation_lower_offset: float | None = None
+    isolation_upper_offset: float | None = None
+    ion_mobility_lower: float | None = None
+    ion_mobility_upper: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +72,7 @@ class Spectrum:
     faims_cv: float | None = None
     native_id: str = ""
     estimated_representation: str | None = None
+    unresolved_ion_mobility: bool = False
 
 
 @dataclass(slots=True)

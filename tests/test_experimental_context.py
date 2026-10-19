@@ -180,8 +180,8 @@ class ExperimentalContextTests(unittest.TestCase):
 
         self.assertTrue(REGISTRY.exists())
         self.assertEqual(DEST.read_text(encoding="utf-8"), render())
-        self.assertIn("Registered QC metric definitions: 39", render())
-        self.assertIn("`MS2_PrecursorCharge_Fractions`", render())
+        self.assertIn("Registered QC metric definitions: 30", render())
+        self.assertIn("`DIAIsolationWindowCount`", render())
         self.assertIn("`acquisition_method_evidence`", render())
         self.assertIn("PRIDE:0000315", render())
 

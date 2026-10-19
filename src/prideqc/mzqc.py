@@ -18,6 +18,7 @@ SECOND = CVTerm("UO:0000010", "second")
 COUNT = CVTerm("UO:0000189", "count unit")
 HZ = CVTerm("UO:0000106", "hertz")
 FRACTION = CVTerm("UO:0000191", "fraction")
+MZ = CVTerm("MS:1000040", "m/z")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +33,17 @@ class MetricDefinition:
 # Only map terms with an unambiguous value contract. Other quantities have
 # explicit local definitions, rather than borrowing a vaguely related accession.
 STANDARD = {
+    "DIAIsolationWindowCount": MetricDefinition(
+        "MS:4000194", "DIA isolation window count",
+        "Distinct DIA MS2 isolation windows by lower/upper m/z boundaries and recorded "
+        "FAIMS or window ion-mobility parameters; requires complete window metadata.",
+        unit=COUNT,
+    ),
+    "DIAIsolationWindowWidths": MetricDefinition(
+        "MS:4000195", "DIA isolation window m/z widths",
+        "Minimum and maximum widths of distinct DIA isolation windows, in m/z.",
+        "tuple", MZ,
+    ),
     "ChromatographyDuration": MetricDefinition(
         "MS:4000053",
         "chromatography duration",
@@ -148,10 +160,6 @@ DEFINITIONS = {
         "cycle after 0.1 Th quantization."
     ),
     "AvgCycleTime_MS1": "Mean strictly positive adjacent sorted MS1 RT differences, in seconds.",
-    "MS2_PrecursorCharge_Fractions": (
-        "Counts and fractions of first-precursor charges, denominator all MS2 scans; missing "
-        "or nonpositive charge is unknown."
-    ),
 }
 
 LEVEL_DEFINITIONS = {
@@ -162,19 +170,7 @@ LEVEL_DEFINITIONS = {
     "ObservedMzRange_MS{n}": (
         "Min/max valid peak m/z; this is an observed range, not the instrument scan window, MS{n}."
     ),
-    "IsolationWidth_MS{n}_Median": "Median positive first-precursor lower+upper isolation offsets in Th (m/z), MS{n}.",
-    "IsolationWidth_MS{n}_Quantiles": "25th, 50th, 75th percentiles of positive first-precursor isolation widths in Th (m/z), MS{n}.",
-    "IsolationWidth_MS{n}_Min": "Minimum positive first-precursor isolation width in Th (m/z), MS{n}.",
-    "IsolationWidth_MS{n}_Max": "Maximum positive first-precursor isolation width in Th (m/z), MS{n}.",
-    "IsolationWidth_MS{n}_Count": "Count of first-precursor isolation widths with a finite positive value, MS{n}.",
-    "IsolationPrecursorMz_MS{n}_UniqueCount": "Count of unique first-precursor m/z values after rounding to 0.1 Th, MS{n}.",
-    "IsolationPrecursorMz_MS{n}_UniqueFraction": "Unique first-precursor m/z target count divided by paired isolation-width observations, after 0.1 Th rounding, MS{n}.",
-    "IsolationPrecursorMz_MS{n}_MaxRepeatFraction": "Largest fraction of paired isolation-width observations sharing one rounded (0.1 Th) first-precursor m/z target, MS{n}.",
-    "IsolationPrecursorMz_MS{n}_RepeatedFraction": "Fraction of paired isolation-width observations whose rounded (0.1 Th) first-precursor m/z target occurs at least twice, MS{n}.",
-    "MultiplePrecursors_MS{n}_Count": (
-        "Scans with multiple precursors; first precursor supplies precursor-distribution "
-        "metrics, MS{n}."
-    ),
+
 }
 
 
@@ -353,11 +349,7 @@ def definition(metric: Metric) -> MetricDefinition:
         raise ValueError(f"Unregistered QC metric: {metric.key}")
     # Shape is a property of the term, not of a particular observed value.
     # In particular, an unavailable tuple must not become a scalar CV term.
-    if metric.key in {
-        "MS2_PrecursorCharge_Fractions",
-    }:
-        shape = "table"
-    elif metric.key == "FAIMS_CV_Values" or any(
+    if metric.key == "FAIMS_CV_Values" or any(
         part in metric.key for part in ("Range", "Quantiles", "LogRatios", "ScanWindow")
     ):
         shape = "tuple"

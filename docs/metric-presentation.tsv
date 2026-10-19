@@ -16,16 +16,8 @@ PeakDensity_MS2_Quantiles	core	ms2	MS2 peaks per scan (quartiles)	Valid stored p
 FastestFrequency_MS2	extended	ms2	FastestFrequency_MS2	See scientific registry definition.
 RT_MS2_Quantiles	extended	ms2	RT_MS2_Quantiles	See scientific registry definition.
 ObservedMzRange_MS2	diagnostic	ms2	ObservedMzRange_MS2	See scientific registry definition.
-IsolationWidth_MS2_Median	core	ms2	Median MS2 isolation width	Requires positive recorded isolation offsets; absent is not zero.
-IsolationWidth_MS2_Quantiles	diagnostic	ms2	IsolationWidth_MS2_Quantiles	See scientific registry definition.
-IsolationWidth_MS2_Min	extended	ms2	IsolationWidth_MS2_Min	See scientific registry definition.
-IsolationWidth_MS2_Max	extended	ms2	IsolationWidth_MS2_Max	See scientific registry definition.
-IsolationWidth_MS2_Count	diagnostic	ms2	IsolationWidth_MS2_Count	See scientific registry definition.
-IsolationPrecursorMz_MS2_UniqueCount	extended	ms2	IsolationPrecursorMz_MS2_UniqueCount	See scientific registry definition.
-IsolationPrecursorMz_MS2_UniqueFraction	diagnostic	ms2	IsolationPrecursorMz_MS2_UniqueFraction	See scientific registry definition.
-IsolationPrecursorMz_MS2_MaxRepeatFraction	extended	ms2	IsolationPrecursorMz_MS2_MaxRepeatFraction	See scientific registry definition.
-IsolationPrecursorMz_MS2_RepeatedFraction	extended	ms2	IsolationPrecursorMz_MS2_RepeatedFraction	See scientific registry definition.
-MultiplePrecursors_MS2_Count	diagnostic	ms2	MultiplePrecursors_MS2_Count	See scientific registry definition.
+DIAIsolationWindowCount	core	ms2	DIA isolation windows	Distinct window geometries; not rounded precursor-target count. DIA evidence and complete metadata required.
+DIAIsolationWindowWidths	core	ms2	DIA window widths (min/max)	Minimum and maximum distinct window widths in m/z; not individual scalar extrema.
 MS1_to_MS2_Ratio	core	ms1_ms2	MS1/MS2 scan ratio	Undefined when there are no MS2 scans; not a performance score.
 AcquisitionCycle_Count	diagnostic	cycles	AcquisitionCycle_Count	See scientific registry definition.
 AcquisitionCycle_MS2Count_Quantiles	core	cycles	MS2 scans per acquisition cycle	MS1-delimited cycles only; not applicable to MS1-free targeted runs.
@@ -33,7 +25,6 @@ AcquisitionCycle_MS2Count_Mode	diagnostic	cycles	AcquisitionCycle_MS2Count_Mode	
 AcquisitionCycle_TargetCoverageFraction	diagnostic	cycles	AcquisitionCycle_TargetCoverageFraction	See scientific registry definition.
 AcquisitionCycle_TargetEligibleFraction	extended	cycles	AcquisitionCycle_TargetEligibleFraction	See scientific registry definition.
 AcquisitionCycle_UniqueTargetCount_Quantiles	extended	cycles	AcquisitionCycle_UniqueTargetCount_Quantiles	See scientific registry definition.
-MS2_PrecursorCharge_Fractions	core	ms2	MS2 precursor charge fractions	Denominator is all MS2 scans; unknown charge is retained.
 ChargeMean	extended	ms2	ChargeMean	See scientific registry definition.
 ChargeMedian	diagnostic	ms2	ChargeMedian	See scientific registry definition.
 ChargeRatio_3over2	extended	ms2	ChargeRatio_3over2	See scientific registry definition.

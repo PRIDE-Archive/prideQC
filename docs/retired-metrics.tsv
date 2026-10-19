@@ -64,3 +64,14 @@ TIC_MS2_Median	QCPRIDE:D249949F6A3F6A3EBF3E	Removed from the public QC registry 
 TIC_MS2_QuartileLogRatios	QCPRIDE:80B75AE92157AF8E1090	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
 TIC_MS2_SignalFall10x_Count	QCPRIDE:DCF0DBC8D6F83087ED6E	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
 TIC_MS2_SignalJump10x_Count	QCPRIDE:4BE7DF39FCE21F9E3583	Removed from the public QC registry in the intentional 80-to-39 metric scope reduction; downstream reports must stop expecting this key.
+IsolationWidth_MS2_Median	QCPRIDE:652589C44AB88BC96F40	Superseded by official DIA window geometry metrics MS:4000194/MS:4000195; not equivalent to rounded-target or per-scan summaries.
+IsolationWidth_MS2_Quantiles	QCPRIDE:482962258BA982FED6BB	Superseded by official DIA window geometry metrics MS:4000194/MS:4000195; not equivalent to rounded-target or per-scan summaries.
+IsolationWidth_MS2_Min	QCPRIDE:228CD009EF66CB6342FD	Superseded by official DIA window geometry metrics MS:4000194/MS:4000195; not equivalent to rounded-target or per-scan summaries.
+IsolationWidth_MS2_Max	QCPRIDE:E0ADF25D530854F3543D	Superseded by official DIA window geometry metrics MS:4000194/MS:4000195; not equivalent to rounded-target or per-scan summaries.
+IsolationWidth_MS2_Count	QCPRIDE:0F163ECB26874F0C65C7	Superseded by official DIA window geometry metrics MS:4000194/MS:4000195; not equivalent to rounded-target or per-scan summaries.
+IsolationPrecursorMz_MS2_UniqueCount	QCPRIDE:C98D3B2F6D4A5E4D3E1B	Superseded by official DIA window geometry metrics MS:4000194/MS:4000195; not equivalent to rounded-target or per-scan summaries.
+IsolationPrecursorMz_MS2_UniqueFraction	QCPRIDE:B7B2C4A7F8F6D1A4C6E9	Superseded by official DIA window geometry metrics MS:4000194/MS:4000195; not equivalent to rounded-target or per-scan summaries.
+IsolationPrecursorMz_MS2_MaxRepeatFraction	QCPRIDE:AAE8B64F7E3D2B6C4D9A	Superseded by official DIA window geometry metrics MS:4000194/MS:4000195; not equivalent to rounded-target or per-scan summaries.
+IsolationPrecursorMz_MS2_RepeatedFraction	QCPRIDE:8D2E4B9C7A1F6E5B3C0D	Superseded by official DIA window geometry metrics MS:4000194/MS:4000195; not equivalent to rounded-target or per-scan summaries.
+MultiplePrecursors_MS2_Count	QCPRIDE:82C9F41E70F7A9F93FCC	Removed from the public QC registry; multi-precursor warnings remain internal.
+MS2_PrecursorCharge_Fractions	QCPRIDE:EF3BCB4B9E83C77AAC5B	Removed charge-fraction table; existing PSI-MS charge summary and ratio metrics remain.

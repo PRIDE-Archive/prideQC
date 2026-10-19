@@ -35,7 +35,7 @@ ChargeMin	ChargeMin	removed	Retired from prideQC QC output; update downstream re
 ChargeMax	ChargeMax	removed	Retired from prideQC QC output; update downstream reporting.
 ChargeRatio_3over2	ChargeRatio_3over2	retained	Positive known charges only; all scans remain in fraction denominator; missing numerator ratio retains rawQC convention.
 ChargeRatio_4over2	ChargeRatio_4over2	retained	Positive known charges only; all scans remain in fraction denominator; missing numerator ratio retains rawQC convention.
-MS2_PrecursorCharge_Fractions	MS2_PrecursorCharge_Fractions	retained	See metric definition and documented invalid/missing-data policies.
+MS2_PrecursorCharge_Fractions		retired	Charge-fraction table removed; scalar PSI-MS charge summary and ratios retained.
 TIC_MS1_CV	TIC_MS1_CV	removed	Retired from prideQC QC output; update downstream reporting.
 TIC_MS2_CV	TIC_MS2_CV	removed	Retired from prideQC QC output; update downstream reporting.
 BasePeak_MS1_Mean	BasePeak_MS1_Mean	removed	Retired from prideQC QC output; update downstream reporting.

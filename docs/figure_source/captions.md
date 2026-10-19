@@ -3,7 +3,8 @@
 All figures are editable SVG (real `<text>`, no embedded raster), 1400 px wide viewBox, white background,
 one palette and one Arial/Helvetica font stack. All data shown are **synthetic**; where a number is printed it was
 produced by prideQC's own code (`metrics.py`, `mass_error.py`, `mass_shift.py`, `cohort.py`) and the OpenMS/UniMod
-catalogue on the synthetic input. Regenerate intentionally with `python docs/figure_source/build_all.py` from the prideQC checkout; the source imports the local prideQC implementation. Read the Docs uses committed SVGs and never runs the generators.
+catalogue on the synthetic input where a panel identifies a registered metric. Other signal traces and examples
+are explicitly illustrative and are not scientific metrics in the output mzQC. Regenerate intentionally with `python docs/figure_source/build_all.py` from the prideQC checkout; the source imports the local prideQC implementation. Read the Docs uses committed SVGs and never runs the generators.
 
 ---
 
@@ -24,10 +25,11 @@ refine and validate SDRF metadata. Uncertain evidence abstains.
 **File:** `docs/_static/figures/figure2_qc_metrics.svg` | **Place:** `docs/qc-workflow.md`, section on QC metrics
 
 **Caption:** A synthetic 90-minute DDA run is reduced to compact metrics. (A) TIC trace and a 20 s zoom of MS1 and MS2 scans,
-MS2 coloured by precursor charge. (B) TIC area by trapezoidal integration and TIC coefficient of variation. (C) Base-peak
-intensity per MS1 scan. (D) Scan rate, fastest 60 s window and MS1 cycle time. (E) Precursor charge distribution.
-(F) Isolation-window widths against the 15 Th boundary. (G) Repeated-target behaviour, contrasted with a fixed target
-list. Values are computed by prideQC's metric code on the synthetic scans.
+MS2 coloured by precursor charge. (B) Illustrative TIC trace (not an exported TIC metric). (C) Base-peak
+intensity per MS1 scan. (D) Scan rate, fastest 60 s window and MS1 cycle time. (E) Illustrative precursor charge distribution, with the published 3+/2+ ratio.
+(F) DDA isolation widths used as acquisition-classification evidence only, not exported DIA QC metrics.
+(G) Repeated-target behaviour contrasted with a fixed target list. Only annotated QC values are exported;
+DIA window count and width-range metrics require complete geometry on supported DIA runs.
 
 **Alt text:** Raw scan stream with six small quantitative panels and formula callouts.
 

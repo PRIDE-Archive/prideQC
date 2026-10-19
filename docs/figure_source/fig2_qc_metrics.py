@@ -46,8 +46,7 @@ def build() -> Fig:
         W,
         H,
         "How prideQC computes QC metrics from a spectrum stream",
-        "A synthetic 90 minute DDA LC-MS/MS run illustrates TIC and base-peak traces, plus published cycle, charge, isolation-window and "
-        "repeated-target metrics. Formulas are those used in prideQC's metric code.",
+        "A synthetic 90 minute DDA LC-MS/MS run illustrates TIC and base-peak traces, published cycle and charge-ratio metrics, and contextual isolation-window/target behaviour.",
     )
 
     # ---------------------------------------------------------------- header
@@ -485,7 +484,10 @@ def build() -> Fig:
     cx, cy = cols[0], row_y[1]
     panel_label(f, cx, cy, "E", "Precursor charge distribution", "first precursor of each MS2 scan")
     px2, top2 = cx + 70, cy + 44
-    fr = M["MS2_PrecursorCharge_Fractions"]
+    counts = [int(np.count_nonzero(D["ms2_charge"] == z)) for z in range(1, 6)]
+    counts += [int(np.count_nonzero(D["ms2_charge"] >= 6)),
+               int(np.count_nonzero(D["ms2_charge"] <= 0))]
+    fractions = np.asarray(counts, dtype=float) / len(D["ms2_charge"])
     labs = ["1+", "2+", "3+", "4+", "5+", "≥6", "n.a."]
     ex = Scale(0, 7, px2, px2 + pw_ - 14)
     ey = Scale(0, 0.6, top2 + ph, top2)
@@ -505,7 +507,7 @@ def build() -> Fig:
         tag="E",
     )
     bw = (ex(1) - ex(0)) * 0.62
-    for i, (lab, v) in enumerate(zip(labs, fr["fraction"], strict=False)):
+    for i, (lab, v) in enumerate(zip(labs, fractions, strict=False)):
         z = [1, 2, 3, 4, 5, 6, 0][i]
         xc_ = ex(i + 0.5)
         f.rect(xc_ - bw / 2, ey(v), bw, ey(0) - ey(v), fill=CHC[z])
@@ -599,7 +601,7 @@ def build() -> Fig:
         cy + ph + 112,
         [
             "window histogram illustrates acquisition settings",
-            f"  median exported width = {M['IsolationWidth_MS2_Median']:.1f} Th",
+            "  DDA width histogram: contextual only",
             "narrow ≤3 Th and wide ≥15 Th are the",
             "  limits the acquisition heuristic uses",
         ],

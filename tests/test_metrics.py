@@ -53,55 +53,12 @@ class MetricTests(unittest.TestCase):
         self.assertAlmostEqual(sum(metrics["RT_MS1_Quantiles"]), 1)
         self.assertAlmostEqual(sum(metrics["RT_TIC_Quantiles"]), 1)
 
-    def test_charge_denominator_includes_unknown_and_negative(self):
+    def test_charge_summary_ignores_unknown_and_negative(self):
         metrics, _ = calculate(
             [spectrum(i, [1], 2, charge=c) for i, c in enumerate([2, 3, 0, -1, None, 7])],
         )
-        table = metrics["MS2_PrecursorCharge_Fractions"]
-        self.assertEqual(table["count"], [0, 1, 1, 0, 0, 1, 3])
-        self.assertAlmostEqual(sum(table["fraction"]), 1)
         self.assertEqual(metrics["ChargeMean"], 4)
-
-
-    def test_isolation_width_distribution_metrics(self):
-        metrics, _ = calculate([
-            spectrum(0, [1], 2, charge=2, width=10),
-            spectrum(1, [1], 2, charge=2, width=15),
-            spectrum(2, [1], 2, charge=2, width=20),
-            spectrum(3, [1], 2, charge=2, width=30),
-        ])
-        self.assertEqual(metrics["IsolationWidth_MS2_Median"], 17.5)
-        self.assertEqual(metrics["IsolationWidth_MS2_Quantiles"], [13.75, 17.5, 22.5])
-        self.assertEqual(metrics["IsolationWidth_MS2_Min"], 10)
-        self.assertEqual(metrics["IsolationWidth_MS2_Max"], 30)
-        self.assertEqual(metrics["IsolationWidth_MS2_Count"], 4)
-
-
-    def test_isolation_precursor_repetition_metrics(self):
-        widths = [1.6] * 8
-        targets = [400.0, 500.0, 600.0, 400.0, 500.0, 600.0, 700.0, 700.0]
-        spectra = [
-            spectrum(i, [1], 2, charge=2, width=w, precursor_mz=mz)
-            for i, (w, mz) in enumerate(zip(widths, targets, strict=True))
-        ]
-        metrics, _ = calculate(spectra)
-        self.assertEqual(metrics["IsolationPrecursorMz_MS2_UniqueCount"], 4)
-        self.assertAlmostEqual(metrics["IsolationPrecursorMz_MS2_UniqueFraction"], 0.5)
-        self.assertAlmostEqual(metrics["IsolationPrecursorMz_MS2_MaxRepeatFraction"], 0.25)
-        self.assertEqual(metrics["IsolationPrecursorMz_MS2_RepeatedFraction"], 1.0)
-
-    def test_isolation_precursor_repetition_excludes_missing_precursor_mz(self):
-        spectra = [
-            spectrum(0, [1], 2, charge=2, width=1.6, precursor_mz=400.0),
-            Spectrum(2, 1, np.array([100.0]), np.array([1.0]),
-                     (Precursor(0.0, 2, 100.0, 1.6, ()),)),
-            spectrum(2, [1], 2, charge=2, width=1.6, precursor_mz=400.0),
-        ]
-        metrics, _ = calculate(spectra)
-        self.assertEqual(metrics["IsolationPrecursorMz_MS2_UniqueCount"], 1)
-        self.assertEqual(metrics["IsolationPrecursorMz_MS2_UniqueFraction"], 0.5)
-        self.assertEqual(metrics["IsolationPrecursorMz_MS2_MaxRepeatFraction"], 1.0)
-        self.assertEqual(metrics["IsolationPrecursorMz_MS2_RepeatedFraction"], 1.0)
+        self.assertNotIn("MS2_PrecursorCharge_Fractions", metrics)
 
     def test_acquisition_cycle_fixed_target_grid_metrics(self):
         items = []
@@ -155,16 +112,6 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(metrics["AcquisitionCycle_Count"], 1)
         self.assertEqual(metrics["AcquisitionCycle_MS2Count_Mode"], 1)
         self.assertEqual(metrics["AcquisitionCycle_TargetCoverageFraction"], 1.0)
-
-    def test_isolation_width_metrics_ignore_missing_widths(self):
-        summary = RunSummary()
-        summary.consume_spectrum(Spectrum(2, 0, np.array([100.]), np.array([1.]),
-                                          (Precursor(500, 2, 100, 10, ()),)))
-        summary.consume_spectrum(Spectrum(2, 1, np.array([100.]), np.array([1.]),
-                                          (Precursor(500, 2, 100, None, ()),)))
-        metrics = {m.key: m.value for m in QCMetricCalculator().calculate(summary)}
-        self.assertEqual(metrics["NumberOfSpectra_MS2"], 2)
-        self.assertEqual(metrics["IsolationWidth_MS2_Count"], 1)
 
     def test_multiple_precursor_rule_is_visible(self):
         item = Spectrum(2, 0, np.array([100.]), np.array([1.]),

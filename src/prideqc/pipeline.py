@@ -32,7 +32,7 @@ from prideqc.mass_error import (
 )
 from prideqc.mass_shift import MassShiftCollector
 from prideqc.metrics import QCMetricCalculator, RunSummary
-from prideqc.models import AnalysisResult, EvidenceCollector, Spectrum, SpectrumReader
+from prideqc.models import AnalysisResult, EvidenceCollector, EvidenceKind, Spectrum, SpectrumReader
 from prideqc.mzqc import MzQCWriter
 from prideqc.qc_sdrf import write_qc_sdrf_proposals
 from prideqc.refinement_adjudication import (
@@ -106,7 +106,15 @@ class Analyzer:
         return AnalysisResult(
             path,
             metadata,
-            self.calculator.calculate(summary),
+            self.calculator.calculate(
+                summary,
+                dia=any(a.field == "acquisition_method"
+                        and a.value == "Data-independent acquisition"
+                        and a.kind in (EvidenceKind.OBSERVED, EvidenceKind.INFERRED)
+                        for a in annotations)
+                    and not any(a.field == "acquisition_method_conflict"
+                                for a in annotations),
+            ),
             annotations,
             summary.warnings(),
             self.reader.engine_version,

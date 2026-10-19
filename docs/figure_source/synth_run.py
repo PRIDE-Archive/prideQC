@@ -121,11 +121,6 @@ if __name__ == "__main__":
         "FastestFrequency_MS2",
         "AvgCycleTime_MS1",
         "ChargeRatio_3over2",
-        "MS2_PrecursorCharge_Fractions",
-        "IsolationWidth_MS2_Median",
-        "IsolationPrecursorMz_MS2_UniqueFraction",
-        "IsolationPrecursorMz_MS2_MaxRepeatFraction",
-        "IsolationPrecursorMz_MS2_RepeatedFraction",
         "AcquisitionCycle_Count",
         "AcquisitionCycle_MS2Count_Mode",
         "MS1_to_MS2_Ratio",
@@ -134,8 +129,5 @@ if __name__ == "__main__":
     fv, grid = fixed_target_metrics()
     print("--- fixed")
     for k in (
-        "IsolationPrecursorMz_MS2_UniqueFraction",
-        "IsolationPrecursorMz_MS2_MaxRepeatFraction",
-        "IsolationPrecursorMz_MS2_RepeatedFraction",
     ):
         print(k, fv[k])
