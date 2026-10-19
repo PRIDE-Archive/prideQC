@@ -344,7 +344,10 @@ def _project_accession_guard(path: Path, request: Mapping[str, Any]) -> str:
     accession = str(request.get("project_accession") or "").strip().upper()
     if not re.fullmatch(r"PXD\d+", accession):
         raise ValueError("Adjudication request must contain one PXD project accession")
-    observed = {match.upper() for match in re.findall(r"PXD\d+", str(path), re.I)}
+    observed = {
+        match.upper()
+        for match in re.findall(r"(?<![A-Za-z0-9])PXD[0-9]{6,}(?![A-Za-z0-9])", str(path), re.I)
+    }
     if observed and observed != {accession}:
         raise ValueError(
             f"Full SDRF path accession does not match adjudication request {accession}: "
