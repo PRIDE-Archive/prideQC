@@ -40,7 +40,7 @@ def sci(v: float, d=1) -> str:
 def build() -> Fig:
     D = synth_run.build()
     M = D["metrics"]
-    fixed_M, fixed_grid = synth_run.fixed_target_metrics()
+    _fixed_metrics, fixed_grid = synth_run.fixed_target_metrics()
     W, H = 1400, 1486
     f = Fig(
         W,
@@ -359,7 +359,7 @@ def build() -> Fig:
     f.text(
         bx(D["ms1_rt"][mx_i]) - 9,
         by_(D["ms1_bp"][mx_i]) + 5,
-        f"max {sci(M['BasePeak_All_Max'])}",
+        f"max {sci(float(D['ms1_bp'].max()))}",
         size=13,
         fill=INK,
         anchor="end",
@@ -372,8 +372,8 @@ def build() -> Fig:
         [
             "base peak = max(intensity) per scan",
             f"  BasePeak_MS1_Mean = {sci(mean_bp)}",
-            "BasePeak_All_Max = max over all levels",
-            f"  = {sci(M['BasePeak_All_Max'])} a.u.",
+            "plotted maximum is an illustrative raw signal,",
+            "  not an exported QC metric",
         ],
         BLUE,
     )
@@ -576,7 +576,7 @@ def build() -> Fig:
     f.text(
         ixs(50),
         top2 - 8,
-        f"≥15 Th wide: {(1 - M['IsolationWidth_MS2_FractionLe15']) * 100:.0f}% of scans",
+        f"≥15 Th wide: {np.mean(D['ms2_width'] >= 15) * 100:.0f}% of scans",
         size=13,
         weight="600",
         fill=AMBER,
@@ -598,8 +598,8 @@ def build() -> Fig:
         cx,
         cy + ph + 112,
         [
-            "FractionLe15 = n(width ≤ 15 Th) / n(width)",
-            f"  = {M['IsolationWidth_MS2_FractionLe15']:.2f}   median = {M['IsolationWidth_MS2_Median']:.1f} Th",
+            "window histogram illustrates acquisition settings",
+            f"  median exported width = {M['IsolationWidth_MS2_Median']:.1f} Th",
             "narrow ≤3 Th and wide ≥15 Th are the",
             "  limits the acquisition heuristic uses",
         ],
@@ -692,9 +692,9 @@ def build() -> Fig:
         cy + ph + 112,
         [
             "targets rounded to 0.1 Th, per cycle",
-            "TargetSetModalFraction = most common",
-            "  target set / eligible cycles",
-            f"  this run {M['AcquisitionCycle_TargetSetModalFraction']:.4f}  vs  fixed list {fixed_M['AcquisitionCycle_TargetSetModalFraction']:.2f}",
+            "DDA varies the isolation target set",
+            "fixed-target scan schedules repeat a target grid",
+            "not a published QC score",
         ],
         PLUM,
     )
@@ -704,7 +704,7 @@ def build() -> Fig:
     f.text(
         60,
         1466,
-        "Retention times are handled in seconds and plotted in minutes. Panel G contrasts the run with a separate synthetic fixed-target scheme to show what the metric detects.",
+        "Retention times are handled in seconds and plotted in minutes. Panel G contrasts DDA targets with a synthetic fixed-target schedule as acquisition-method context.",
         size=13.5,
         fill=MUTED,
         tag="foot",

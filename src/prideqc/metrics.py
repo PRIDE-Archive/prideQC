@@ -158,7 +158,6 @@ class LevelSummary:
     isolation_precursor_mz: array = field(default_factory=_doubles)
     polarity: Counter[str] = field(default_factory=Counter)
     representation: Counter[str] = field(default_factory=Counter)
-    estimated_representation: Counter[str] = field(default_factory=Counter)
     activation: Counter[tuple[str, str]] = field(default_factory=Counter)
     collision_energy: Counter[tuple[float, str]] = field(default_factory=Counter)
     total_peaks: int = 0
@@ -193,8 +192,6 @@ class LevelSummary:
         self.empty_scans += int(tic == 0)
         self.polarity[spectrum.polarity] += 1
         self.representation[spectrum.representation] += 1
-        if spectrum.estimated_representation is not None:
-            self.estimated_representation[spectrum.estimated_representation] += 1
         if mz.size:
             self.observed_mz_low = min(self.observed_mz_low, float(mz.min()))
             self.observed_mz_high = max(self.observed_mz_high, float(mz.max()))
@@ -286,8 +283,6 @@ class AcquisitionCycleTracker:
     def metrics(self) -> dict[str, Any]:
         ms2_counts = list(self.ms2_counts)
         unique_counts = list(self.unique_target_counts)
-        set_signatures = Counter(self.target_set_signatures)
-        order_signatures = Counter(self.target_order_signatures)
         target_observations = self.target_observations
 
         if self.started and self.current_ms2_count > 0:
@@ -296,13 +291,11 @@ class AcquisitionCycleTracker:
             if len(self.current_targets) == self.current_ms2_count:
                 unique_targets = sorted(set(self.current_targets))
                 unique_counts.append(len(unique_targets))
-                set_signatures[_integer_signature(unique_targets)] += 1
-                order_signatures[_integer_signature(self.current_targets)] += 1
 
         cycle_count = len(ms2_counts)
         eligible_count = len(unique_counts)
         total_ms2 = sum(ms2_counts)
-        mode, modal_fraction = _mode_and_fraction(ms2_counts)
+        mode, _ = _mode_and_fraction(ms2_counts)
         ms2_array = np.asarray(ms2_counts, dtype=float)
         unique_array = np.asarray(unique_counts, dtype=float)
 
@@ -310,24 +303,32 @@ class AcquisitionCycleTracker:
             "AcquisitionCycle_Count": cycle_count,
             "AcquisitionCycle_MS2Count_Quantiles": _quantiles(ms2_array),
             "AcquisitionCycle_MS2Count_Mode": mode,
-            "AcquisitionCycle_MS2Count_ModalFraction": modal_fraction,
             "AcquisitionCycle_TargetCoverageFraction": (
                 target_observations / total_ms2 if total_ms2 else None
             ),
-            "AcquisitionCycle_TargetEligibleCount": eligible_count,
             "AcquisitionCycle_TargetEligibleFraction": (
                 eligible_count / cycle_count if cycle_count else None
             ),
             "AcquisitionCycle_UniqueTargetCount_Quantiles": _quantiles(unique_array),
-            "AcquisitionCycle_TargetSetDistinctCount": len(set_signatures),
-            "AcquisitionCycle_TargetSetModalFraction": (
-                max(set_signatures.values()) / eligible_count if eligible_count else None
-            ),
-            "AcquisitionCycle_TargetOrderDistinctCount": len(order_signatures),
-            "AcquisitionCycle_TargetOrderModalFraction": (
-                max(order_signatures.values()) / eligible_count if eligible_count else None
-            ),
         }
+
+    def classifier_consensus(self) -> tuple[float | None, float | None, float | None]:
+        """Private evidence for DDA/DIA inference; not reported as QC metrics."""
+        counts = list(self.ms2_counts)
+        set_counts = self.target_set_signatures.copy()
+        order_counts = self.target_order_signatures.copy()
+        if self.started and self.current_ms2_count > 0:
+            counts.append(self.current_ms2_count)
+            if len(self.current_targets) == self.current_ms2_count:
+                set_counts[_integer_signature(sorted(set(self.current_targets)))] += 1
+                order_counts[_integer_signature(self.current_targets)] += 1
+        _, modal_fraction = _mode_and_fraction(counts)
+        eligible = sum(set_counts.values())
+        return (
+            modal_fraction,
+            max(set_counts.values()) / eligible if eligible else None,
+            max(order_counts.values()) / eligible if eligible else None,
+        )
 
 
 class RunSummary:
@@ -337,7 +338,6 @@ class RunSummary:
         self.levels: dict[int, LevelSummary] = {}
         self.acquisition_cycles = AcquisitionCycleTracker()
         self.chromatograms: Counter[int] = Counter()
-        self.chromatogram_points = 0
         self.chromatogram_low = math.inf
         self.chromatogram_high = -math.inf
         self.faims: set[float] = set()
@@ -354,7 +354,6 @@ class RunSummary:
 
     def consume_chromatogram(self, rt: FloatArray, kind: int) -> None:
         self.chromatograms[kind] += 1
-        self.chromatogram_points += len(rt)
         finite = _finite(rt)
         if finite.size:
             self.chromatogram_low = min(self.chromatogram_low, float(finite.min()))
@@ -397,7 +396,6 @@ class QCMetricCalculator:
             if finite_ranges else None
         )
         values["NumberOfChromatograms"] = sum(run.chromatograms.values())
-        values["NumberOfChromatogramDataPoints"] = run.chromatogram_points
         values["ChromatogramTypes"] = {"openms_type": sorted(
             run.chromatograms,
         ), "count": [run.chromatograms[k] for k in sorted(
@@ -407,8 +405,6 @@ class QCMetricCalculator:
             [run.chromatogram_low, run.chromatogram_high]
             if math.isfinite(run.chromatogram_low) else None
         )
-        maxima = [float(x.max()) for s in summaries if (x := _finite(s.base_peak)).size]
-        values["BasePeak_All_Max"] = max(maxima) if maxima else None
         values["FAIMS_CV_Values"] = sorted(run.faims)
         values["FAIMS_CV_Count"] = len(run.faims)
         values["FAIMS_CV_Range"] = [min(run.faims), max(run.faims)] if run.faims else None
@@ -444,7 +440,6 @@ class QCMetricCalculator:
             f"TIC_{label}_Area": _integral(rt, tic),
             f"TIC_{label}_Area_RTQuantiles": _quartile_areas(rt, tic),
             f"TIC_{label}_QuartileLogRatios": _log_ratios(tic),
-            f"TIC_{label}_ChangeQuartileLogRatios": _log_ratios(np.abs(np.diff(tic))),
             f"ScanRate_{label}": float(rts.size / span * 60) if span > 0 else None,
             f"FastestFrequency_{label}": _fastest_frequency(rts),
             f"RT_{label}_Quantiles": _interval_fractions(rts, span),
@@ -459,9 +454,6 @@ class QCMetricCalculator:
                 else None
             ),
             f"PeakTypes_{label}": _counter_table(summary.representation, "type"),
-            f"EstimatedPeakTypes_{label}": _counter_table(
-                summary.estimated_representation, "type"
-            ),
             f"Polarity_{label}": _counter_table(summary.polarity, "polarity"),
             f"InvalidPeakCount_{label}": summary.invalid_peak_count,
         }
@@ -470,29 +462,9 @@ class QCMetricCalculator:
         ratios = following[valid] / previous[valid]
         result[f"TIC_{label}_SignalJump10x_Count"] = int(np.count_nonzero(ratios >= 10))
         result[f"TIC_{label}_SignalFall10x_Count"] = int(np.count_nonzero(ratios <= 0.1))
-        result[f"RT_{label}_IQR"] = float(
-            np.diff(np.quantile(rts, [0.25, 0.75]))[0],
-        ) if rts.size else None
-        if rts.size:
-            low, high = np.quantile(rts, [0.25, 0.75])
-            result[f"RT_{label}_IQRRate"] = float(
-                np.count_nonzero((rts >= low) & (rts <= high)) / (high - low),
-            ) if high > low else None
-        else:
-            result[f"RT_{label}_IQRRate"] = None
         if level == 1:
             differences = np.diff(rts)
             result["AvgCycleTime_MS1"] = _mean(differences[differences > 0])
-            groups = np.sort(np.resize(np.arange(1, 5), tic.size))
-            middle = tic[(groups == 2) | (groups == 3)]
-            result["MedianTIC_in_RT_MS1_IQR"] = float(np.median(middle)) if middle.size else None
-            if rt.size:
-                half = (rt.size + 1) // 2
-                spans = rt[half - 1:] - rt[:rt.size - half + 1]
-                start = int(np.argmin(spans))
-                result["TIC_MS1_MedianInHalfRange"] = float(np.median(tic[start:start + half]))
-            else:
-                result["TIC_MS1_MedianInHalfRange"] = None
             if rt.size > 1 and rt[-1] > rt[0] and tic.sum() > 0:
                 cumulative = np.cumsum(tic)
                 indices = np.searchsorted(cumulative, cumulative[-1] * np.array([0.25, 0.5, 0.75]))
@@ -518,15 +490,6 @@ class QCMetricCalculator:
                 f"IsolationWidth_{label}_Min": float(widths.min()) if widths.size else None,
                 f"IsolationWidth_{label}_Max": float(widths.max()) if widths.size else None,
                 f"IsolationWidth_{label}_Count": int(widths.size),
-                f"IsolationWidth_{label}_FractionLe15": (
-                    float(np.count_nonzero(widths <= 15) / widths.size)
-                    if widths.size else None
-                ),
-                f"IsolationWidth_{label}_FractionGe15": (
-                    float(np.count_nonzero(widths >= 15) / widths.size)
-                    if widths.size else None
-                ),
-                f"IsolationPrecursorMz_{label}_Count": int(len(summary.isolation_precursor_mz)),
                 f"IsolationPrecursorMz_{label}_UniqueCount": (
                     int(np.unique(np.round(np.asarray(summary.isolation_precursor_mz), 1)).size)
                     if summary.isolation_precursor_mz else 0
@@ -542,14 +505,6 @@ class QCMetricCalculator:
                 f"IsolationPrecursorMz_{label}_RepeatedFraction": _repeated_fraction(summary.isolation_precursor_mz),
                 f"MultiplePrecursors_{label}_Count": summary.multiple_precursors,
             })
-            if level == 2:
-                if intensity.size:
-                    q5, q95 = np.quantile(intensity, [0.05, 0.95])
-                    result["ExtentPrecursorIntensity_95over5_MS2"] = float(
-                        q95 / q5,
-                    ) if q5 > 0 else None
-                else:
-                    result["ExtentPrecursorIntensity_95over5_MS2"] = None
         return result
 
     def _charge_metrics(self, summary: LevelSummary) -> dict[str, Any]:
@@ -565,8 +520,6 @@ class QCMetricCalculator:
             },
             "ChargeMean": _mean(known),
             "ChargeMedian": float(np.median(known)) if known.size else None,
-            "ChargeMin": int(known.min()) if known.size else None,
-            "ChargeMax": int(known.max()) if known.size else None,
             "ChargeRatio_3over2": bins[2] / bins[1] if bins[1] and bins[2] else None,
             "ChargeRatio_4over2": bins[3] / bins[1] if bins[1] and bins[3] else None,
         }

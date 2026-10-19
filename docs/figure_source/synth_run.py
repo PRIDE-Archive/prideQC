@@ -121,7 +121,6 @@ if __name__ == "__main__":
         "TIC_MS1_CV",
         "TIC_MS1_Median",
         "BasePeak_MS1_Mean",
-        "BasePeak_All_Max",
         "ScanRate_MS1",
         "ScanRate_MS2",
         "FastestFrequency_MS1",
@@ -129,15 +128,12 @@ if __name__ == "__main__":
         "AvgCycleTime_MS1",
         "ChargeRatio_3over2",
         "MS2_PrecursorCharge_Fractions",
-        "IsolationWidth_MS2_FractionLe15",
         "IsolationWidth_MS2_Median",
         "IsolationPrecursorMz_MS2_UniqueFraction",
         "IsolationPrecursorMz_MS2_MaxRepeatFraction",
         "IsolationPrecursorMz_MS2_RepeatedFraction",
         "AcquisitionCycle_Count",
         "AcquisitionCycle_MS2Count_Mode",
-        "AcquisitionCycle_TargetSetModalFraction",
-        "AcquisitionCycle_TargetSetDistinctCount",
         "MS1_to_MS2_Ratio",
     ):
         print(k, m[k])
@@ -147,7 +143,5 @@ if __name__ == "__main__":
         "IsolationPrecursorMz_MS2_UniqueFraction",
         "IsolationPrecursorMz_MS2_MaxRepeatFraction",
         "IsolationPrecursorMz_MS2_RepeatedFraction",
-        "AcquisitionCycle_TargetSetModalFraction",
-        "AcquisitionCycle_TargetSetDistinctCount",
     ):
         print(k, fv[k])

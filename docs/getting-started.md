@@ -39,7 +39,6 @@ Useful options include:
 - `--estimate-mass-error` — estimate precursor and fragment measurement precision.
 - `--estimate-mass-shifts` — detect recurrent related-spectrum neutral mass shifts.
 - `--diagnostics` — screen MS2/MS3 spectra for diagnostic-ion evidence.
-- `--estimate-peak-type` — estimate centroid/profile representation where needed.
 - `--workers N` — process independent files in separate worker processes.
 
 ## Example output tree

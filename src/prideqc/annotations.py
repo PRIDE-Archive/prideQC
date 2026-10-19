@@ -188,11 +188,11 @@ class TechnicalAnnotator:
             cycle = run.acquisition_cycles.metrics()
             cycle_count = int(cycle["AcquisitionCycle_Count"] or 0)
             cycle_mode = int(cycle["AcquisitionCycle_MS2Count_Mode"] or 0)
-            cycle_modal_fraction = cycle["AcquisitionCycle_MS2Count_ModalFraction"]
             target_coverage = cycle["AcquisitionCycle_TargetCoverageFraction"]
             target_eligible_fraction = cycle["AcquisitionCycle_TargetEligibleFraction"]
-            set_modal_fraction = cycle["AcquisitionCycle_TargetSetModalFraction"]
-            order_modal_fraction = cycle["AcquisitionCycle_TargetOrderModalFraction"]
+            cycle_modal_fraction, set_modal_fraction, order_modal_fraction = (
+                run.acquisition_cycles.classifier_consensus()
+            )
 
             rounded_targets = np.round(np.asarray(summary.isolation_precursor_mz), 1)
             unique_targets = int(np.unique(rounded_targets).size) if rounded_targets.size else 0

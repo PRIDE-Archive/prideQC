@@ -19,7 +19,6 @@ Compute QC metrics and evidence from local or PRIDE-hosted mass-spectrometry fil
 - `--diagnostics`
 - `--estimate-mass-error`
 - `--estimate-mass-shifts`
-- `--estimate-peak-type`
 
 ### SDRF refinement switches
 

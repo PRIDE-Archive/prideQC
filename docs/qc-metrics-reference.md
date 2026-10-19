@@ -6,9 +6,9 @@ selects which existing mzQC metrics are prominently displayed; it does
 **not** change acquisition, calculation, CV identity, serialization or merging.
 Experimental method and label annotations are recorded separately.
 
-**Registered QC metric definitions: 104.**
-Presentation tiers: **18 core**, **39 diagnostic**,
-and **47 extended**. A registration is not a promise
+**Registered QC metric definitions: 80.**
+Presentation tiers: **18 core**, **36 diagnostic**,
+and **26 extended**. A registration is not a promise
 that a value exists for every run. Metrics absent or undefined in the source
 mzQC must remain absent/undefined; do not fill missing values with zero.
 
@@ -99,22 +99,16 @@ Browse the compact three-column indexes by category, then expand
 a category's definitions to see full CV accessions, value shapes
 and the original metric descriptions.
 
-### Acquisition cycles (12)
+### Acquisition cycles (6)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
 | `AcquisitionCycle_Count` | diagnostic | cycles |
 | `AcquisitionCycle_MS2Count_Quantiles` | core | cycles |
 | `AcquisitionCycle_MS2Count_Mode` | diagnostic | cycles |
-| `AcquisitionCycle_MS2Count_ModalFraction` | extended | cycles |
 | `AcquisitionCycle_TargetCoverageFraction` | diagnostic | cycles |
-| `AcquisitionCycle_TargetEligibleCount` | extended | cycles |
 | `AcquisitionCycle_TargetEligibleFraction` | extended | cycles |
 | `AcquisitionCycle_UniqueTargetCount_Quantiles` | extended | cycles |
-| `AcquisitionCycle_TargetSetDistinctCount` | extended | cycles |
-| `AcquisitionCycle_TargetSetModalFraction` | diagnostic | cycles |
-| `AcquisitionCycle_TargetOrderDistinctCount` | extended | cycles |
-| `AcquisitionCycle_TargetOrderModalFraction` | extended | cycles |
 
 :::{dropdown} Full definitions and CV accessions — Acquisition cycles
 
@@ -130,17 +124,9 @@ and the original metric descriptions.
   - CV: `QCPRIDE:38064FE0BC760341F5CE`
   - Definition: Most frequent MS2 scan count per observed MS1-delimited cycle; lower count wins ties.
 
-- **`AcquisitionCycle_MS2Count_ModalFraction`** — extended; scalar; applies to cycles
-  - CV: `QCPRIDE:F6EA9ED8D480A916D62F`
-  - Definition: Fraction of observed MS1-delimited cycles having the modal MS2 scan count.
-
 - **`AcquisitionCycle_TargetCoverageFraction`** — diagnostic; scalar; applies to cycles
   - CV: `QCPRIDE:1E7E0C9468F1B503778C`
   - Definition: Fraction of MS2 scans inside observed MS1-delimited cycles with a finite positive first-precursor m/z paired with a positive isolation width.
-
-- **`AcquisitionCycle_TargetEligibleCount`** — extended; scalar; applies to cycles
-  - CV: `QCPRIDE:172D73B0C593B7E3F376`
-  - Definition: Count of observed MS1-delimited cycles where every MS2 scan has target metadata eligible for target-set/order comparison.
 
 - **`AcquisitionCycle_TargetEligibleFraction`** — extended; scalar; applies to cycles
   - CV: `QCPRIDE:0EA9DB6C9708D5F09586`
@@ -150,31 +136,14 @@ and the original metric descriptions.
   - CV: `QCPRIDE:EAE7AB20278D155810C1`
   - Definition: 25th, 50th, 75th percentiles of unique first-precursor isolation targets per eligible cycle after 0.1 Th quantization.
 
-- **`AcquisitionCycle_TargetSetDistinctCount`** — extended; scalar; applies to cycles
-  - CV: `QCPRIDE:3DAD05F0A9B6418D738F`
-  - Definition: Number of distinct per-cycle isolation-target sets among eligible cycles after 0.1 Th quantization.
-
-- **`AcquisitionCycle_TargetSetModalFraction`** — diagnostic; scalar; applies to cycles
-  - CV: `QCPRIDE:C1EE0988D7C3648932F1`
-  - Definition: Fraction of eligible cycles whose quantized isolation-target set equals the modal set.
-
-- **`AcquisitionCycle_TargetOrderDistinctCount`** — extended; scalar; applies to cycles
-  - CV: `QCPRIDE:971C73C2545A365A4D7E`
-  - Definition: Number of distinct ordered per-cycle isolation-target sequences among eligible cycles after 0.1 Th quantization.
-
-- **`AcquisitionCycle_TargetOrderModalFraction`** — extended; scalar; applies to cycles
-  - CV: `QCPRIDE:4A5FB670C1ACFB1FBDB2`
-  - Definition: Fraction of eligible cycles whose quantized ordered isolation-target sequence equals the modal sequence.
-
 :::
 
-### Chromatography (5)
+### Chromatography (4)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
 | `ChromatographyDuration` | core | all |
 | `NumberOfChromatograms` | diagnostic | chromatograms |
-| `NumberOfChromatogramDataPoints` | diagnostic | chromatograms |
 | `ChromatogramTypes` | diagnostic | chromatograms |
 | `ChromatogramRTRange` | extended | chromatograms |
 
@@ -188,10 +157,6 @@ and the original metric descriptions.
   - CV: `QCPRIDE:3A03550E7F73CC8BC2E7`
   - Definition: Number of stored chromatograms.
 
-- **`NumberOfChromatogramDataPoints`** — diagnostic; scalar; applies to chromatograms
-  - CV: `QCPRIDE:166BE0366D9F74CDD72A`
-  - Definition: Total stored chromatogram array lengths, not chromatographic peaks.
-
 - **`ChromatogramTypes`** — diagnostic; table; applies to chromatograms
   - CV: `QCPRIDE:F6028B02FCB099FDD16A`
   - Definition: Counts grouped by OpenMS ChromatogramType enum value; engine version is recorded.
@@ -202,22 +167,18 @@ and the original metric descriptions.
 
 :::
 
-### Ion intensity and TIC (22)
+### Ion intensity and TIC (17)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
-| `BasePeak_All_Max` | extended | all |
 | `BasePeak_MS1_Mean` | extended | ms1 |
 | `TIC_MS1_Median` | core | ms1 |
 | `TIC_MS1_CV` | core | ms1 |
 | `TIC_MS1_Area` | diagnostic | ms1 |
 | `TIC_MS1_Area_RTQuantiles` | extended | ms1 |
 | `TIC_MS1_QuartileLogRatios` | extended | ms1 |
-| `TIC_MS1_ChangeQuartileLogRatios` | extended | ms1 |
 | `TIC_MS1_SignalJump10x_Count` | diagnostic | ms1 |
 | `TIC_MS1_SignalFall10x_Count` | diagnostic | ms1 |
-| `MedianTIC_in_RT_MS1_IQR` | extended | ms1 |
-| `TIC_MS1_MedianInHalfRange` | diagnostic | ms1 |
 | `RT_TIC_Quantiles` | extended | ms1 |
 | `BasePeak_MS2_Mean` | extended | ms2 |
 | `TIC_MS2_Median` | core | ms2 |
@@ -225,15 +186,10 @@ and the original metric descriptions.
 | `TIC_MS2_Area` | diagnostic | ms2 |
 | `TIC_MS2_Area_RTQuantiles` | extended | ms2 |
 | `TIC_MS2_QuartileLogRatios` | extended | ms2 |
-| `TIC_MS2_ChangeQuartileLogRatios` | extended | ms2 |
 | `TIC_MS2_SignalJump10x_Count` | diagnostic | ms2 |
 | `TIC_MS2_SignalFall10x_Count` | diagnostic | ms2 |
 
 :::{dropdown} Full definitions and CV accessions — Ion intensity and TIC
-
-- **`BasePeak_All_Max`** — extended; scalar; applies to all
-  - CV: `QCPRIDE:0DFA7AA5174921CAC620`
-  - Definition: Largest valid intensity across all spectra, including MS3 and higher; arbitrary intensity units.
 
 - **`BasePeak_MS1_Mean`** — extended; scalar; applies to ms1
   - CV: `QCPRIDE:D452DD102903397E2819`
@@ -259,10 +215,6 @@ and the original metric descriptions.
   - CV: `QCPRIDE:604EE74E7854759E05FC`
   - Definition: Natural logs of TIC Q2/Q1, Q3/Q2, Q4/Q3 (Q4=max), MS1.
 
-- **`TIC_MS1_ChangeQuartileLogRatios`** — extended; tuple; applies to ms1
-  - CV: `QCPRIDE:B4CB91D742E1BE7A0B5E`
-  - Definition: Natural logs of absolute adjacent TIC change Q2/Q1, Q3/Q2, Q4/Q3, MS1.
-
 - **`TIC_MS1_SignalJump10x_Count`** — diagnostic; scalar; applies to ms1
   - CV: `QCPRIDE:CC18B4EE12E3DE4D10CC`
   - Definition: Adjacent sorted-TIC ratios >=10, with strictly positive previous TIC, MS1.
@@ -270,14 +222,6 @@ and the original metric descriptions.
 - **`TIC_MS1_SignalFall10x_Count`** — diagnostic; scalar; applies to ms1
   - CV: `QCPRIDE:968FA11A94C7458E4F1C`
   - Definition: Adjacent sorted-TIC ratios <=0.1, with strictly positive previous TIC; zero next TIC counts, MS1.
-
-- **`MedianTIC_in_RT_MS1_IQR`** — extended; scalar; applies to ms1
-  - CV: `QCPRIDE:384CE930503A31FD6181`
-  - Definition: Median TIC in middle two scan-index quartile groups (recycle-and-sort assignment), MS1. ID-free proxy; not an identified-peptide metric.
-
-- **`TIC_MS1_MedianInHalfRange`** — diagnostic; tuple; applies to ms1
-  - CV: `QCPRIDE:866968003763CDDE9CF5`
-  - Definition: Median TIC in the shortest window containing ceil(n/2) finite-RT MS1 scans; first window wins ties. ID-free proxy.
 
 - **`RT_TIC_Quantiles`** — extended; tuple; applies to ms1
   - CV: `MS:4000183`
@@ -306,10 +250,6 @@ and the original metric descriptions.
 - **`TIC_MS2_QuartileLogRatios`** — extended; tuple; applies to ms2
   - CV: `QCPRIDE:80B75AE92157AF8E1090`
   - Definition: Natural logs of TIC Q2/Q1, Q3/Q2, Q4/Q3 (Q4=max), MS2.
-
-- **`TIC_MS2_ChangeQuartileLogRatios`** — extended; tuple; applies to ms2
-  - CV: `QCPRIDE:760CEDD06B184EE701FF`
-  - Definition: Natural logs of absolute adjacent TIC change Q2/Q1, Q3/Q2, Q4/Q3, MS2.
 
 - **`TIC_MS2_SignalJump10x_Count`** — diagnostic; scalar; applies to ms2
   - CV: `QCPRIDE:4BE7DF39FCE21F9E3583`
@@ -399,7 +339,7 @@ and the original metric descriptions.
 
 :::
 
-### Precursors and isolation (26)
+### Precursors and isolation (20)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
@@ -413,20 +353,14 @@ and the original metric descriptions.
 | `IsolationWidth_MS2_Min` | extended | ms2 |
 | `IsolationWidth_MS2_Max` | extended | ms2 |
 | `IsolationWidth_MS2_Count` | diagnostic | ms2 |
-| `IsolationWidth_MS2_FractionLe15` | extended | ms2 |
-| `IsolationWidth_MS2_FractionGe15` | extended | ms2 |
-| `IsolationPrecursorMz_MS2_Count` | extended | ms2 |
 | `IsolationPrecursorMz_MS2_UniqueCount` | extended | ms2 |
 | `IsolationPrecursorMz_MS2_UniqueFraction` | diagnostic | ms2 |
 | `IsolationPrecursorMz_MS2_MaxRepeatFraction` | extended | ms2 |
 | `IsolationPrecursorMz_MS2_RepeatedFraction` | extended | ms2 |
 | `MultiplePrecursors_MS2_Count` | diagnostic | ms2 |
-| `ExtentPrecursorIntensity_95over5_MS2` | extended | ms2 |
 | `MS2_PrecursorCharge_Fractions` | core | ms2 |
 | `ChargeMean` | extended | ms2 |
 | `ChargeMedian` | diagnostic | ms2 |
-| `ChargeMin` | extended | ms2 |
-| `ChargeMax` | extended | ms2 |
 | `ChargeRatio_3over2` | extended | ms2 |
 | `ChargeRatio_4over2` | extended | ms2 |
 
@@ -472,18 +406,6 @@ and the original metric descriptions.
   - CV: `QCPRIDE:0F163ECB26874F0C65C7`
   - Definition: Count of first-precursor isolation widths with a finite positive value, MS2.
 
-- **`IsolationWidth_MS2_FractionLe15`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:C093A5D8209394150C2B`
-  - Definition: Fraction of recorded positive first-precursor isolation widths <=15 Th (m/z), MS2.
-
-- **`IsolationWidth_MS2_FractionGe15`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:DE0B3E119A726F58C6C1`
-  - Definition: Fraction of recorded positive first-precursor isolation widths >=15 Th (m/z), MS2.
-
-- **`IsolationPrecursorMz_MS2_Count`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:5C5E15B79F1D0F5E5C1F`
-  - Definition: Count of finite positive first-precursor m/z values paired with positive isolation widths, MS2.
-
 - **`IsolationPrecursorMz_MS2_UniqueCount`** — extended; scalar; applies to ms2
   - CV: `QCPRIDE:C98D3B2F6D4A5E4D3E1B`
   - Definition: Count of unique first-precursor m/z values after rounding to 0.1 Th, MS2.
@@ -504,10 +426,6 @@ and the original metric descriptions.
   - CV: `QCPRIDE:82C9F41E70F7A9F93FCC`
   - Definition: Scans with multiple precursors; first precursor supplies precursor-distribution metrics, MS2.
 
-- **`ExtentPrecursorIntensity_95over5_MS2`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:BD6FAF3B9FAECC3FF579`
-  - Definition: 95th/5th percentile ratio of positive recorded first-precursor MS2 intensities; ID-free proxy, no fragment-TIC fallback.
-
 - **`MS2_PrecursorCharge_Fractions`** — core; table; applies to ms2
   - CV: `QCPRIDE:EF3BCB4B9E83C77AAC5B`
   - Definition: Counts and fractions of first-precursor charges, denominator all MS2 scans; missing or nonpositive charge is unknown.
@@ -520,14 +438,6 @@ and the original metric descriptions.
   - CV: `QCPRIDE:3E06B5777AC79EC2AAC6`
   - Definition: Median positive first-precursor MS2 charge; unknown charges excluded.
 
-- **`ChargeMin`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:87C7AAEB9CFD9A6651E1`
-  - Definition: Minimum positive first-precursor MS2 charge.
-
-- **`ChargeMax`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:7BEF7C9E6BFC65BFAB6D`
-  - Definition: Maximum positive first-precursor MS2 charge.
-
 - **`ChargeRatio_3over2`** — extended; scalar; applies to ms2
   - CV: `QCPRIDE:3263CF93B552C37EE7C0`
   - Definition: Count of MS2 charge 3 divided by charge 2; unavailable unless both are present (rawQC convention).
@@ -538,7 +448,7 @@ and the original metric descriptions.
 
 :::
 
-### Scan timing (12)
+### Scan timing (8)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
@@ -546,14 +456,10 @@ and the original metric descriptions.
 | `ScanRate_MS1` | core | ms1 |
 | `FastestFrequency_MS1` | extended | ms1 |
 | `RT_MS1_Quantiles` | extended | ms1 |
-| `RT_MS1_IQR` | extended | ms1 |
-| `RT_MS1_IQRRate` | extended | ms1 |
 | `RtRange_MS2` | diagnostic | ms2 |
 | `ScanRate_MS2` | core | ms2 |
 | `FastestFrequency_MS2` | extended | ms2 |
 | `RT_MS2_Quantiles` | extended | ms2 |
-| `RT_MS2_IQR` | extended | ms2 |
-| `RT_MS2_IQRRate` | extended | ms2 |
 
 :::{dropdown} Full definitions and CV accessions — Scan timing
 
@@ -573,14 +479,6 @@ and the original metric descriptions.
   - CV: `MS:4000184`
   - Definition: Four consecutive scan-RT quartile widths divided by the MS1 time span.
 
-- **`RT_MS1_IQR`** — extended; scalar; applies to ms1
-  - CV: `QCPRIDE:1FBA04CFFBA1AF991EC1`
-  - Definition: 75th minus 25th percentile of finite retention times, in seconds, MS1.
-
-- **`RT_MS1_IQRRate`** — extended; scalar; applies to ms1
-  - CV: `QCPRIDE:502F90C949DF08AF0C6A`
-  - Definition: Count of finite-RT scans in the closed RT interquartile interval divided by its width in seconds, MS1; ID-free proxy.
-
 - **`RtRange_MS2`** — diagnostic; tuple; applies to ms2
   - CV: `QCPRIDE:55D96D3835BFEE5AD7AB`
   - Definition: Minimum and maximum finite RT in seconds, MS2.
@@ -597,17 +495,9 @@ and the original metric descriptions.
   - CV: `MS:4000185`
   - Definition: Four consecutive scan-RT quartile widths divided by the MS2 time span.
 
-- **`RT_MS2_IQR`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:56E9A52714B2A63AB701`
-  - Definition: 75th minus 25th percentile of finite retention times, in seconds, MS2.
-
-- **`RT_MS2_IQRRate`** — extended; scalar; applies to ms2
-  - CV: `QCPRIDE:DC206A3283881BDD1E18`
-  - Definition: Count of finite-RT scans in the closed RT interquartile interval divided by its width in seconds, MS2; ID-free proxy.
-
 :::
 
-### Spectra and peak summaries (15)
+### Spectra and peak summaries (13)
 
 | Registry metric | Tier | Applies to |
 | --- | --- | --- |
@@ -617,13 +507,11 @@ and the original metric descriptions.
 | `NumberOfSpectra_MS1` | core | ms1 |
 | `PeakDensity_MS1_Quantiles` | core | ms1 |
 | `PeakTypes_MS1` | diagnostic | ms1 |
-| `EstimatedPeakTypes_MS1` | extended | ms1 |
 | `Polarity_MS1` | diagnostic | ms1 |
 | `InvalidPeakCount_MS1` | diagnostic | ms1 |
 | `NumberOfSpectra_MS2` | core | ms2 |
 | `PeakDensity_MS2_Quantiles` | core | ms2 |
 | `PeakTypes_MS2` | diagnostic | ms2 |
-| `EstimatedPeakTypes_MS2` | extended | ms2 |
 | `Polarity_MS2` | diagnostic | ms2 |
 | `InvalidPeakCount_MS2` | diagnostic | ms2 |
 
@@ -653,10 +541,6 @@ and the original metric descriptions.
   - CV: `QCPRIDE:658F0AF60FACA5FDD19E`
   - Definition: Counts of centroid, profile and unknown scan representations, MS1.
 
-- **`EstimatedPeakTypes_MS1`** — extended; table; applies to ms1
-  - CV: `QCPRIDE:499B085DD486DCBECCC0`
-  - Definition: Optional OpenMS PeakTypeEstimator counts for scans with more than ten peaks, MS1; empty if estimation was not requested or eligible.
-
 - **`Polarity_MS1`** — diagnostic; table; applies to ms1
   - CV: `QCPRIDE:5D7B6DFCAC3E42EAF25F`
   - Definition: Counts by recorded polarity, including unknown, MS1.
@@ -676,10 +560,6 @@ and the original metric descriptions.
 - **`PeakTypes_MS2`** — diagnostic; table; applies to ms2
   - CV: `QCPRIDE:02BD471D53BE3411913F`
   - Definition: Counts of centroid, profile and unknown scan representations, MS2.
-
-- **`EstimatedPeakTypes_MS2`** — extended; table; applies to ms2
-  - CV: `QCPRIDE:201C9F534D91EC37FC1D`
-  - Definition: Optional OpenMS PeakTypeEstimator counts for scans with more than ten peaks, MS2; empty if estimation was not requested or eligible.
 
 - **`Polarity_MS2`** — diagnostic; table; applies to ms2
   - CV: `QCPRIDE:6A1C64BAB5CCF09A5DE3`

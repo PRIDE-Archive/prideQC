@@ -9,7 +9,7 @@ PeakDensity_MS2_Q1	PeakDensity_MS2_Quantiles	grouped	Q1/Q2/Q3 elements in one tu
 PeakDensity_MS2_Q2	PeakDensity_MS2_Quantiles	grouped	Q1/Q2/Q3 elements in one tuple.
 PeakDensity_MS2_Q3	PeakDensity_MS2_Quantiles	grouped	Q1/Q2/Q3 elements in one tuple.
 NumberOfSpectralPeaks	NumberOfSpectralPeaks	retained	See metric definition and documented invalid/missing-data policies.
-NumberOfChromatogramDataPoints	NumberOfChromatogramDataPoints	retained	See metric definition and documented invalid/missing-data policies.
+NumberOfChromatogramDataPoints	NumberOfChromatogramDataPoints	removed	Retired from prideQC QC output; update downstream reporting.
 FAIMS_CV_Count	FAIMS_CV_Count	retained	See metric definition and documented invalid/missing-data policies.
 FAIMS_CV_Values	FAIMS_CV_Values	retained	See metric definition and documented invalid/missing-data policies.
 FAIMS_CV_Range	FAIMS_CV_Range	retained	See metric definition and documented invalid/missing-data policies.
@@ -22,17 +22,17 @@ FastestFrequency_MS1	FastestFrequency_MS1	retained	See metric definition and doc
 FastestFrequency_MS2	FastestFrequency_MS2	retained	See metric definition and documented invalid/missing-data policies.
 RT_MS1_Quantiles	RT_MS1_Quantiles	retained	See metric definition and documented invalid/missing-data policies.
 RT_MS2_Quantiles	RT_MS2_Quantiles	retained	See metric definition and documented invalid/missing-data policies.
-TIC_MS1_Change_Q2	TIC_MS1_ChangeQuartileLogRatios	grouped	Q2/Q1, Q3/Q2, Q4/Q3 natural logarithms in one tuple.
-TIC_MS1_Change_Q3	TIC_MS1_ChangeQuartileLogRatios	grouped	Q2/Q1, Q3/Q2, Q4/Q3 natural logarithms in one tuple.
-TIC_MS1_Change_Q4	TIC_MS1_ChangeQuartileLogRatios	grouped	Q2/Q1, Q3/Q2, Q4/Q3 natural logarithms in one tuple.
+TIC_MS1_Change_Q2	TIC_MS1_ChangeQuartileLogRatios	removed	Retired from prideQC QC output; update downstream reporting.
+TIC_MS1_Change_Q3	TIC_MS1_ChangeQuartileLogRatios	removed	Retired from prideQC QC output; update downstream reporting.
+TIC_MS1_Change_Q4	TIC_MS1_ChangeQuartileLogRatios	removed	Retired from prideQC QC output; update downstream reporting.
 TIC_MS1_Ratio_Q2	TIC_MS1_QuartileLogRatios	grouped	Q2/Q1, Q3/Q2, Q4/Q3 natural logarithms in one tuple.
 TIC_MS1_Ratio_Q3	TIC_MS1_QuartileLogRatios	grouped	Q2/Q1, Q3/Q2, Q4/Q3 natural logarithms in one tuple.
 TIC_MS1_Ratio_Q4	TIC_MS1_QuartileLogRatios	grouped	Q2/Q1, Q3/Q2, Q4/Q3 natural logarithms in one tuple.
 RT_TIC_Quantiles	RT_TIC_Quantiles	retained	See metric definition and documented invalid/missing-data policies.
 ChargeMean	ChargeMean	retained	Positive known charges only; all scans remain in fraction denominator; missing numerator ratio retains rawQC convention.
 ChargeMedian	ChargeMedian	retained	Positive known charges only; all scans remain in fraction denominator; missing numerator ratio retains rawQC convention.
-ChargeMin	ChargeMin	retained	Positive known charges only; all scans remain in fraction denominator; missing numerator ratio retains rawQC convention.
-ChargeMax	ChargeMax	retained	Positive known charges only; all scans remain in fraction denominator; missing numerator ratio retains rawQC convention.
+ChargeMin	ChargeMin	removed	Retired from prideQC QC output; update downstream reporting.
+ChargeMax	ChargeMax	removed	Retired from prideQC QC output; update downstream reporting.
 ChargeRatio_3over2	ChargeRatio_3over2	retained	Positive known charges only; all scans remain in fraction denominator; missing numerator ratio retains rawQC convention.
 ChargeRatio_4over2	ChargeRatio_4over2	retained	Positive known charges only; all scans remain in fraction denominator; missing numerator ratio retains rawQC convention.
 MS2_PrecursorCharge_Fractions	MS2_PrecursorCharge_Fractions	retained	See metric definition and documented invalid/missing-data policies.
@@ -40,7 +40,7 @@ TIC_MS1_CV	TIC_MS1_CV	retained	See metric definition and documented invalid/miss
 TIC_MS2_CV	TIC_MS2_CV	retained	See metric definition and documented invalid/missing-data policies.
 BasePeak_MS1_Mean	BasePeak_MS1_Mean	retained	See metric definition and documented invalid/missing-data policies.
 BasePeak_MS2_Mean	BasePeak_MS2_Mean	retained	See metric definition and documented invalid/missing-data policies.
-BasePeak_All_Max	BasePeak_All_Max	retained	See metric definition and documented invalid/missing-data policies.
+BasePeak_All_Max	BasePeak_All_Max	removed	Retired from prideQC QC output; update downstream reporting.
 ScanRate_MS1	ScanRate_MS1	retained	See metric definition and documented invalid/missing-data policies.
 ScanRate_MS2	ScanRate_MS2	retained	See metric definition and documented invalid/missing-data policies.
 MS1_to_MS2_Ratio	MS1_to_MS2_Ratio	retained	See metric definition and documented invalid/missing-data policies.
@@ -53,13 +53,13 @@ PrecursorIntensity_Mean	PrecursorIntensity_MS2_Mean	changed/renamed	Positive rec
 PrecursorIntensity_Sd	PrecursorIntensity_MS2_Sd	changed/renamed	Positive recorded precursor intensities only.
 PrecursorIntensity_FallbackCount	PrecursorIntensity_MS2_MissingCount	removed/replaced	Fallback is removed; explicitly count unavailable intensities instead.
 PrecursorMz_MS2_Median	PrecursorMz_MS2_Median	retained	See metric definition and documented invalid/missing-data policies.
-RT_MS1_IQR	RT_MS1_IQR	retained	See metric definition and documented invalid/missing-data policies.
-RT_MS1_IQRRate	RT_MS1_IQRRate	retained	See metric definition and documented invalid/missing-data policies.
+RT_MS1_IQR	RT_MS1_IQR	removed	Retired from prideQC QC output; update downstream reporting.
+RT_MS1_IQRRate	RT_MS1_IQRRate	removed	Retired from prideQC QC output; update downstream reporting.
 TIC_MS1_Area_RTQuantiles	TIC_MS1_Area_RTQuantiles	corrected	Exact partial-trapezoid boundary integration replaces cumulative-area interpolation.
 TIC_MS1_Area	TIC_MS1_Area	retained	See metric definition and documented invalid/missing-data policies.
-ExtentPrecursorIntensity_95over5_MS2	ExtentPrecursorIntensity_95over5_MS2	retained	See metric definition and documented invalid/missing-data policies.
-MedianTIC_in_RT_MS1_IQR	MedianTIC_in_RT_MS1_IQR	retained	See metric definition and documented invalid/missing-data policies.
-TIC_MS1_MedianInHalfRange	TIC_MS1_MedianInHalfRange	retained	See metric definition and documented invalid/missing-data policies.
+ExtentPrecursorIntensity_95over5_MS2	ExtentPrecursorIntensity_95over5_MS2	removed	Retired from prideQC QC output; update downstream reporting.
+MedianTIC_in_RT_MS1_IQR	MedianTIC_in_RT_MS1_IQR	removed	Retired from prideQC QC output; update downstream reporting.
+TIC_MS1_MedianInHalfRange	TIC_MS1_MedianInHalfRange	removed	Retired from prideQC QC output; update downstream reporting.
 NumberOfMSLevels	NumberOfMSLevels	retained	See metric definition and documented invalid/missing-data policies.
 Polarity_MS1_positive	Polarity_MS1	grouped	Counts per polarity in a table.
 Polarity_MS1_negative	Polarity_MS1	grouped	Counts per polarity in a table.
@@ -78,14 +78,14 @@ Chromatograms_SIC	ChromatogramTypes	grouped	OpenMS enum: XIC=0,TIC=1,SIC=2,BPC=3
 Chromatograms_Unknown	ChromatogramTypes	grouped	OpenMS enum: XIC=0,TIC=1,SIC=2,BPC=3,SIM=4,SRM=5; other values retained.
 Chromatograms_RT_Min	ChromatogramRTRange	grouped	Min/max tuple in seconds.
 Chromatograms_RT_Max	ChromatogramRTRange	grouped	Min/max tuple in seconds.
-MS1_PeakType_Annotated	PeakTypes_MS1	grouped	Counts per type; derive profile fraction from profile/(profile+centroid). Estimation requires --estimate-peak-type.
-MS1_PeakType_Annotated_ProfileFraction	PeakTypes_MS1	grouped	Counts per type; derive profile fraction from profile/(profile+centroid). Estimation requires --estimate-peak-type.
-MS1_PeakType_Estimated	EstimatedPeakTypes_MS1	grouped/optional	Counts per type; derive profile fraction from profile/(profile+centroid). Estimation requires --estimate-peak-type.
-MS1_PeakType_Estimated_ProfileFraction	EstimatedPeakTypes_MS1	grouped/optional	Counts per type; derive profile fraction from profile/(profile+centroid). Estimation requires --estimate-peak-type.
-MS2_PeakType_Annotated	PeakTypes_MS2	grouped	Counts per type; derive profile fraction from profile/(profile+centroid). Estimation requires --estimate-peak-type.
-MS2_PeakType_Annotated_ProfileFraction	PeakTypes_MS2	grouped	Counts per type; derive profile fraction from profile/(profile+centroid). Estimation requires --estimate-peak-type.
-MS2_PeakType_Estimated	EstimatedPeakTypes_MS2	grouped/optional	Counts per type; derive profile fraction from profile/(profile+centroid). Estimation requires --estimate-peak-type.
-MS2_PeakType_Estimated_ProfileFraction	EstimatedPeakTypes_MS2	grouped/optional	Counts per type; derive profile fraction from profile/(profile+centroid). Estimation requires --estimate-peak-type.
+MS1_PeakType_Annotated	PeakTypes_MS1	grouped	Counts per type; derive profile fraction from recorded profile/(profile+centroid).
+MS1_PeakType_Annotated_ProfileFraction	PeakTypes_MS1	grouped	Counts per type; derive profile fraction from recorded profile/(profile+centroid).
+MS1_PeakType_Estimated	EstimatedPeakTypes_MS1	removed	Retired from prideQC QC output; update downstream reporting.
+MS1_PeakType_Estimated_ProfileFraction	EstimatedPeakTypes_MS1	removed	Retired from prideQC QC output; update downstream reporting.
+MS2_PeakType_Annotated	PeakTypes_MS2	grouped	Counts per type; derive profile fraction from recorded profile/(profile+centroid).
+MS2_PeakType_Annotated_ProfileFraction	PeakTypes_MS2	grouped	Counts per type; derive profile fraction from recorded profile/(profile+centroid).
+MS2_PeakType_Estimated	EstimatedPeakTypes_MS2	removed	Retired from prideQC QC output; update downstream reporting.
+MS2_PeakType_Estimated_ProfileFraction	EstimatedPeakTypes_MS2	removed	Retired from prideQC QC output; update downstream reporting.
 MassAnalyzers	annotations.mass_analyzers	moved to evidence	All CV terms preserved. Analyzer-resolution extraction deferred.
 ActivationMethods	annotations.dissociation_msN	moved to evidence	Per-level scan counts; all observed methods.
 TIC_MS2_Area	TIC_MS2_Area	retained	See metric definition and documented invalid/missing-data policies.

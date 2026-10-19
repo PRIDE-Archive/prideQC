@@ -113,11 +113,6 @@ def parser() -> argparse.ArgumentParser:
         ),
     )
     analyze.add_argument(
-        "--estimate-peak-type",
-        action="store_true",
-        help="Also estimate centroid/profile type with OpenMS",
-    )
-    analyze.add_argument(
         "--include-inferred",
         action="store_true",
         help="Allow acquisition-mode heuristic suggestions to fill SDRF cells",
@@ -350,7 +345,6 @@ def _analyze(arguments: argparse.Namespace) -> int:
             tmt_profile_reporter_evidence=arguments.tmt_profile_reporter_evidence,
             estimate_mass_error=arguments.estimate_mass_error,
             estimate_mass_shifts=arguments.estimate_mass_shifts,
-            estimate_peak_type=arguments.estimate_peak_type,
             converter=arguments.converter,
             converter_executable=arguments.converter_executable,
             conversion_timeout=arguments.conversion_timeout,

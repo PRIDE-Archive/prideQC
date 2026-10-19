@@ -22,10 +22,10 @@ from scripts.generate_qc_metrics_reference import (
 class MetricPresentationTests(unittest.TestCase):
     def test_exact_registry_bijection_and_counts(self):
         catalog = load_catalog()
-        self.assertEqual(len(catalog), 104)
+        self.assertEqual(len(catalog), 80)
         self.assertEqual(
             Counter(policy["tier"] for _, policy in catalog),
-            {"core": 18, "diagnostic": 39, "extended": 47},
+            {"core": 18, "diagnostic": 36, "extended": 26},
         )
         self.assertEqual(CORE_COUNT, 18)
         self.assertEqual({metric["shape"] for metric, _ in catalog},
@@ -53,7 +53,7 @@ class MetricPresentationTests(unittest.TestCase):
             raw = list(csv.DictReader(handle, delimiter="\t"))
         catalog = load_catalog()
         self.assertEqual(raw, [metric for metric, _ in catalog])
-        # All 104 definitions, including extended entries, remain in the reference.
+        # All 80 definitions, including extended entries, remain in the reference.
         doc = render()
         for metric in raw:
             self.assertIn(f"`{metric['accession']}`", doc)
@@ -72,11 +72,28 @@ class MetricPresentationTests(unittest.TestCase):
         for metric, _ in load_catalog():
             self.assertEqual(doc.count(f"CV: `{metric['accession']}`"), 1)
 
+    def test_retired_metrics_are_absent_from_registry_and_new_mzqc(self):
+        from prideqc.metrics import QCMetricCalculator, RunSummary
+        from prideqc.models import Metric
+        from prideqc.mzqc import definition
+
+        retired = {line.split("\t", 1)[0] for line in
+                   (Path(__file__).resolve().parents[1] / "docs" / "retired-metrics.tsv")
+                   .read_text(encoding="utf-8").splitlines()[1:]}
+        self.assertEqual(len(retired), 24)
+        keys = {metric["key"] for metric, _ in load_catalog()}
+        self.assertTrue(retired.isdisjoint(keys))
+        new_keys = {metric.key for metric in QCMetricCalculator().calculate(RunSummary())}
+        self.assertTrue(retired.isdisjoint(new_keys))
+        for key in retired:
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "Unregistered QC metric"):
+                definition(Metric(key, 0))
+
     def test_generated_document_is_current(self):
         self.assertEqual(DEST.read_text(encoding="utf-8"), render())
         self.assertIn("**18 core**", render())
-        self.assertIn("**39 diagnostic**", render())
-        self.assertIn("**47 extended**", render())
+        self.assertIn("**36 diagnostic**", render())
+        self.assertIn("**26 extended**", render())
 
     def test_duplicate_or_missing_policy_fails_closed(self):
         with tempfile.TemporaryDirectory() as temp:

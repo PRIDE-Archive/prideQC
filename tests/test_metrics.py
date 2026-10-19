@@ -18,23 +18,6 @@ def calculate(spectra):
 
 
 class MetricTests(unittest.TestCase):
-    def test_id_free_middle_and_shortest_half_proxies(self):
-        items = [spectrum(rt, [tic]) for rt, tic in zip(
-            [0, 1, 2, 10, 20], [1, 100, 3, 4, 5], strict=True
-        )]
-        metrics, _ = calculate(items)
-        self.assertEqual(metrics["MedianTIC_in_RT_MS1_IQR"], 3.5)
-        self.assertEqual(metrics["TIC_MS1_MedianInHalfRange"], 3)
-        self.assertAlmostEqual(metrics["RT_MS1_IQRRate"], 1 / 3)
-
-    def test_precursor_extent_uses_only_recorded_intensity(self):
-        metrics, _ = calculate([
-            spectrum(0, [999], 2, charge=2, precursor_intensity=0),
-            spectrum(1, [999], 2, charge=2, precursor_intensity=10),
-            spectrum(2, [999], 2, charge=2, precursor_intensity=30),
-        ])
-        self.assertAlmostEqual(metrics["ExtentPrecursorIntensity_95over5_MS2"], 29 / 11)
-
     def test_irregular_tic_integral_and_exact_quartile_boundaries(self):
         metrics, _ = calculate([spectrum(0, [0]), spectrum(10, [20])])
         self.assertEqual(metrics["TIC_MS1_Area"], 100)
@@ -53,7 +36,6 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(metrics["ScanRate_MS1"], 2)
         self.assertEqual(metrics["ScanRate_MS2"], 12)
         self.assertEqual(metrics["ChromatographyDuration"], 200)
-        self.assertEqual(metrics["BasePeak_All_Max"], 999)
         self.assertEqual(metrics["NumberOfSpectra_MS3"], 1)
 
     def test_finite_rt_filtering_does_not_drop_scan_counts(self):
@@ -95,13 +77,6 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(metrics["TIC_MS1_SignalJump10x_Count"], 1)
         self.assertEqual(metrics["TIC_MS1_SignalFall10x_Count"], 2)
 
-    def test_absolute_tic_changes_produce_finite_ratios(self):
-        metrics, _ = calculate([spectrum(i, [x]) for i, x in enumerate([1, 9, 3, 7, 5])])
-        np.testing.assert_allclose(
-            metrics["TIC_MS1_ChangeQuartileLogRatios"],
-            np.log([5 / 3.5, 6.5 / 5, 8 / 6.5]),
-        )
-
     def test_rt_interval_fractions_sum_to_one(self):
         metrics, _ = calculate([spectrum(t, [1]) for t in [0, 1, 4, 10, 20]])
         self.assertAlmostEqual(sum(metrics["RT_MS1_Quantiles"]), 1)
@@ -114,7 +89,6 @@ class MetricTests(unittest.TestCase):
         table = metrics["MS2_PrecursorCharge_Fractions"]
         self.assertEqual(table["count"], [0, 1, 1, 0, 0, 1, 3])
         self.assertAlmostEqual(sum(table["fraction"]), 1)
-        self.assertEqual(metrics["ChargeMin"], 2)
         self.assertEqual(metrics["ChargeMean"], 4)
 
     def test_missing_precursor_intensity_is_never_fragment_tic(self):
@@ -135,8 +109,6 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(metrics["IsolationWidth_MS2_Min"], 10)
         self.assertEqual(metrics["IsolationWidth_MS2_Max"], 30)
         self.assertEqual(metrics["IsolationWidth_MS2_Count"], 4)
-        self.assertAlmostEqual(metrics["IsolationWidth_MS2_FractionLe15"], 0.5)
-        self.assertAlmostEqual(metrics["IsolationWidth_MS2_FractionGe15"], 0.75)
 
 
     def test_isolation_precursor_repetition_metrics(self):
@@ -147,7 +119,6 @@ class MetricTests(unittest.TestCase):
             for i, (w, mz) in enumerate(zip(widths, targets, strict=True))
         ]
         metrics, _ = calculate(spectra)
-        self.assertEqual(metrics["IsolationPrecursorMz_MS2_Count"], 8)
         self.assertEqual(metrics["IsolationPrecursorMz_MS2_UniqueCount"], 4)
         self.assertAlmostEqual(metrics["IsolationPrecursorMz_MS2_UniqueFraction"], 0.5)
         self.assertAlmostEqual(metrics["IsolationPrecursorMz_MS2_MaxRepeatFraction"], 0.25)
@@ -161,7 +132,6 @@ class MetricTests(unittest.TestCase):
             spectrum(2, [1], 2, charge=2, width=1.6, precursor_mz=400.0),
         ]
         metrics, _ = calculate(spectra)
-        self.assertEqual(metrics["IsolationPrecursorMz_MS2_Count"], 2)
         self.assertEqual(metrics["IsolationPrecursorMz_MS2_UniqueCount"], 1)
         self.assertEqual(metrics["IsolationPrecursorMz_MS2_UniqueFraction"], 0.5)
         self.assertEqual(metrics["IsolationPrecursorMz_MS2_MaxRepeatFraction"], 1.0)
@@ -180,15 +150,9 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(metrics["AcquisitionCycle_Count"], 3)
         self.assertEqual(metrics["AcquisitionCycle_MS2Count_Quantiles"], [4.0, 4.0, 4.0])
         self.assertEqual(metrics["AcquisitionCycle_MS2Count_Mode"], 4)
-        self.assertEqual(metrics["AcquisitionCycle_MS2Count_ModalFraction"], 1.0)
         self.assertEqual(metrics["AcquisitionCycle_TargetCoverageFraction"], 1.0)
-        self.assertEqual(metrics["AcquisitionCycle_TargetEligibleCount"], 3)
         self.assertEqual(metrics["AcquisitionCycle_TargetEligibleFraction"], 1.0)
         self.assertEqual(metrics["AcquisitionCycle_UniqueTargetCount_Quantiles"], [4.0, 4.0, 4.0])
-        self.assertEqual(metrics["AcquisitionCycle_TargetSetDistinctCount"], 1)
-        self.assertEqual(metrics["AcquisitionCycle_TargetSetModalFraction"], 1.0)
-        self.assertEqual(metrics["AcquisitionCycle_TargetOrderDistinctCount"], 1)
-        self.assertEqual(metrics["AcquisitionCycle_TargetOrderModalFraction"], 1.0)
 
     def test_acquisition_cycle_dynamic_targets_do_not_look_like_fixed_grid(self):
         items = []
@@ -202,11 +166,6 @@ class MetricTests(unittest.TestCase):
         metrics, _ = calculate(items)
         self.assertEqual(metrics["AcquisitionCycle_Count"], 3)
         self.assertEqual(metrics["AcquisitionCycle_MS2Count_Mode"], 2)
-        self.assertEqual(metrics["AcquisitionCycle_MS2Count_ModalFraction"], 1.0)
-        self.assertEqual(metrics["AcquisitionCycle_TargetSetDistinctCount"], 3)
-        self.assertAlmostEqual(metrics["AcquisitionCycle_TargetSetModalFraction"], 1 / 3)
-        self.assertEqual(metrics["AcquisitionCycle_TargetOrderDistinctCount"], 3)
-        self.assertAlmostEqual(metrics["AcquisitionCycle_TargetOrderModalFraction"], 1 / 3)
 
     def test_acquisition_cycle_target_metrics_require_complete_metadata(self):
         items = [
@@ -217,13 +176,8 @@ class MetricTests(unittest.TestCase):
         metrics, _ = calculate(items)
         self.assertEqual(metrics["AcquisitionCycle_Count"], 1)
         self.assertEqual(metrics["AcquisitionCycle_TargetCoverageFraction"], 0.5)
-        self.assertEqual(metrics["AcquisitionCycle_TargetEligibleCount"], 0)
         self.assertEqual(metrics["AcquisitionCycle_TargetEligibleFraction"], 0.0)
         self.assertIsNone(metrics["AcquisitionCycle_UniqueTargetCount_Quantiles"])
-        self.assertEqual(metrics["AcquisitionCycle_TargetSetDistinctCount"], 0)
-        self.assertIsNone(metrics["AcquisitionCycle_TargetSetModalFraction"])
-        self.assertEqual(metrics["AcquisitionCycle_TargetOrderDistinctCount"], 0)
-        self.assertIsNone(metrics["AcquisitionCycle_TargetOrderModalFraction"])
 
     def test_acquisition_cycle_metrics_ignore_ms2_before_first_ms1(self):
         items = [
@@ -245,8 +199,6 @@ class MetricTests(unittest.TestCase):
         metrics = {m.key: m.value for m in QCMetricCalculator().calculate(summary)}
         self.assertEqual(metrics["NumberOfSpectra_MS2"], 2)
         self.assertEqual(metrics["IsolationWidth_MS2_Count"], 1)
-        self.assertEqual(metrics["IsolationWidth_MS2_FractionLe15"], 1.0)
-        self.assertEqual(metrics["IsolationWidth_MS2_FractionGe15"], 0.0)
 
     def test_multiple_precursor_rule_is_visible(self):
         item = Spectrum(2, 0, np.array([100.]), np.array([1.]),
@@ -264,11 +216,10 @@ class MetricTests(unittest.TestCase):
         self.assertIsNone(metrics["ScanRate_MS1"])
         self.assertIsNone(metrics["TIC_MS1_Area"])
 
-    def test_chromatograms_are_counts_of_points_not_features(self):
+    def test_chromatogram_rt_range(self):
         summary = RunSummary()
         summary.consume_chromatogram(np.array([math.nan, 0, 10]), 1)
         metrics = {m.key: m.value for m in QCMetricCalculator().calculate(summary)}
-        self.assertEqual(metrics["NumberOfChromatogramDataPoints"], 3)
         self.assertEqual(metrics["ChromatogramRTRange"], [0, 10])
 
     def test_faims_is_not_drift_time(self):

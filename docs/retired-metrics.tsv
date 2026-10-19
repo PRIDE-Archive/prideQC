@@ -1,0 +1,25 @@
+key	old_accession	removal_reason
+NumberOfChromatogramDataPoints	QCPRIDE:166BE0366D9F74CDD72A	Chromatogram array size is primarily a file-format/acquisition sampling detail; little standalone quality value.
+BasePeak_All_Max	QCPRIDE:0DFA7AA5174921CAC620	Global extreme single intensity vulnerable to noise, clipping, one exceptional peak and MS-level mixing.
+TIC_MS1_ChangeQuartileLogRatios	QCPRIDE:B4CB91D742E1BE7A0B5E	Adjacent absolute TIC-change quartiles are a local transform; needs anomaly-detection benchmarking.
+EstimatedPeakTypes_MS1	QCPRIDE:499B085DD486DCBECCC0	Estimated centroid/profile detection is algorithm-dependent; record estimator version and ground-truth accuracy.
+RT_MS1_IQR	QCPRIDE:1FBA04CFFBA1AF991EC1	RT IQR mostly reflects scan timing and gradient length; redundant with run duration/scan rate.
+RT_MS1_IQRRate	QCPRIDE:502F90C949DF08AF0C6A	Central RT-scan density duplicates rate/timing family and lacks clear demonstrated incremental utility.
+MedianTIC_in_RT_MS1_IQR	QCPRIDE:384CE930503A31FD6181	Middle-half scan-index TIC is a proxy rather than ID-based QC; validate added value beyond median TIC.
+TIC_MS1_MedianInHalfRange	QCPRIDE:866968003763CDDE9CF5	Shortest half-scan RT-window TIC median is a proxy; test interpretability and failure sensitivity.
+TIC_MS2_ChangeQuartileLogRatios	QCPRIDE:760CEDD06B184EE701FF	MS2 adjacent TIC change quartiles are a specialized local derivative lacking independent validation.
+EstimatedPeakTypes_MS2	QCPRIDE:201C9F534D91EC37FC1D	MS2 centroid/profile estimator has method/algorithm dependence and questionable benefit over recorded peak types.
+RT_MS2_IQR	QCPRIDE:56E9A52714B2A63AB701	MS2 RT IQR largely duplicates run length and timing, with limited demonstrated QC value.
+RT_MS2_IQRRate	QCPRIDE:DC206A3283881BDD1E18	MS2 RT interquartile density overlaps scan rate and timing summaries.
+IsolationWidth_MS2_FractionLe15	QCPRIDE:C093A5D8209394150C2B	<=15 Th threshold is method-dependent and arbitrary; 15 Th equals both <= and >= bins.
+IsolationWidth_MS2_FractionGe15	QCPRIDE:DE0B3E119A726F58C6C1	>=15 Th threshold is method-dependent and arbitrary; 15 Th equals both <= and >= bins.
+IsolationPrecursorMz_MS2_Count	QCPRIDE:5C5E15B79F1D0F5E5C1F	Number paired with isolation width duplicates eligible-count/coverage bookkeeping.
+ExtentPrecursorIntensity_95over5_MS2	QCPRIDE:BD6FAF3B9FAECC3FF579	95th/5th precursor intensity ratio is an arbitrary-tail proxy; sensitive to low 5th percentile and zeros.
+AcquisitionCycle_MS2Count_ModalFraction	QCPRIDE:F6EA9ED8D480A916D62F	Modal fraction of MS2-per-cycle count duplicates cycle quantiles/mode without established extra quality value.
+AcquisitionCycle_TargetEligibleCount	QCPRIDE:172D73B0C593B7E3F376	Absolute eligible cycle count duplicates eligibility fraction plus cycle count.
+AcquisitionCycle_TargetSetDistinctCount	QCPRIDE:3DAD05F0A9B6418D738F	Distinct target-set count is a newly derived method-fingerprint statistic; needs known-method ground truth.
+AcquisitionCycle_TargetSetModalFraction	QCPRIDE:C1EE0988D7C3648932F1	Modal target-set fraction is method fingerprint; benchmark reliability and utility vs simpler widths/targets.
+AcquisitionCycle_TargetOrderDistinctCount	QCPRIDE:971C73C2545A365A4D7E	Ordered target-sequence cardinality is sensitive to vendor encoding and cycle segmentation.
+AcquisitionCycle_TargetOrderModalFraction	QCPRIDE:4A5FB670C1ACFB1FBDB2	Modal target-order fraction is experimental; assess robustness under staggered and variable-window DIA.
+ChargeMin	QCPRIDE:87C7AAEB9CFD9A6651E1	Charge minimum duplicates the charge histogram and is highly sensitive to one outlier.
+ChargeMax	QCPRIDE:7BEF7C9E6BFC65BFAB6D	Charge maximum duplicates histogram and is sensitive to misassigned extreme charges.

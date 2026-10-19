@@ -4,10 +4,8 @@ NumberOfSpectra	core	all	Total spectra	Counts every MS level including empty sca
 NumberOfSpectralPeaks	diagnostic	all	NumberOfSpectralPeaks	See scientific registry definition.
 ChromatographyDuration	core	all	Run time (s)	RT span from spectra, not LC separation chemistry.
 NumberOfChromatograms	diagnostic	chromatograms	NumberOfChromatograms	See scientific registry definition.
-NumberOfChromatogramDataPoints	diagnostic	chromatograms	NumberOfChromatogramDataPoints	See scientific registry definition.
 ChromatogramTypes	diagnostic	chromatograms	ChromatogramTypes	See scientific registry definition.
 ChromatogramRTRange	extended	chromatograms	ChromatogramRTRange	See scientific registry definition.
-BasePeak_All_Max	extended	all	BasePeak_All_Max	See scientific registry definition.
 FAIMS_CV_Values	diagnostic	faims	FAIMS_CV_Values	See scientific registry definition.
 FAIMS_CV_Count	diagnostic	faims	FAIMS_CV_Count	See scientific registry definition.
 FAIMS_CV_Range	diagnostic	faims	FAIMS_CV_Range	See scientific registry definition.
@@ -21,23 +19,17 @@ TIC_MS1_CV	core	ms1	MS1 TIC variability (CV)	Undefined if the mean TIC is zero o
 TIC_MS1_Area	diagnostic	ms1	TIC_MS1_Area	See scientific registry definition.
 TIC_MS1_Area_RTQuantiles	extended	ms1	TIC_MS1_Area_RTQuantiles	See scientific registry definition.
 TIC_MS1_QuartileLogRatios	extended	ms1	TIC_MS1_QuartileLogRatios	See scientific registry definition.
-TIC_MS1_ChangeQuartileLogRatios	extended	ms1	TIC_MS1_ChangeQuartileLogRatios	See scientific registry definition.
 ScanRate_MS1	core	ms1	MS1 scan rate	Scans per minute over the MS1 RT span.
 FastestFrequency_MS1	extended	ms1	FastestFrequency_MS1	See scientific registry definition.
 RT_MS1_Quantiles	extended	ms1	RT_MS1_Quantiles	See scientific registry definition.
 ObservedMzRange_MS1	diagnostic	ms1	ObservedMzRange_MS1	See scientific registry definition.
 ScanWindow_MS1	diagnostic	ms1	ScanWindow_MS1	See scientific registry definition.
 PeakTypes_MS1	diagnostic	ms1	PeakTypes_MS1	See scientific registry definition.
-EstimatedPeakTypes_MS1	extended	ms1	EstimatedPeakTypes_MS1	See scientific registry definition.
 Polarity_MS1	diagnostic	ms1	Polarity_MS1	See scientific registry definition.
 InvalidPeakCount_MS1	diagnostic	ms1	InvalidPeakCount_MS1	See scientific registry definition.
 TIC_MS1_SignalJump10x_Count	diagnostic	ms1	TIC_MS1_SignalJump10x_Count	See scientific registry definition.
 TIC_MS1_SignalFall10x_Count	diagnostic	ms1	TIC_MS1_SignalFall10x_Count	See scientific registry definition.
-RT_MS1_IQR	extended	ms1	RT_MS1_IQR	See scientific registry definition.
-RT_MS1_IQRRate	extended	ms1	RT_MS1_IQRRate	See scientific registry definition.
 AvgCycleTime_MS1	diagnostic	ms1	AvgCycleTime_MS1	See scientific registry definition.
-MedianTIC_in_RT_MS1_IQR	extended	ms1	MedianTIC_in_RT_MS1_IQR	See scientific registry definition.
-TIC_MS1_MedianInHalfRange	diagnostic	ms1	TIC_MS1_MedianInHalfRange	See scientific registry definition.
 RT_TIC_Quantiles	extended	ms1	RT_TIC_Quantiles	See scientific registry definition.
 NumberOfSpectra_MS2	core	ms2	MS2 spectra	Includes scans with no detected peaks.
 RtRange_MS2	diagnostic	ms2	RtRange_MS2	See scientific registry definition.
@@ -49,20 +41,16 @@ TIC_MS2_CV	diagnostic	ms2	TIC_MS2_CV	See scientific registry definition.
 TIC_MS2_Area	diagnostic	ms2	TIC_MS2_Area	See scientific registry definition.
 TIC_MS2_Area_RTQuantiles	extended	ms2	TIC_MS2_Area_RTQuantiles	See scientific registry definition.
 TIC_MS2_QuartileLogRatios	extended	ms2	TIC_MS2_QuartileLogRatios	See scientific registry definition.
-TIC_MS2_ChangeQuartileLogRatios	extended	ms2	TIC_MS2_ChangeQuartileLogRatios	See scientific registry definition.
 ScanRate_MS2	core	ms2	MS2 scan rate	Scans per minute over the MS2 RT span.
 FastestFrequency_MS2	extended	ms2	FastestFrequency_MS2	See scientific registry definition.
 RT_MS2_Quantiles	extended	ms2	RT_MS2_Quantiles	See scientific registry definition.
 ObservedMzRange_MS2	diagnostic	ms2	ObservedMzRange_MS2	See scientific registry definition.
 ScanWindow_MS2	diagnostic	ms2	ScanWindow_MS2	See scientific registry definition.
 PeakTypes_MS2	diagnostic	ms2	PeakTypes_MS2	See scientific registry definition.
-EstimatedPeakTypes_MS2	extended	ms2	EstimatedPeakTypes_MS2	See scientific registry definition.
 Polarity_MS2	diagnostic	ms2	Polarity_MS2	See scientific registry definition.
 InvalidPeakCount_MS2	diagnostic	ms2	InvalidPeakCount_MS2	See scientific registry definition.
 TIC_MS2_SignalJump10x_Count	diagnostic	ms2	TIC_MS2_SignalJump10x_Count	See scientific registry definition.
 TIC_MS2_SignalFall10x_Count	diagnostic	ms2	TIC_MS2_SignalFall10x_Count	See scientific registry definition.
-RT_MS2_IQR	extended	ms2	RT_MS2_IQR	See scientific registry definition.
-RT_MS2_IQRRate	extended	ms2	RT_MS2_IQRRate	See scientific registry definition.
 MzRange_MS2	extended	ms2	MzRange_MS2	See scientific registry definition.
 PrecursorMz_MS2_Median	diagnostic	ms2	PrecursorMz_MS2_Median	See scientific registry definition.
 PrecursorIntensity_MS2_Quantiles	extended	ms2	PrecursorIntensity_MS2_Quantiles	See scientific registry definition.
@@ -74,32 +62,20 @@ IsolationWidth_MS2_Quantiles	diagnostic	ms2	IsolationWidth_MS2_Quantiles	See sci
 IsolationWidth_MS2_Min	extended	ms2	IsolationWidth_MS2_Min	See scientific registry definition.
 IsolationWidth_MS2_Max	extended	ms2	IsolationWidth_MS2_Max	See scientific registry definition.
 IsolationWidth_MS2_Count	diagnostic	ms2	IsolationWidth_MS2_Count	See scientific registry definition.
-IsolationWidth_MS2_FractionLe15	extended	ms2	IsolationWidth_MS2_FractionLe15	See scientific registry definition.
-IsolationWidth_MS2_FractionGe15	extended	ms2	IsolationWidth_MS2_FractionGe15	See scientific registry definition.
-IsolationPrecursorMz_MS2_Count	extended	ms2	IsolationPrecursorMz_MS2_Count	See scientific registry definition.
 IsolationPrecursorMz_MS2_UniqueCount	extended	ms2	IsolationPrecursorMz_MS2_UniqueCount	See scientific registry definition.
 IsolationPrecursorMz_MS2_UniqueFraction	diagnostic	ms2	IsolationPrecursorMz_MS2_UniqueFraction	See scientific registry definition.
 IsolationPrecursorMz_MS2_MaxRepeatFraction	extended	ms2	IsolationPrecursorMz_MS2_MaxRepeatFraction	See scientific registry definition.
 IsolationPrecursorMz_MS2_RepeatedFraction	extended	ms2	IsolationPrecursorMz_MS2_RepeatedFraction	See scientific registry definition.
 MultiplePrecursors_MS2_Count	diagnostic	ms2	MultiplePrecursors_MS2_Count	See scientific registry definition.
-ExtentPrecursorIntensity_95over5_MS2	extended	ms2	ExtentPrecursorIntensity_95over5_MS2	See scientific registry definition.
 MS1_to_MS2_Ratio	core	ms1_ms2	MS1/MS2 scan ratio	Undefined when there are no MS2 scans; not a performance score.
 AcquisitionCycle_Count	diagnostic	cycles	AcquisitionCycle_Count	See scientific registry definition.
 AcquisitionCycle_MS2Count_Quantiles	core	cycles	MS2 scans per acquisition cycle	MS1-delimited cycles only; not applicable to MS1-free targeted runs.
 AcquisitionCycle_MS2Count_Mode	diagnostic	cycles	AcquisitionCycle_MS2Count_Mode	See scientific registry definition.
-AcquisitionCycle_MS2Count_ModalFraction	extended	cycles	AcquisitionCycle_MS2Count_ModalFraction	See scientific registry definition.
 AcquisitionCycle_TargetCoverageFraction	diagnostic	cycles	AcquisitionCycle_TargetCoverageFraction	See scientific registry definition.
-AcquisitionCycle_TargetEligibleCount	extended	cycles	AcquisitionCycle_TargetEligibleCount	See scientific registry definition.
 AcquisitionCycle_TargetEligibleFraction	extended	cycles	AcquisitionCycle_TargetEligibleFraction	See scientific registry definition.
 AcquisitionCycle_UniqueTargetCount_Quantiles	extended	cycles	AcquisitionCycle_UniqueTargetCount_Quantiles	See scientific registry definition.
-AcquisitionCycle_TargetSetDistinctCount	extended	cycles	AcquisitionCycle_TargetSetDistinctCount	See scientific registry definition.
-AcquisitionCycle_TargetSetModalFraction	diagnostic	cycles	AcquisitionCycle_TargetSetModalFraction	See scientific registry definition.
-AcquisitionCycle_TargetOrderDistinctCount	extended	cycles	AcquisitionCycle_TargetOrderDistinctCount	See scientific registry definition.
-AcquisitionCycle_TargetOrderModalFraction	extended	cycles	AcquisitionCycle_TargetOrderModalFraction	See scientific registry definition.
 MS2_PrecursorCharge_Fractions	core	ms2	MS2 precursor charge fractions	Denominator is all MS2 scans; unknown charge is retained.
 ChargeMean	extended	ms2	ChargeMean	See scientific registry definition.
 ChargeMedian	diagnostic	ms2	ChargeMedian	See scientific registry definition.
-ChargeMin	extended	ms2	ChargeMin	See scientific registry definition.
-ChargeMax	extended	ms2	ChargeMax	See scientific registry definition.
 ChargeRatio_3over2	extended	ms2	ChargeRatio_3over2	See scientific registry definition.
 ChargeRatio_4over2	extended	ms2	ChargeRatio_4over2	See scientific registry definition.

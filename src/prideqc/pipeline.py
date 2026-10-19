@@ -80,13 +80,11 @@ class Analyzer:
         reader: SpectrumReader | None = None,
         calculator: QCMetricCalculator | None = None,
         annotator: TechnicalAnnotator | None = None,
-        *,
-        estimate_peak_type: bool = False,
     ) -> None:
         if reader is None:
             from prideqc.readers import PyOpenMSReader
 
-            reader = PyOpenMSReader(estimate_peak_type=estimate_peak_type)
+            reader = PyOpenMSReader()
         self.reader = reader
         self.calculator = calculator or QCMetricCalculator()
         self.annotator = annotator or TechnicalAnnotator()
@@ -127,7 +125,6 @@ class WorkflowOptions:
     tmt_profile_reporter_evidence: bool = False
     estimate_mass_error: bool = False
     estimate_mass_shifts: bool = False
-    estimate_peak_type: bool = False
     converter: str | None = None
     converter_executable: str | None = None
     conversion_timeout: float = 3600
@@ -225,8 +222,7 @@ def _analyze_file(task: tuple[Path, Path, WorkflowOptions]) -> FileOutcome:
 
         reader = PyOpenMSReader(
             estimate_peak_type=(
-                options.estimate_peak_type
-                or options.estimate_mass_error
+                options.estimate_mass_error
                 or options.estimate_mass_shifts
             ),
             native_mass_error=isinstance(mass_error_collector, NativeOpenMSMassErrorCollector),

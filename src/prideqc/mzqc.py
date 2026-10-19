@@ -105,13 +105,8 @@ DEFINITIONS = {
     "NumberOfSpectra": "Total spectrum count over all levels.",
     "NumberOfSpectralPeaks": "Total valid stored peak data points over all levels; not chromatographic features.",
     "NumberOfChromatograms": "Number of stored chromatograms.",
-    "NumberOfChromatogramDataPoints": "Total stored chromatogram array lengths, not chromatographic peaks.",
     "ChromatogramTypes": "Counts grouped by OpenMS ChromatogramType enum value; engine version is recorded.",
     "ChromatogramRTRange": "Minimum and maximum finite chromatogram time, in seconds.",
-    "BasePeak_All_Max": (
-        "Largest valid intensity across all spectra, including MS3 and higher; arbitrary "
-        "intensity units."
-    ),
     "FAIMS_CV_Values": "Distinct finite FAIMS compensation voltages, sorted, in volts; not drift times.",
     "FAIMS_CV_Count": "Number of distinct finite FAIMS compensation voltages.",
     "FAIMS_CV_Range": "Minimum and maximum finite FAIMS compensation voltages, in volts.",
@@ -126,16 +121,9 @@ DEFINITIONS = {
     "AcquisitionCycle_MS2Count_Mode": (
         "Most frequent MS2 scan count per observed MS1-delimited cycle; lower count wins ties."
     ),
-    "AcquisitionCycle_MS2Count_ModalFraction": (
-        "Fraction of observed MS1-delimited cycles having the modal MS2 scan count."
-    ),
     "AcquisitionCycle_TargetCoverageFraction": (
         "Fraction of MS2 scans inside observed MS1-delimited cycles with a finite positive first-"
         "precursor m/z paired with a positive isolation width."
-    ),
-    "AcquisitionCycle_TargetEligibleCount": (
-        "Count of observed MS1-delimited cycles where every MS2 scan has target metadata eligible "
-        "for target-set/order comparison."
     ),
     "AcquisitionCycle_TargetEligibleFraction": (
         "Fraction of observed MS1-delimited cycles eligible for target-set/order comparison."
@@ -144,42 +132,13 @@ DEFINITIONS = {
         "25th, 50th, 75th percentiles of unique first-precursor isolation targets per eligible "
         "cycle after 0.1 Th quantization."
     ),
-    "AcquisitionCycle_TargetSetDistinctCount": (
-        "Number of distinct per-cycle isolation-target sets among eligible cycles after 0.1 Th "
-        "quantization."
-    ),
-    "AcquisitionCycle_TargetSetModalFraction": (
-        "Fraction of eligible cycles whose quantized isolation-target set equals the modal set."
-    ),
-    "AcquisitionCycle_TargetOrderDistinctCount": (
-        "Number of distinct ordered per-cycle isolation-target sequences among eligible cycles "
-        "after 0.1 Th quantization."
-    ),
-    "AcquisitionCycle_TargetOrderModalFraction": (
-        "Fraction of eligible cycles whose quantized ordered isolation-target sequence equals the "
-        "modal sequence."
-    ),
     "AvgCycleTime_MS1": "Mean strictly positive adjacent sorted MS1 RT differences, in seconds.",
-    "MedianTIC_in_RT_MS1_IQR": (
-        "Median TIC in middle two scan-index quartile groups (recycle-and-sort assignment), "
-        "MS1. ID-free proxy; not an identified-peptide metric."
-    ),
-    "TIC_MS1_MedianInHalfRange": (
-        "Median TIC in the shortest window containing ceil(n/2) finite-RT MS1 scans; first "
-        "window wins ties. ID-free proxy."
-    ),
-    "ExtentPrecursorIntensity_95over5_MS2": (
-        "95th/5th percentile ratio of positive recorded first-precursor MS2 intensities; "
-        "ID-free proxy, no fragment-TIC fallback."
-    ),
     "MS2_PrecursorCharge_Fractions": (
         "Counts and fractions of first-precursor charges, denominator all MS2 scans; missing "
         "or nonpositive charge is unknown."
     ),
     "ChargeMean": "Mean positive first-precursor MS2 charge; unknown charges excluded.",
     "ChargeMedian": "Median positive first-precursor MS2 charge; unknown charges excluded.",
-    "ChargeMin": "Minimum positive first-precursor MS2 charge.",
-    "ChargeMax": "Maximum positive first-precursor MS2 charge.",
     "ChargeRatio_3over2": (
         "Count of MS2 charge 3 divided by charge 2; unavailable unless both are present (rawQC "
         "convention)."
@@ -208,24 +167,14 @@ LEVEL_DEFINITIONS = {
         "times seconds, MS{n}."
     ),
     "TIC_MS{n}_QuartileLogRatios": "Natural logs of TIC Q2/Q1, Q3/Q2, Q4/Q3 (Q4=max), MS{n}.",
-    "TIC_MS{n}_ChangeQuartileLogRatios": "Natural logs of absolute adjacent TIC change Q2/Q1, Q3/Q2, Q4/Q3, MS{n}.",
     "ScanRate_MS{n}": "Count of finite-RT scans divided by that level's RT span, in scans per minute, MS{n}.",
     "FastestFrequency_MS{n}": "Maximum scan count in a closed 60-second window divided by 60, in Hz, MS{n}.",
     "RT_MS{n}_Quantiles": "Four scan-RT quartile interval fractions of that level's RT span, MS{n}.",
-    "RT_MS{n}_IQR": "75th minus 25th percentile of finite retention times, in seconds, MS{n}.",
-    "RT_MS{n}_IQRRate": (
-        "Count of finite-RT scans in the closed RT interquartile interval divided by its width "
-        "in seconds, MS{n}; ID-free proxy."
-    ),
     "ObservedMzRange_MS{n}": (
         "Min/max valid peak m/z; this is an observed range, not the instrument scan window, MS{n}."
     ),
     "ScanWindow_MS{n}": "Envelope of recorded scan-window bounds in Th (m/z), MS{n}.",
     "PeakTypes_MS{n}": "Counts of centroid, profile and unknown scan representations, MS{n}.",
-    "EstimatedPeakTypes_MS{n}": (
-        "Optional OpenMS PeakTypeEstimator counts for scans with more than ten peaks, MS{n}; "
-        "empty if estimation was not requested or eligible."
-    ),
     "Polarity_MS{n}": "Counts by recorded polarity, including unknown, MS{n}.",
     "InvalidPeakCount_MS{n}": (
         "Count of excluded peaks with non-finite/nonpositive m/z or non-finite/negative "
@@ -253,9 +202,6 @@ LEVEL_DEFINITIONS = {
     "IsolationWidth_MS{n}_Min": "Minimum positive first-precursor isolation width in Th (m/z), MS{n}.",
     "IsolationWidth_MS{n}_Max": "Maximum positive first-precursor isolation width in Th (m/z), MS{n}.",
     "IsolationWidth_MS{n}_Count": "Count of first-precursor isolation widths with a finite positive value, MS{n}.",
-    "IsolationWidth_MS{n}_FractionLe15": "Fraction of recorded positive first-precursor isolation widths <=15 Th (m/z), MS{n}.",
-    "IsolationWidth_MS{n}_FractionGe15": "Fraction of recorded positive first-precursor isolation widths >=15 Th (m/z), MS{n}.",
-    "IsolationPrecursorMz_MS{n}_Count": "Count of finite positive first-precursor m/z values paired with positive isolation widths, MS{n}.",
     "IsolationPrecursorMz_MS{n}_UniqueCount": "Count of unique first-precursor m/z values after rounding to 0.1 Th, MS{n}.",
     "IsolationPrecursorMz_MS{n}_UniqueFraction": "Unique first-precursor m/z target count divided by paired isolation-width observations, after 0.1 Th rounding, MS{n}.",
     "IsolationPrecursorMz_MS{n}_MaxRepeatFraction": "Largest fraction of paired isolation-width observations sharing one rounded (0.1 Th) first-precursor m/z target, MS{n}.",
@@ -446,7 +392,7 @@ def definition(metric: Metric) -> MetricDefinition:
         "ChromatogramTypes",
         "MS2_PrecursorCharge_Fractions",
     } or metric.key.startswith(
-        ("PeakTypes_", "EstimatedPeakTypes_", "Polarity_"),
+        ("PeakTypes_", "Polarity_"),
     ):
         shape = "table"
     elif metric.key == "FAIMS_CV_Values" or any(
