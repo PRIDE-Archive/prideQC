@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 
 project = "prideQC"
@@ -34,6 +35,8 @@ exclude_patterns = [
     # excluded from the public end-user documentation site.
     "codon-pride-accessions.md",
     "codon-pride-file-array.md",
+    # Local-only PRIDE infrastructure instructions are not part of public docs.
+    "nextflow-codon.md",
     "development-quality.md",
     "hpc.md",
     "mass-error-historical-comparison.md",
@@ -49,7 +52,9 @@ html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 html_theme_options = {
     "source_repository": "https://github.com/PRIDE-Archive/prideQC/",
-    "source_branch": "main",
+    "source_branch": (
+        "dev" if os.environ.get("READTHEDOCS_VERSION") == "dev" else "main"
+    ),
     "source_directory": "docs/",
     "footer_icons": [],
     "top_of_page_buttons": ["view"],

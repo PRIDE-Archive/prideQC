@@ -103,6 +103,12 @@ The first task is always primary. Metadata refinement is downstream of the measu
 :::
 ::::
 
+## Additional technical documentation
+
+- [Accession-level mzQC consolidation](study-mzqc-merge.md)
+- [TMT reporter-ion evidence](tmt-reporter-evidence.md)
+- [Experimental TMT profile-spectrum evidence](tmt-profile-reporter-evidence.md)
+
 ## Documentation map
 
 ```{toctree}
@@ -116,6 +122,9 @@ measurement-evidence
 reporting
 sdrf-refinement
 cli-reference
+study-mzqc-merge
+tmt-reporter-evidence
+tmt-profile-reporter-evidence
 ```
 
 ## External resources
