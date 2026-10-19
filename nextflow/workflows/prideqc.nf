@@ -2,8 +2,7 @@
 nextflow.enable.dsl = 2
 
 include { PRIDEQC_MANIFEST } from '../modules/local/manifest/main'
-include { PRIDEQC_PREPARE }  from '../modules/local/prepare/main'
-include { PRIDEQC_ANALYZE }  from '../modules/local/analyze/main'
+include { PRIDEQC_SOURCE_QC } from '../modules/local/source_qc/main'
 include { PRIDEQC_FINALIZE } from '../modules/local/finalize/main'
 
 workflow PRIDEQC_WORKFLOW {
@@ -35,33 +34,30 @@ workflow PRIDEQC_WORKFLOW {
         tuple(record.accession, record.expected_runs as Integer,
               record.task_id.toString(), task_file)
     }
-    PRIDEQC_PREPARE(archive_tasks,
+    // A single Slurm scratch task downloads, expands and analyzes one logical
+    // source run. Multi-run archives emit a failure receipt in this pilot lane.
+    // Only QC outputs/receipts, never extracted RAW, travel between processes.
+    PRIDEQC_SOURCE_QC(archive_tasks,
+        file("${projectDir}/bin/source_qc.py"),
         file("${projectDir}/bin/prepare_archive.py"),
-        file("${projectDir}/bin/archive_units.py"))
+        file("${projectDir}/bin/archive_units.py"),
+        file("${projectDir}/bin/analyze_unit.py"))
 
-    // Split each archive into one independent Slurm QC task per discovered run.
-    def logical_units = PRIDEQC_PREPARE.out.units.flatMap { accession, _expected_archives, _task_id, unit_dirs, _prepare_status ->
-        def units = unit_dirs instanceof List ? unit_dirs : [unit_dirs]
-        units.collect { unit -> tuple(accession, unit) }
+    def units = PRIDEQC_SOURCE_QC.out.completed.flatMap { accession, _expected_archives, _task_id, unit_dirs, _status ->
+        def results = unit_dirs instanceof List ? unit_dirs : [unit_dirs]
+        results.collect { result_dir -> tuple(accession, result_dir) }
     }
-    PRIDEQC_ANALYZE(logical_units, file("${projectDir}/bin/analyze_unit.py"))
-
-    // Dynamic accession barrier: sum discovered units only after all expected
-    // archive tasks finished. Failure sentinels still count, so nothing vanishes.
-    def expected_counts = PRIDEQC_PREPARE.out.units
-        .map { accession, expected_archives, _task_id, unit_dirs, _prepare_status ->
-            def units = unit_dirs instanceof List ? unit_dirs : [unit_dirs]
-            tuple(groupKey(accession, expected_archives), units.size())
+    def expected_counts = PRIDEQC_SOURCE_QC.out.completed
+        .map { accession, expected_archives, _task_id, unit_dirs, _status ->
+            def results = unit_dirs instanceof List ? unit_dirs : [unit_dirs]
+            tuple(groupKey(accession, expected_archives), results.size())
         }
         .groupTuple()
         .map { key, counts -> tuple(key.getGroupTarget(), counts.sum() as Integer) }
-
-    // Join each run receipt to the accession's actual discovered-run count.
-    // Nextflow groups a study as soon as that many receipts have arrived.
-    def grouped = PRIDEQC_ANALYZE.out.unit_result
+    def grouped = units
         .combine(expected_counts, by: 0)
-        .map { accession, unit_result, expected_units ->
-            tuple(groupKey(accession, expected_units), unit_result)
+        .map { accession, result_dir, expected_units ->
+            tuple(groupKey(accession, expected_units), result_dir)
         }
         .groupTuple()
         .map { key, run_dirs ->

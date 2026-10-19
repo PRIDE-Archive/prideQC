@@ -13,6 +13,7 @@ process PRIDEQC_FINALIZE {
     script:
     """
     python3 ${finalizer} --accession ${accession} --expected-units ${expected_units} \
-      --root runs --outdir final
+      --root runs --outdir final \
+      ${params.allow_complete_study ? '--verified-complete-inventory' : ''}
     """
 }

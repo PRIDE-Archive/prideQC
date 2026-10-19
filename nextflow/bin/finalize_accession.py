@@ -20,7 +20,7 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def finalize(accession: str, expected_units: int, root: Path, outdir: Path) -> dict:
+def finalize(accession: str, expected_units: int, root: Path, outdir: Path, *, verified_complete_inventory: bool = False) -> dict:
     if expected_units < 1:
         raise ValueError("expected_units must be positive")
     if outdir.exists() and any(outdir.iterdir()):
@@ -64,7 +64,7 @@ def finalize(accession: str, expected_units: int, root: Path, outdir: Path) -> d
         writer.writeheader()
         for item, _ in results:
             writer.writerow({key: item.get(key, "") for key in columns})
-    if complete:
+    if complete and verified_complete_inventory:
         source = outdir / "_merge_inputs"
         source.mkdir()
         try:
@@ -99,8 +99,11 @@ def finalize(accession: str, expected_units: int, root: Path, outdir: Path) -> d
             shutil.rmtree(outdir / "_study", ignore_errors=True)
         finally:
             shutil.rmtree(source, ignore_errors=True)
+    state = "incomplete" if not complete else ("complete" if verified_complete_inventory else "partial")
     summary = {"schema_version": 2, "accession": accession,
-               "status": "complete" if complete else "incomplete",
+               "status": state,
+               "inventory_scope": "operator_verified_complete" if verified_complete_inventory else "pilot_subset_unverified",
+               "study_merge_performed": state == "complete",
                "expected_logical_runs": expected_units,
                "observed_receipts": len(results),
                "successful_runs": status_counts.get("success", 0),
@@ -118,8 +121,10 @@ def main() -> None:
     ap.add_argument("--expected-units", type=int, required=True)
     ap.add_argument("--root", type=Path, required=True)
     ap.add_argument("--outdir", type=Path, required=True)
+    ap.add_argument("--verified-complete-inventory", action="store_true")
     args = ap.parse_args()
-    print(json.dumps(finalize(args.accession, args.expected_units, args.root, args.outdir), sort_keys=True))
+    print(json.dumps(finalize(args.accession, args.expected_units, args.root, args.outdir,
+                              verified_complete_inventory=args.verified_complete_inventory), sort_keys=True))
 
 
 if __name__ == "__main__":

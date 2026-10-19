@@ -4,6 +4,25 @@ Entry point: `main.nf`; version 2 adapters under `bin/` and modules under
 `modules/local/`. Requires a pinned SIF with prideqc + pridepy, Nextflow DSL2,
 and a frozen **file-task** and **accession-report** manifest.
 
+## October 19 safe first-flight lane (default)
+
+`PRIDEQC_SOURCE_QC` runs download, extraction and analysis **inside the same
+Slurm task scratch directory**. It accepts exactly **one logical RAW/mzML run
+per source**, records a failure sentinel for a multi-run archive, and stages
+out only per-run `result.json`, logs, `.mzQC`, `.obo`, and preparation status.
+It does **not** route RAW directories via Nextflow's persistent work dir.
+
+The default `--allow_complete_study false` always writes an accession
+`_audit/accession-status.json` with `status=partial` for an otherwise
+successful pilot, and **never** publishes a study `<PXD>.mzQC`.
+Only an externally verified full-inventory run may opt into
+`--allow_complete_study true`; this option is an **operator assertion**, not
+independent proof of PRIDE-wide file completeness. The old separately
+staged PREPARE/ANALYZE modules remain in source for historical reference but
+are **not invoked** by the pilot workflow. They must not be re-enabled
+without a RAW-free handoff design. Multi-run bundles and production
+per-logical-run scatter require a separate architecture milestone.
+
 ## Pipeline
 
 1. `PRIDEQC_MANIFEST`: fail-closed validation of frozen source-archive tasks.
