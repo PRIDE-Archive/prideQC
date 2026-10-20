@@ -53,6 +53,8 @@ class ScratchPilotTests(unittest.TestCase):
         with patch.object(analyze_unit.subprocess, "run", side_effect=mocked_analysis):
             result = self._run(archive)
         self.assertEqual(result["status"], "success")
+        self.assertEqual(result["requested_estimators"], {"mass_error": False,
+                                                         "mass_shifts": False})
         self.assertFalse((self.root / "node-local-raw").exists())
         staged = list((self.root / "ready").rglob("*"))
         self.assertFalse(any(p.name.lower().endswith((".raw", ".mzml", ".mzml.gz")) for p in staged))

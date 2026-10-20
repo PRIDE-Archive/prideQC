@@ -57,6 +57,20 @@ def run(task_file: Path, protocol: str, scratch_dir: Path, outdir: Path,
         unit_id = json.loads((unit / "unit.json").read_text(encoding="utf-8"))["unit_id"]
         result = analyze(unit, ready_units / unit_id, mass_error=mass_error,
                          mass_shifts=mass_shifts)
+        # Record the requested scientific estimators and the provenance of a
+        # curated primary representation even if the actual reader/QC failed.
+        # These are intent/provenance markers, NOT evidence that metrics passed.
+        task = json.loads(task_file.read_text(encoding="utf-8"))
+        result["requested_estimators"] = {"mass_error": bool(mass_error),
+                                          "mass_shifts": bool(mass_shifts)}
+        if task.get("representation_policy"):
+            result["source_representation"] = {
+                "logical_run_id": task.get("logical_run_id"),
+                "policy": task["representation_policy"],
+                "inventory_sha256": task.get("representation_inventory_sha256"),
+            }
+        (ready_units / unit_id / "result.json").write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         (outdir / "prepare-status.json").write_text(
             json.dumps(status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return result

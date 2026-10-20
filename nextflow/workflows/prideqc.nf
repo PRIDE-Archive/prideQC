@@ -9,6 +9,12 @@ workflow PRIDEQC_WORKFLOW {
     if (!params.input || !params.report_manifest || !params.outdir || !params.sif) {
         error 'Require --input (file manifest), --report_manifest, --outdir and --sif'
     }
+    // The current pilot cannot independently prove that an entire accession
+    // inventory is represented, particularly with vendor/mzML alternatives.
+    // A CLI/operator Boolean assertion must never enable study publication.
+    if (params.allow_complete_study) {
+        error 'Full-study merging is disabled until a verified inventory attestation gate is implemented'
+    }
     if (!(params.protocol in ['ftp','aspera','s3','globus','fire'])) {
         error "Invalid --protocol: ${params.protocol}"
     }

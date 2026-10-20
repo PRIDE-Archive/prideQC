@@ -47,6 +47,10 @@ def analyze(unit_dir: Path, output: Path, *, mass_error: bool = False,
                 result["failure_stage"] = "prideqc_analysis"
                 result["error_type"] = "PrideqcNonzeroExit"
                 result["exit_code"] = proc.returncode
+                # Failure triage only: a .raw suffix does not prove Thermo
+                # content, and a reader-open error does not prove corruption.
+                if "Thermo RAW reader: Could not open RAW file" in proc.stderr:
+                    result["reader_failure_kind"] = "thermo_raw_open_error_unclassified"
             else:
                 manifest = json.loads((qc / "manifest.json").read_text())
                 records = manifest.get("files", [])

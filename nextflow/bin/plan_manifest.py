@@ -14,6 +14,8 @@ ACCESSION = re.compile(r"PXD[0-9]{6,}$")
 # An explicit, narrow v1 name policy. No paths, traversal, shell syntax or whitespace.
 FILENAME = re.compile(r"[A-Za-z0-9_.+\-]+$")
 SUPPORTED = (".raw", ".mzml", ".mzml.gz", ".zip", ".tar.gz", ".tgz", ".d", ".raw.gz")
+MIXED_RUN_ID = re.compile(r"[A-Za-z0-9_.+\-]{1,128}$")
+HEX_SHA256 = re.compile(r"[0-9a-f]{64}$")
 
 
 def read_tsv(path: Path, required: set[str]) -> list[dict[str, str]]:
@@ -40,6 +42,9 @@ def prepare(file_manifest: Path, report_manifest: Path, output: Path, accessions
     by_accession: dict[str, list[dict[str, str]]] = defaultdict(list)
     task_ids: set[str] = set()
     names_by_pxd: dict[str, set[str]] = defaultdict(set)
+    representations_by_pxd: dict[str, set[str]] = defaultdict(set)
+    run_ids_by_pxd: dict[str, set[str]] = defaultdict(set)
+    stems_by_pxd: dict[str, set[str]] = defaultdict(set)
     for row in selected:
         pxd = row["pxd_accession"].upper()
         task_id = row["task_id"].strip()
@@ -61,6 +66,15 @@ def prepare(file_manifest: Path, report_manifest: Path, output: Path, accessions
         if name.casefold() in names_by_pxd[pxd]:
             raise ValueError(f"Duplicate filename for {pxd}: {name}")
         names_by_pxd[pxd].add(name.casefold())
+        lower = name.casefold()
+        suffix = next((s for s in (".mzml.gz", ".raw.gz", ".mzml", ".raw") if lower.endswith(s)), None)
+        if suffix:
+            kind = "mzml" if suffix.startswith(".mzml") else "native_raw"
+            representations_by_pxd[pxd].add(kind)
+            stem = lower[:-len(suffix)]
+            if stem in stems_by_pxd[pxd]:
+                raise ValueError(f"Duplicate or ambiguous RAW/mzML representations: {pxd}/{stem}")
+            stems_by_pxd[pxd].add(stem)
         # v1 is intentionally metadata-only. SDRF mappings need a separate, tested lane.
         if (
             any(
@@ -70,6 +84,25 @@ def prepare(file_manifest: Path, report_manifest: Path, output: Path, accessions
         ):
             raise ValueError(f"Task {task_id}: SDRF mapping not supported in v1 Nextflow pilot")
         by_accession[pxd].append(row)
+    # Different original vendor files and converted mzMLs in the same accession
+    # can represent the same acquisition. Require provenance from a reviewed
+    # representation-selection inventory before allowing a mixed-format plan.
+    for pxd, kinds in representations_by_pxd.items():
+        if kinds == {"mzml", "native_raw"}:
+            inventories = set()
+            for row in by_accession[pxd]:
+                run_id = row.get("logical_run_id", "").strip()
+                proof = row.get("representation_inventory_sha256", "").strip()
+                if (row.get("representation_policy", "") != "curated_single_primary_v1"
+                        or not MIXED_RUN_ID.fullmatch(run_id)
+                        or not HEX_SHA256.fullmatch(proof)):
+                    raise ValueError(f"Mixed vendor/mzML project needs a curated manifest: {pxd}")
+                if run_id in run_ids_by_pxd[pxd]:
+                    raise ValueError(f"Duplicate logical MS acquisition: {pxd}/{run_id}")
+                run_ids_by_pxd[pxd].add(run_id)
+                inventories.add(proof)
+            if len(inventories) != 1:
+                raise ValueError(f"Inconsistent representation-inventory provenance: {pxd}")
     expected: dict[str, int] = {}
     report_ids: set[str] = set()
     for row in reports:
@@ -109,6 +142,9 @@ def prepare(file_manifest: Path, report_manifest: Path, output: Path, accessions
                 "archive_file": row["archive_file"],
                 "expected_runs": expected[pxd],  # number of source archive tasks, not logical MS runs
                 "source_manifest": file_manifest.name,
+                "logical_run_id": row.get("logical_run_id", "").strip(),
+                "representation_policy": row.get("representation_policy", "").strip(),
+                "representation_inventory_sha256": row.get("representation_inventory_sha256", "").strip(),
             }
             (tasks / f"{pxd}__{int(row['task_id']):09d}.json").write_text(
                 json.dumps(entry, sort_keys=True, indent=2) + "\n", encoding="utf-8"
