@@ -5,12 +5,53 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+class EmptySpectrumRun(ValueError):
+    """The reader returned no MS spectra; a QC receipt must not claim success."""
+
+
+def require_observed_spectra(path: Path) -> int:
+    """Check authoritative mzQC scan counts, including MS3+ acquisitions.
+
+    Uses the PSI-MS MS1/MS2 accessions and PRIDEQC local names for higher
+    levels. Do not infer scan counts from an mzQC metric count or file size.
+    """
+    document = json.loads(path.read_text(encoding="utf-8"))
+    run_qualities = document.get("mzQC", {}).get("runQualities")
+    if not isinstance(run_qualities, list) or len(run_qualities) != 1:
+        raise ValueError("Expected exactly one mzQC runQuality")
+    quality_metrics = run_qualities[0].get("qualityMetrics")
+    if not isinstance(quality_metrics, list):
+        raise ValueError("Missing mzQC qualityMetrics")
+    counts: dict[int, int] = {}
+    for item in quality_metrics:
+        if not isinstance(item, dict):
+            raise ValueError("Malformed mzQC qualityMetric")
+        accession, name = item.get("accession"), item.get("name")
+        level = {"MS:4000059": 1, "MS:4000060": 2}.get(accession)
+        match = re.fullmatch(r"NumberOfSpectra_MS([3-9][0-9]*)", name or "") if isinstance(name, str) else None
+        if level is None and match:
+            level = int(match.group(1))
+        if level is None:
+            continue
+        value = item.get("value")
+        if (level in counts or type(value) is not int or value < 0):
+            raise ValueError(f"Invalid or duplicate MS{level} spectrum count")
+        counts[level] = value
+    if 1 not in counts or 2 not in counts:
+        raise ValueError("Missing mzQC MS1/MS2 spectrum counts")
+    total = sum(counts.values())
+    if total == 0:
+        raise EmptySpectrumRun("No MS spectra; zero-scan mzQC is diagnostic, not a successful QC run")
+    return total
 
 
 def analyze(unit_dir: Path, output: Path, *, mass_error: bool = False,
@@ -59,6 +100,10 @@ def analyze(unit_dir: Path, output: Path, *, mass_error: bool = False,
                         or records[0].get("error") or len(files) != 1):
                     raise ValueError("QC output integrity or per-run status check failed")
                 mzqc = files[0]
+                # A successful CLI exit can still contain zero read spectra.
+                # Fail closed so the accession finalizer cannot count an empty
+                # acquisition as a scientifically usable successful run.
+                require_observed_spectra(mzqc)
                 obo = mzqc.with_suffix(".obo")
                 if not obo.is_file():
                     raise ValueError("Missing per-run OBO")

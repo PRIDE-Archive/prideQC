@@ -46,7 +46,12 @@ class ScratchPilotTests(unittest.TestCase):
             output = Path(cmd[cmd.index("-o") + 1])
             output.mkdir()
             (output / "manifest.json").write_text(json.dumps({"files": [{"status": "success"}]}))
-            (output / "one.mzML.mzQC").write_text('{"mzQC": {}}')
+            (output / "one.mzML.mzQC").write_text(json.dumps({"mzQC": {
+                "version": "1.0.0", "runQualities": [{"qualityMetrics": [
+                    {"accession": "MS:4000059", "name": "number of MS1 spectra", "value": 1},
+                    {"accession": "MS:4000060", "name": "number of MS2 spectra", "value": 2},
+                ]}]
+            }}))
             (output / "one.mzML.obo").write_text("format-version: 1.2\n")
             return SimpleNamespace(returncode=0, stdout="QC success", stderr="")
 
@@ -64,6 +69,51 @@ class ScratchPilotTests(unittest.TestCase):
         self.assertEqual(status["status"], "partial")
         self.assertEqual(status["study_merge_performed"], False)
         self.assertFalse((self.root / "final" / "_study").exists())
+
+    def test_zero_spectra_qc_is_not_success_even_with_zero_exit(self):
+        archive = self.root / "empty.mzML"
+        archive.write_bytes(b"stub empty mzML")
+
+        def mocked_analysis(cmd, **_kwargs):
+            output = Path(cmd[cmd.index("-o") + 1])
+            output.mkdir()
+            (output / "manifest.json").write_text(json.dumps({"files": [{"status": "success"}]}))
+            (output / "empty.mzML.mzQC").write_text(json.dumps({"mzQC": {
+                "runQualities": [{"qualityMetrics": [
+                    {"accession": "MS:4000059", "name": "number of MS1 spectra", "value": 0},
+                    {"accession": "MS:4000060", "name": "number of MS2 spectra", "value": 0},
+                ]}]
+            }}))
+            (output / "empty.mzML.obo").write_text("format-version: 1.2\n")
+            return SimpleNamespace(returncode=0, stdout="QC ran", stderr="")
+
+        with patch.object(analyze_unit.subprocess, "run", side_effect=mocked_analysis):
+            result = self._run(archive)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error_type"], "EmptySpectrumRun")
+        self.assertEqual(result["failure_stage"], "qc_validation")
+        self.assertFalse((self.root / "node-local-raw").exists())
+        finalized = finalize_accession.finalize("PXD041271", 1, self.root / "ready" / "units", self.root / "final")
+        self.assertEqual(finalized["status"], "incomplete")
+        self.assertEqual(finalized["successful_runs"], 0)
+
+    def test_ms3_only_is_not_rejected_as_empty(self):
+        mzqc = self.root / "ms3.mzQC"
+        mzqc.write_text(json.dumps({"mzQC": {"runQualities": [{"qualityMetrics": [
+            {"accession": "MS:4000059", "name": "number of MS1 spectra", "value": 0},
+            {"accession": "MS:4000060", "name": "number of MS2 spectra", "value": 0},
+            {"accession": "QCPRIDE:EXAMPLE", "name": "NumberOfSpectra_MS3", "value": 4},
+        ]}]}}))
+        self.assertEqual(analyze_unit.require_observed_spectra(mzqc), 4)
+
+    def test_bad_spectrum_count_is_rejected(self):
+        mzqc = self.root / "invalid.mzQC"
+        mzqc.write_text(json.dumps({"mzQC": {"runQualities": [{"qualityMetrics": [
+            {"accession": "MS:4000059", "name": "number of MS1 spectra", "value": -1},
+            {"accession": "MS:4000060", "name": "number of MS2 spectra", "value": 4},
+        ]}]}}))
+        with self.assertRaisesRegex(ValueError, "Invalid or duplicate"):
+            analyze_unit.require_observed_spectra(mzqc)
 
     def test_multi_run_archive_fails_closed_without_qc_or_raw(self):
         archive = self.root / "many.zip"
