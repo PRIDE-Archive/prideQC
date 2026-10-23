@@ -17,7 +17,8 @@ from prepare_archive import prepare
 
 def run(task_file: Path, protocol: str, scratch_dir: Path, outdir: Path,
         *, source: Path | None = None, checksum: bool = True,
-        mass_error: bool = False, mass_shifts: bool = False) -> dict:
+        mass_error: bool = False, mass_shifts: bool = False,
+        tmt_reporter: bool = False, tmt_profile: bool = False) -> dict:
     if scratch_dir.exists() or (outdir.exists() and any(outdir.iterdir())):
         raise ValueError("Refusing existing scratch or nonempty output directory")
     if scratch_dir.resolve().parent != Path.cwd().resolve():
@@ -56,13 +57,16 @@ def run(task_file: Path, protocol: str, scratch_dir: Path, outdir: Path,
             unit = units[0]
         unit_id = json.loads((unit / "unit.json").read_text(encoding="utf-8"))["unit_id"]
         result = analyze(unit, ready_units / unit_id, mass_error=mass_error,
-                         mass_shifts=mass_shifts)
+                         mass_shifts=mass_shifts, tmt_reporter=tmt_reporter,
+                         tmt_profile=tmt_profile)
         # Record the requested scientific estimators and the provenance of a
         # curated primary representation even if the actual reader/QC failed.
         # These are intent/provenance markers, NOT evidence that metrics passed.
         task = json.loads(task_file.read_text(encoding="utf-8"))
         result["requested_estimators"] = {"mass_error": bool(mass_error),
-                                          "mass_shifts": bool(mass_shifts)}
+                                          "mass_shifts": bool(mass_shifts),
+                                          "tmt_reporter_evidence": bool(tmt_reporter),
+                                          "tmt_profile_reporter_evidence": bool(tmt_profile)}
         if task.get("representation_policy"):
             result["source_representation"] = {
                 "logical_run_id": task.get("logical_run_id"),
@@ -90,11 +94,15 @@ def main() -> None:
     ap.add_argument("--no-checksum-check", action="store_true")
     ap.add_argument("--estimate-mass-error", action="store_true")
     ap.add_argument("--estimate-mass-shifts", action="store_true")
+    ap.add_argument("--tmt-reporter-evidence", action="store_true")
+    ap.add_argument("--tmt-profile-reporter-evidence", action="store_true")
     args = ap.parse_args()
     print(json.dumps(run(args.task, args.protocol, args.scratch_dir, args.outdir,
                          source=args.local_source, checksum=not args.no_checksum_check,
                          mass_error=args.estimate_mass_error,
-                         mass_shifts=args.estimate_mass_shifts), sort_keys=True))
+                         mass_shifts=args.estimate_mass_shifts,
+                         tmt_reporter=args.tmt_reporter_evidence,
+                         tmt_profile=args.tmt_profile_reporter_evidence), sort_keys=True))
 
 
 if __name__ == "__main__":

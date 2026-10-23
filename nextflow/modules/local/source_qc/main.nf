@@ -28,6 +28,8 @@ process PRIDEQC_SOURCE_QC {
         --scratch-dir node-local-raw --outdir ready \
         ${params.checksum_check ? '' : '--no-checksum-check'} \
         ${params.estimate_mass_error ? '--estimate-mass-error' : ''} \
-        ${params.estimate_mass_shifts ? '--estimate-mass-shifts' : ''}
+        ${params.estimate_mass_shifts ? '--estimate-mass-shifts' : ''} \
+        ${params.tmt_reporter_evidence ? '--tmt-reporter-evidence' : ''} \
+        ${params.tmt_profile_reporter_evidence ? '--tmt-profile-reporter-evidence' : ''}
     """
 }

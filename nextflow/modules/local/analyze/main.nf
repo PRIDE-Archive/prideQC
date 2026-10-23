@@ -19,6 +19,8 @@ process PRIDEQC_ANALYZE {
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
     python3 ${analyzer} --unit ${unit_dir} --output result \
       ${params.estimate_mass_error ? '--estimate-mass-error' : ''} \
-      ${params.estimate_mass_shifts ? '--estimate-mass-shifts' : ''}
+      ${params.estimate_mass_shifts ? '--estimate-mass-shifts' : ''} \
+      ${params.tmt_reporter_evidence ? '--tmt-reporter-evidence' : ''} \
+      ${params.tmt_profile_reporter_evidence ? '--tmt-profile-reporter-evidence' : ''}
     """
 }

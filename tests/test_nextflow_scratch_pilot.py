@@ -59,7 +59,9 @@ class ScratchPilotTests(unittest.TestCase):
             result = self._run(archive)
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["requested_estimators"], {"mass_error": False,
-                                                         "mass_shifts": False})
+                                                         "mass_shifts": False,
+                                                         "tmt_reporter_evidence": False,
+                                                         "tmt_profile_reporter_evidence": False})
         self.assertFalse((self.root / "node-local-raw").exists())
         staged = list((self.root / "ready").rglob("*"))
         self.assertFalse(any(p.name.lower().endswith((".raw", ".mzml", ".mzml.gz")) for p in staged))

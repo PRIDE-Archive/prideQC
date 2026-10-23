@@ -55,7 +55,8 @@ def require_observed_spectra(path: Path) -> int:
 
 
 def analyze(unit_dir: Path, output: Path, *, mass_error: bool = False,
-            mass_shifts: bool = False) -> dict:
+            mass_shifts: bool = False, tmt_reporter: bool = False,
+            tmt_profile: bool = False) -> dict:
     unit = json.loads((unit_dir / "unit.json").read_text(encoding="utf-8"))
     if output.exists() and any(output.iterdir()):
         raise ValueError("Refusing nonempty unit result directory")
@@ -80,6 +81,10 @@ def analyze(unit_dir: Path, output: Path, *, mass_error: bool = False,
                 cmd.append("--estimate-mass-error")
             if mass_shifts:
                 cmd.append("--estimate-mass-shifts")
+            if tmt_reporter:
+                cmd.append("--tmt-reporter-evidence")
+            if tmt_profile:
+                cmd.append("--tmt-profile-reporter-evidence")
             proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
             # Keep bounded local logs; do not include full command, credentials, or URLs.
             (output / "prideqc.stdout.log").write_text(proc.stdout[-16000:], encoding="utf-8")
@@ -124,10 +129,14 @@ def main() -> None:
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--estimate-mass-error", action="store_true")
     ap.add_argument("--estimate-mass-shifts", action="store_true")
+    ap.add_argument("--tmt-reporter-evidence", action="store_true")
+    ap.add_argument("--tmt-profile-reporter-evidence", action="store_true")
     args = ap.parse_args()
     print(json.dumps(analyze(args.unit, args.output,
                              mass_error=args.estimate_mass_error,
-                             mass_shifts=args.estimate_mass_shifts), sort_keys=True))
+                             mass_shifts=args.estimate_mass_shifts,
+                             tmt_reporter=args.tmt_reporter_evidence,
+                             tmt_profile=args.tmt_profile_reporter_evidence), sort_keys=True))
 
 
 if __name__ == "__main__":

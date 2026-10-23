@@ -32,6 +32,8 @@ def run(
     checksum: bool,
     mass_error: bool,
     mass_shifts: bool,
+    tmt_reporter: bool = False,
+    tmt_profile: bool = False,
 ) -> None:
     task = json.loads(task_file.read_text(encoding="utf-8"))
     pxd, name = task["accession"], task["archive_file"]
@@ -66,6 +68,10 @@ def run(
         cmd.append("--estimate-mass-error")
     if mass_shifts:
         cmd.append("--estimate-mass-shifts")
+    if tmt_reporter:
+        cmd.append("--tmt-reporter-evidence")
+    if tmt_profile:
+        cmd.append("--tmt-profile-reporter-evidence")
     subprocess.run(cmd, check=True)
     manifest_file = output / "manifest.json"
     if not manifest_file.is_file():
@@ -112,6 +118,8 @@ def main():
     ap.add_argument("--no-checksum-check", action="store_true")
     ap.add_argument("--estimate-mass-error", action="store_true")
     ap.add_argument("--estimate-mass-shifts", action="store_true")
+    ap.add_argument("--tmt-reporter-evidence", action="store_true")
+    ap.add_argument("--tmt-profile-reporter-evidence", action="store_true")
     a = ap.parse_args()
     run(
         a.task,
@@ -121,6 +129,8 @@ def main():
         not a.no_checksum_check,
         a.estimate_mass_error,
         a.estimate_mass_shifts,
+        a.tmt_reporter_evidence,
+        a.tmt_profile_reporter_evidence,
     )
 
 
