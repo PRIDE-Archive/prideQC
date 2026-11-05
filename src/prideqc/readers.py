@@ -199,9 +199,9 @@ def _openms_text(value: Any) -> str | None:
             text = " ".join(p for p in parts if p)
             return text or None
         if callable(get_text):  # DateTime.get() -> "YYYY-MM-DD hh:mm:ss"
-            text = _openms_text(get_text())
+            stamp = _openms_text(get_text())
             # An unset OpenMS DateTime reports the zero timestamp: not a value.
-            return None if text and text.startswith("0000-00-00") else text
+            return None if stamp and stamp.startswith("0000-00-00") else stamp
         return None
     text = str(value).strip()
     return text or None
