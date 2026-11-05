@@ -161,6 +161,12 @@ LEVEL_DEFINITIONS = {
 
 
 ANNOTATION_DESCRIPTIONS = {
+    "ms_level_coverage": (
+        "MS level coverage and not-applicable metrics",
+        "Observed spectrum counts per MS level, absent MS1/MS2 levels, and the level "
+        "metrics that do not apply because the level was not acquired (for example PRM "
+        "or MS2-only runs). Omitted metrics in this list are not measured zeros.",
+    ),
     "ionization": (
         "ionization source CV evidence",
         "Recorded ion source PSI-MS CV terms from instrument configuration; "

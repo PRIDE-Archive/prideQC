@@ -11,7 +11,7 @@ process PRIDEQC_SOURCE_QC {
     publishDir { "${params.outdir}/${accession}/_run_outputs" },
         mode: 'copy', pattern: 'ready/units/*', overwrite: true
     input:
-    tuple val(accession), val(expected_archives), val(task_id), path(task_json)
+    tuple val(accession), val(expected_archives), val(task_id), val(memory_gb), path(task_json)
     path runner
     path prepare_script
     path archive_script

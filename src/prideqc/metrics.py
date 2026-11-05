@@ -310,6 +310,8 @@ class RunSummary:
                 )
         if not self.levels:
             messages.append("No spectra; spectrum-derived quantities are unavailable.")
+        elif 1 not in self.levels:
+            messages.append("MS1: no spectra acquired; MS1 metrics are not applicable.")
         return messages
 
 

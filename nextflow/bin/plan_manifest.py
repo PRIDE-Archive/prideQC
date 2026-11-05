@@ -16,6 +16,30 @@ FILENAME = re.compile(r"[A-Za-z0-9_.+\-]+$")
 SUPPORTED = (".raw", ".mzml", ".mzml.gz", ".zip", ".tar.gz", ".tgz", ".d", ".raw.gz")
 MIXED_RUN_ID = re.compile(r"[A-Za-z0-9_.+\-]{1,128}$")
 HEX_SHA256 = re.compile(r"[0-9a-f]{64}$")
+# Measured Flight6 peak RSS is about 8.7x RAW size (2.61 GB -> 22.6 GB sacct MaxRSS).
+# Upper size bound (bytes, exclusive) -> Slurm memory request in GB.
+MEMORY_TIERS = ((1_000_000_000, 16), (3_000_000_000, 32), (6_000_000_000, 64))
+MEMORY_UNKNOWN_GB = 32
+MEMORY_MAX_GB = 128
+
+
+def memory_tier_gb(size_bytes: int | None) -> int:
+    """Return the first-attempt memory request for a source file size."""
+    if size_bytes is None:
+        return MEMORY_UNKNOWN_GB
+    for bound, gb in MEMORY_TIERS:
+        if size_bytes < bound:
+            return gb
+    return MEMORY_MAX_GB
+
+
+def _size(row: dict[str, str], task_id: str) -> int | None:
+    text = (row.get("file_size_bytes") or "").strip()
+    if not text:
+        return None
+    if not text.isascii() or not text.isdecimal() or int(text) < 1:
+        raise ValueError(f"Task {task_id}: invalid file_size_bytes {text!r}")
+    return int(text)
 
 
 def read_tsv(path: Path, required: set[str]) -> list[dict[str, str]]:
@@ -135,6 +159,7 @@ def prepare(file_manifest: Path, report_manifest: Path, output: Path, accessions
         raise ValueError(f"Output task directory is not empty: {tasks}")
     for pxd in sorted(by_accession):
         for row in sorted(by_accession[pxd], key=lambda x: int(x["task_id"])):
+            size = _size(row, row["task_id"])
             entry = {
                 "schema_version": 1,
                 "task_id": int(row["task_id"]),
@@ -145,6 +170,8 @@ def prepare(file_manifest: Path, report_manifest: Path, output: Path, accessions
                 "logical_run_id": row.get("logical_run_id", "").strip(),
                 "representation_policy": row.get("representation_policy", "").strip(),
                 "representation_inventory_sha256": row.get("representation_inventory_sha256", "").strip(),
+                "file_size_bytes": size,
+                "memory_gb": memory_tier_gb(size),
             }
             (tasks / f"{pxd}__{int(row['task_id']):09d}.json").write_text(
                 json.dumps(entry, sort_keys=True, indent=2) + "\n", encoding="utf-8"

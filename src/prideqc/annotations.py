@@ -159,6 +159,7 @@ class TechnicalAnnotator:
                 "Search tolerances cannot be measured from instrument class or isolation width.",
                 sdrf_column=column,
             ))
+        annotations.append(ms_level_coverage(run))
         return annotations
 
     def _acquisition(self, run: RunSummary) -> list[Annotation]:
@@ -245,6 +246,45 @@ class TechnicalAnnotator:
                 support=support, total=support_total,
             ))
         return annotations
+
+
+def ms_level_coverage(run: RunSummary) -> Annotation:
+    """State which MS levels were acquired and which level metrics do not apply.
+
+    Consumers must not read an absent MS1 metric as a measured zero or a reader
+    defect: targeted PRM and MS2-only runs legitimately have no MS1 scans.
+    """
+
+    counts = {f"MS{level}": run.levels[level].count for level in sorted(run.levels)}
+    absent = [level for level in (1, 2) if not run.levels.get(level)]
+    not_applicable = []
+    for level in absent:
+        not_applicable.extend([
+            f"PeakDensity_MS{level}_Quantiles", f"FastestFrequency_MS{level}",
+            f"RT_MS{level}_Quantiles", f"ObservedMzRange_MS{level}",
+        ])
+        if level == 1:
+            not_applicable.extend(["MedianCycleTime_MS1", "RT_TIC_Quantiles", "MS1_to_MS2_Ratio"])
+        else:
+            not_applicable.extend(["MS1_to_MS2_Ratio", "ChargeMean", "ChargeMedian",
+                                   "ChargeRatio_3over2", "ChargeRatio_4over2"])
+    if 1 in absent and 2 in absent:
+        status = "NO_SPECTRA"
+    elif 1 in absent:
+        status = "MS1_ABSENT"
+    elif 2 in absent:
+        status = "MS2_ABSENT"
+    else:
+        status = "MS1_AND_MS2_PRESENT"
+    return Annotation(
+        "ms_level_coverage",
+        {"status": status, "spectra_per_level": counts,
+         "absent_levels": [f"MS{level}" for level in absent],
+         "not_applicable_metrics": list(dict.fromkeys(not_applicable))},
+        OBSERVED, "spectrum MS-level counts from the reader stream",
+        "Metrics listed as not applicable are omitted from mzQC because the level was "
+        "not acquired; they are not measured zeros and not reader failures.",
+    )
 
 
 def labeling_candidates(evidence: list[Annotation]) -> Annotation | None:

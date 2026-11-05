@@ -177,3 +177,13 @@ class ProductionSafetySourceTests(unittest.TestCase):
         self.assertIn("withName: PRIDEQC_SOURCE_QC", config)
         self.assertIn("maxForks = 2", config)
         self.assertIn("queueSize = 4", config)
+
+    def test_source_qc_memory_is_tiered_by_planner_and_escalates(self):
+        config = (BIN.parent / "conf" / "codon_slurm.config").read_text()
+        module = (BIN.parent / "modules/local/source_qc/main.nf").read_text()
+        workflow = (BIN.parent / "workflows" / "prideqc.nf").read_text()
+        self.assertIn("(memory_gb as Integer) * (1 << (task.attempt - 1)), 128)", config)
+        self.assertIn("val(memory_gb), path(task_json)", module)
+        self.assertIn("(record.memory_gb ?: 32) as Integer, task_file)", workflow)
+        self.assertNotIn("PRIDEQC_ANALYZE", config)
+        self.assertNotIn("PRIDEQC_PREPARE", config)

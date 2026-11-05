@@ -39,6 +39,31 @@ class NextflowManifestTests(unittest.TestCase):
         self.assertEqual(first["expected_runs"], 2)
         self.assertEqual(first["archive_file"], "a.raw")
 
+    def test_memory_tier_from_file_size(self):
+        self.files.write_text(
+            "task_id\tpxd_accession\tarchive_file\tsdrf_path\tneeds_file_map\tfile_size_bytes\n"
+            "506\tPXD041271\ta.raw\t\t0\t999999999\n507\tPXD041271\tb.raw\t\t0\t2614135068\n"
+        )
+        planner.prepare(self.files, self.reports, self.root / "out", set())
+        a = json.loads((self.root / "out/tasks/PXD041271__000000506.json").read_text())
+        b = json.loads((self.root / "out/tasks/PXD041271__000000507.json").read_text())
+        self.assertEqual((a["memory_gb"], b["memory_gb"]), (16, 32))
+        self.assertEqual(b["file_size_bytes"], 2614135068)
+        self.assertEqual(planner.memory_tier_gb(None), 32)
+        self.assertEqual(planner.memory_tier_gb(5_000_000_000), 64)
+        self.assertEqual(planner.memory_tier_gb(9_000_000_000), 128)
+
+    def test_missing_size_column_defaults_to_32gb_and_bad_size_fails(self):
+        planner.prepare(self.files, self.reports, self.root / "out", set())
+        a = json.loads((self.root / "out/tasks/PXD041271__000000506.json").read_text())
+        self.assertEqual((a["file_size_bytes"], a["memory_gb"]), (None, 32))
+        self.files.write_text(
+            "task_id\tpxd_accession\tarchive_file\tsdrf_path\tneeds_file_map\tfile_size_bytes\n"
+            "506\tPXD041271\ta.raw\t\t0\t-5\n507\tPXD041271\tb.raw\t\t0\t10\n"
+        )
+        with self.assertRaisesRegex(ValueError, "invalid file_size_bytes"):
+            planner.prepare(self.files, self.reports, self.root / "out2", set())
+
     def test_wrong_report_count_fails(self):
         self.reports.write_text(self.reports.read_text().replace("\t2\n", "\t3\n"))
         with self.assertRaisesRegex(ValueError, "Count mismatch"):

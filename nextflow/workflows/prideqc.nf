@@ -38,7 +38,7 @@ workflow PRIDEQC_WORKFLOW {
     def archive_tasks = PRIDEQC_MANIFEST.out.tasks.flatten().map { task_file ->
         def record = new groovy.json.JsonSlurper().parse(task_file)
         tuple(record.accession, record.expected_runs as Integer,
-              record.task_id.toString(), task_file)
+              record.task_id.toString(), (record.memory_gb ?: 32) as Integer, task_file)
     }
     // A single Slurm scratch task downloads, expands and analyzes one logical
     // source run. Multi-run archives emit a failure receipt in this pilot lane.
