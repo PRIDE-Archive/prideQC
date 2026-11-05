@@ -218,6 +218,75 @@ class VendorReaderTests(unittest.TestCase):
         self.assertEqual(metadata.instrument_details["model"], "Exploris")
         self.assertEqual(metadata.instruments, [])
 
+    def test_openms_wrapper_objects_never_leak_python_reprs(self):
+        # Flight5 (2026-11-05): pyOpenMS DateTime and Software objects were
+        # written as "<pyopenms... object at 0x...>" into summary/annotations.
+        class DateTime:
+            def __init__(self, text):
+                self.text = text
+
+            def get(self):
+                return self.text
+
+            def __str__(self):
+                return "<pyopenms._pyopenms_datastructures.DateTime object at 0x7f>"
+
+        class Software:
+            def __init__(self, name, version):
+                self.name, self.version = name, version
+
+            def getName(self):
+                return self.name
+
+            def getVersion(self):
+                return self.version
+
+            def __str__(self):
+                return "<pyopenms._pyopenms_kernel.Software object at 0x7f>"
+
+        class Instrument:
+            def __init__(self, software):
+                self.software = software
+
+            def getName(self):
+                return "Orbitrap Fusion"
+
+            def getSoftware(self):
+                return self.software
+
+        class Settings:
+            def __init__(self, stamp, software):
+                self.stamp, self.software = stamp, software
+
+            def getDateTime(self):
+                return self.stamp
+
+            def getInstrument(self):
+                return Instrument(self.software)
+
+        class Experiment:
+            def __init__(self, stamp, software):
+                self.settings = Settings(stamp, software)
+
+            def getExperimentalSettings(self):
+                return self.settings
+
+        metadata = _metadata_from_experiment(
+            Experiment(DateTime("2017-10-04 10:11:12"), Software("Xcalibur", "4.0")),
+            Path("sample.raw"))
+        self.assertEqual(metadata.started_at, "2017-10-04 10:11:12")
+        self.assertEqual(metadata.instrument_details["software"], "Xcalibur 4.0")
+        self.assertEqual(metadata.instrument_details["name"], "Orbitrap Fusion")
+
+        # Unset OpenMS values must be absent, not an empty or repr string.
+        empty = _metadata_from_experiment(
+            Experiment(DateTime(""), Software("", "")), Path("sample.raw"))
+        self.assertIsNone(empty.started_at)
+        self.assertNotIn("software", empty.instrument_details)
+        unset = _metadata_from_experiment(
+            Experiment(DateTime("0000-00-00 00:00:00"), Software("", "")), Path("sample.raw"))
+        self.assertIsNone(unset.started_at)
+
     def test_mzqc_file_format_follows_original_input(self):
         for filename, accession, name in (
             ("sample.mzML", "MS:1000584", "mzML format"),

@@ -177,6 +177,36 @@ def _meta_number(obj: Any, keys: tuple[str, ...]) -> float | None:
     return None
 
 
+def _openms_text(value: Any) -> str | None:
+    """Convert a returned OpenMS value to text without leaking Python reprs.
+
+    pyOpenMS returns wrapper objects (for example ``DateTime`` and
+    ``Software``) whose ``str()`` is ``<pyopenms... object at 0x...>``.
+    Unwrap known wrappers; reject any other non-scalar value.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        value = value.decode(errors="replace")
+    if not isinstance(value, (str, int, float)):
+        get_name = getattr(value, "getName", None)
+        get_text = getattr(value, "get", None)
+        if callable(get_name):  # Software and similar named entities
+            parts = [_openms_text(get_name())]
+            get_version = getattr(value, "getVersion", None)
+            if callable(get_version):
+                parts.append(_openms_text(get_version()))
+            text = " ".join(p for p in parts if p)
+            return text or None
+        if callable(get_text):  # DateTime.get() -> "YYYY-MM-DD hh:mm:ss"
+            text = _openms_text(get_text())
+            # An unset OpenMS DateTime reports the zero timestamp: not a value.
+            return None if text and text.startswith("0000-00-00") else text
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _text_value(obj: Any, names: tuple[str, ...]) -> str | None:
     """Read a string-valued OpenMS property when the binding exposes it."""
     for name in names:
@@ -184,12 +214,9 @@ def _text_value(obj: Any, names: tuple[str, ...]) -> str | None:
         if not callable(getter):
             continue
         try:
-            value = getter()
+            text = _openms_text(getter())
         except (AttributeError, TypeError, RuntimeError):
             continue
-        if isinstance(value, bytes):
-            value = value.decode(errors="replace")
-        text = str(value).strip()
         if text:
             return text
     return None
@@ -214,9 +241,9 @@ def _metadata_from_experiment(experiment: Any, source: Path) -> RunMetadata:
     date_getter = getattr(settings, "getDateTime", None)
     if callable(date_getter):
         try:
-            value = date_getter()
+            value = _openms_text(date_getter())
             if value:
-                metadata.started_at = str(value)
+                metadata.started_at = value
         except (AttributeError, TypeError, RuntimeError):
             pass
 
