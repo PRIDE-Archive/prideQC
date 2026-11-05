@@ -58,10 +58,11 @@ class InventoryTests(unittest.TestCase):
             record("c.wiff"), record("c.wiff.scan"), record("c.mzML"),    # WIFF: policy pending
             record("d.zip"), record("e.mzXML"), record("f.d.zip"),
             record("g.raw.gz"), record("search.mzid.gz"), record("peaks.mgf"),
-            record("bad name.raw"), record("zero.raw", 0),
+            record("bad name.raw"), record("zero.raw", 0), record("x (1).mgf"),
         ]})
-        summary = INV.build(["PXD000001"], api, self.root / "out")
+        summary = INV.build(["PXD000001"], api, self.root / "out", workers=2)
         r = rows(self.root / "out")
+        self.assertEqual(r["x (1).mgf"]["reason"], "SKIP_PEAK_LIST_NOT_A_RUN_REPRESENTATION")
         self.assertEqual(r["a.raw"]["decision"], "QUEUE_NATIVE_RAW")
         self.assertEqual(r["a.raw"]["memory_gb"], "32")
         self.assertEqual(r["a.mzML"]["reason"], "SKIP_MZML_VENDOR_RAW_PREFERRED")

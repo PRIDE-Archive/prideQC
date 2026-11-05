@@ -35,6 +35,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -214,6 +215,8 @@ def decide(project: dict[str, Any], processed: dict[tuple, str]) -> list[dict]:
         done = processed.get((accession, r["file_name"].casefold()))
         if kind not in SPECTRUM_FORMATS:
             r["decision"], r["reason"] = "SKIP", "SKIP_NOT_A_SPECTRUM_FILE"
+        elif kind not in ("thermo_raw", "mzml"):
+            r["decision"], r["reason"] = "SKIP", SKIP_REASON.get(kind, "SKIP_UNCLASSIFIED")
         elif not project["verified"]:
             r["decision"], r["reason"] = "SKIP", "SKIP_PROJECT_LISTING_NOT_VERIFIED"
         elif not SAFE_NAME.fullmatch(r["file_name"]):
@@ -235,7 +238,7 @@ def decide(project: dict[str, Any], processed: dict[tuple, str]) -> list[dict]:
                 r["reason"] = "NO_VENDOR_FILE_WITH_SAME_STEM"
                 r["representation_evidence"] = "stem_match_unverified"
         else:
-            r["decision"], r["reason"] = "SKIP", SKIP_REASON.get(kind, "SKIP_UNCLASSIFIED")
+            r["decision"], r["reason"] = "SKIP", "SKIP_UNCLASSIFIED"
         if r["decision"] in ("DONE", "FAILED_PREVIOUSLY"):
             r["reason"] = f"{r['reason']};{r['decision']}"
     return rows
@@ -250,7 +253,7 @@ def write_tsv(path: Path, fields: list[str], rows: list[dict]) -> None:
 
 
 def build(accessions: list[str], fetch: Fetcher, outdir: Path, *, cache: Path | None = None,
-          processed_index: Path | None = None, sleep: float = 0.0,
+          processed_index: Path | None = None, sleep: float = 0.0, workers: int = 1,
           progress: Callable[[int, int], None] | None = None) -> dict[str, Any]:
     if outdir.exists() or outdir.is_symlink():
         raise ValueError(f"Refusing existing output directory: {outdir}")
@@ -259,21 +262,24 @@ def build(accessions: list[str], fetch: Fetcher, outdir: Path, *, cache: Path | 
     processed = load_processed(processed_index)
     rows: list[dict] = []
     projects: list[dict] = []
-    for i, accession in enumerate(accessions, 1):
+
+    def one(accession: str) -> tuple[dict, str]:
         try:
-            project = project_files(fetch, accession, cache)
-            error = ""
+            result = project_files(fetch, accession, cache), ""
         except Exception as err:  # one bad project must not stop the crawl
-            project = {"accession": accession, "expected": None, "listed": 0, "unique_names": 0,
-                       "files": [], "verified": False}
-            error = type(err).__name__
-        projects.append({k: project[k] for k in ("accession", "expected", "listed", "unique_names", "verified")}
-                        | {"error": error})
-        rows.extend(decide(project, processed))
-        if progress:
-            progress(i, len(accessions))
+            result = ({"accession": accession, "expected": None, "listed": 0, "unique_names": 0,
+                       "files": [], "verified": False}, type(err).__name__)
         if sleep:
             time.sleep(sleep)
+        return result
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        for i, (project, error) in enumerate(pool.map(one, accessions), 1):
+            projects.append({k: project[k] for k in ("accession", "expected", "listed", "unique_names",
+                                                     "verified")} | {"error": error})
+            rows.extend(decide(project, processed))
+            if progress:
+                progress(i, len(accessions))
     stage = outdir.with_name(f".{outdir.name}.partial-{os.getpid()}")
     stage.mkdir(parents=True)
     write_tsv(stage / "inventory.tsv", FIELDS, rows)
@@ -317,7 +323,8 @@ def main() -> int:
     ap.add_argument("--accession", action="append", default=[], help="Limit to these accessions")
     ap.add_argument("--max-projects", type=int, help="Take the first N projects by accession")
     ap.add_argument("--processed-index", type=Path, help="export_run_index.py index.jsonl for resume")
-    ap.add_argument("--sleep", type=float, default=0.2, help="Seconds between projects")
+    ap.add_argument("--sleep", type=float, default=0.2, help="Seconds after each project, per worker")
+    ap.add_argument("--workers", type=int, default=1, help="Parallel project fetches (keep small, <= 4)")
     args = ap.parse_args()
     try:
         accessions = sorted({a.upper() for a in args.accession}) or list_projects(http_fetch, args.max_projects)
@@ -329,7 +336,8 @@ def main() -> int:
                 print(f"JCODE_PROGRESS {json.dumps({'done': i, 'total': n})}", file=sys.stderr, flush=True)
 
         print(json.dumps(build(accessions, http_fetch, args.outdir, cache=args.cache,
-                               processed_index=args.processed_index, sleep=args.sleep, progress=progress),
+                               processed_index=args.processed_index, sleep=args.sleep,
+                               workers=min(max(args.workers, 1), 4), progress=progress),
                          indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError) as err:
