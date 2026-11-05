@@ -28,10 +28,12 @@ class FakeApi:
     def __call__(self, url):
         self.calls.append(url)
         path = url.split("/v3/", 1)[1]
+        if path == "projects/count":
+            return self.counts.get("__projects__", len(self.projects))
         if path.startswith("projects?"):
             page = int(path.split("page=")[1].split("&")[0])
             items = [{"accession": a} for a in sorted(self.projects)]
-            return items[page * INV.PROJECT_PAGE:(page + 1) * INV.PROJECT_PAGE]
+            return items[page * INV.PAGE:(page + 1) * INV.PAGE]
         accession = path.split("/")[1]
         files = self.projects[accession]
         if path.endswith("/files/count"):
@@ -130,10 +132,14 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(summary["queue_files"], 1)
 
     def test_list_projects_paginates_and_filters(self):
-        projects = {f"PXD{i:06d}": [] for i in range(INV.PROJECT_PAGE + 3)}
+        projects = {f"PXD{i:06d}": [] for i in range(INV.PAGE * 2)}  # exact page multiple
         api = FakeApi(projects)
-        self.assertEqual(len(INV.list_projects(api)), INV.PROJECT_PAGE + 3)
+        accessions, check = INV.list_projects_checked(api)
+        self.assertEqual(len(accessions), INV.PAGE * 2)
+        self.assertTrue(check["verified"])
         self.assertEqual(len(INV.list_projects(api, limit=5)), 5)
+        short = FakeApi(projects, counts={"__projects__": INV.PAGE * 2 + 1})
+        self.assertFalse(INV.list_projects_checked(short)[1]["verified"])
 
 
 if __name__ == "__main__":

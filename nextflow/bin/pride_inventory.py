@@ -40,8 +40,7 @@ from pathlib import Path
 from typing import Any
 
 API = "https://www.ebi.ac.uk/pride/ws/archive/v3"
-PAGE = 100
-PROJECT_PAGE = 1000
+PAGE = 100  # the v3 API caps pageSize at 100 and ignores larger values
 ACCESSION = re.compile(r"PXD\d{6,}\Z")
 SAFE_NAME = re.compile(r"[A-Za-z0-9_.+\-]{1,255}\Z")
 MEMORY_TIERS = ((1_000_000_000, 16), (3_000_000_000, 32), (6_000_000_000, 64))
@@ -127,19 +126,32 @@ def memory_tier_gb(size: int | None) -> int | None:
 
 
 def list_projects(fetch: Fetcher, limit: int | None = None) -> list[str]:
+    accessions, _ = list_projects_checked(fetch, limit)
+    return accessions
+
+
+def list_projects_checked(fetch: Fetcher, limit: int | None = None) -> tuple[list[str], dict[str, Any]]:
+    """Page the project list; verify it against projects/count when not limited."""
     found: list[str] = []
     page = 0
     while True:
-        batch = fetch(f"{API}/projects?pageSize={PROJECT_PAGE}&page={page}&sortDirection=ASC&sortFields=accession")
+        batch = fetch(f"{API}/projects?pageSize={PAGE}&page={page}&sortDirection=ASC&sortFields=accession")
         if not isinstance(batch, list) or not batch:
             break
         found.extend(str(p.get("accession", "")) for p in batch if isinstance(p, dict))
         if limit and len(found) >= limit:
             break
-        if len(batch) < PROJECT_PAGE:
+        if len(batch) < PAGE:
             break
         page += 1
-    return sorted({a for a in found if ACCESSION.fullmatch(a)})[: limit or None]
+    unique = sorted({a for a in found if ACCESSION.fullmatch(a)})
+    check: dict[str, Any] = {"listed": len(found), "unique_pxd": len(unique), "pages": page + 1,
+                             "limited": bool(limit)}
+    if not limit:
+        expected = fetch(f"{API}/projects/count")
+        check["expected"] = int(expected) if str(expected).isdigit() else None
+        check["verified"] = check["expected"] == len(found) == len(set(found))
+    return unique[: limit or None], check
 
 
 def project_files(fetch: Fetcher, accession: str, cache: Path | None) -> dict[str, Any]:
@@ -255,7 +267,8 @@ def write_tsv(path: Path, fields: list[str], rows: list[dict]) -> None:
 
 def build(accessions: list[str], fetch: Fetcher, outdir: Path, *, cache: Path | None = None,
           processed_index: Path | None = None, sleep: float = 0.0, workers: int = 1,
-          progress: Callable[[int, int], None] | None = None) -> dict[str, Any]:
+          progress: Callable[[int, int], None] | None = None,
+          project_listing: dict[str, Any] | None = None) -> dict[str, Any]:
     if outdir.exists() or outdir.is_symlink():
         raise ValueError(f"Refusing existing output directory: {outdir}")
     if cache:
@@ -311,7 +324,8 @@ def build(accessions: list[str], fetch: Fetcher, outdir: Path, *, cache: Path | 
                "queue_files": len(queue), "queue_tb": tb(queue),
                "queue_memory_gb": count(lambda r: r["memory_gb"], queue),
                "queue_projects": len({r["accession"] for r in queue}),
-               "complete_study_asserted": False, "representation_evidence": "stem_match_unverified"}
+               "complete_study_asserted": False, "representation_evidence": "stem_match_unverified",
+               "project_listing": project_listing or {"source": "explicit_accessions"}}
     (stage / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     stage.rename(outdir)
     return summary
@@ -328,7 +342,13 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=1, help="Parallel project fetches (keep small, <= 4)")
     args = ap.parse_args()
     try:
-        accessions = sorted({a.upper() for a in args.accession}) or list_projects(http_fetch, args.max_projects)
+        listing: dict[str, Any] = {"source": "explicit_accessions"}
+        accessions = sorted({a.upper() for a in args.accession})
+        if not accessions:
+            accessions, listing = list_projects_checked(http_fetch, args.max_projects)
+            print(f"PROJECT_LISTING {json.dumps(listing)}", file=sys.stderr, flush=True)
+            if not args.max_projects and not listing.get("verified"):
+                raise ValueError(f"Project listing not verified against projects/count: {listing}")
         if any(not ACCESSION.fullmatch(a) for a in accessions):
             raise ValueError("Invalid accession")
 
@@ -338,7 +358,8 @@ def main() -> int:
 
         print(json.dumps(build(accessions, http_fetch, args.outdir, cache=args.cache,
                                processed_index=args.processed_index, sleep=args.sleep,
-                               workers=min(max(args.workers, 1), 4), progress=progress),
+                               workers=min(max(args.workers, 1), 4), progress=progress,
+                               project_listing=listing),
                          indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError) as err:
