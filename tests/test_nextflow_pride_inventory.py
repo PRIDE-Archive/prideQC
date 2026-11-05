@@ -31,7 +31,7 @@ class FakeApi:
         if path.startswith("projects?"):
             page = int(path.split("page=")[1].split("&")[0])
             items = [{"accession": a} for a in sorted(self.projects)]
-            return items[page * INV.PAGE:(page + 1) * INV.PAGE]
+            return items[page * INV.PROJECT_PAGE:(page + 1) * INV.PROJECT_PAGE]
         accession = path.split("/")[1]
         files = self.projects[accession]
         if path.endswith("/files/count"):
@@ -130,9 +130,9 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(summary["queue_files"], 1)
 
     def test_list_projects_paginates_and_filters(self):
-        projects = {f"PXD{i:06d}": [] for i in range(INV.PAGE + 3)}
+        projects = {f"PXD{i:06d}": [] for i in range(INV.PROJECT_PAGE + 3)}
         api = FakeApi(projects)
-        self.assertEqual(len(INV.list_projects(api)), INV.PAGE + 3)
+        self.assertEqual(len(INV.list_projects(api)), INV.PROJECT_PAGE + 3)
         self.assertEqual(len(INV.list_projects(api, limit=5)), 5)
 
 

@@ -41,6 +41,7 @@ from typing import Any
 
 API = "https://www.ebi.ac.uk/pride/ws/archive/v3"
 PAGE = 100
+PROJECT_PAGE = 1000
 ACCESSION = re.compile(r"PXD\d{6,}\Z")
 SAFE_NAME = re.compile(r"[A-Za-z0-9_.+\-]{1,255}\Z")
 MEMORY_TIERS = ((1_000_000_000, 16), (3_000_000_000, 32), (6_000_000_000, 64))
@@ -129,13 +130,13 @@ def list_projects(fetch: Fetcher, limit: int | None = None) -> list[str]:
     found: list[str] = []
     page = 0
     while True:
-        batch = fetch(f"{API}/projects?pageSize={PAGE}&page={page}&sortDirection=ASC&sortFields=accession")
+        batch = fetch(f"{API}/projects?pageSize={PROJECT_PAGE}&page={page}&sortDirection=ASC&sortFields=accession")
         if not isinstance(batch, list) or not batch:
             break
         found.extend(str(p.get("accession", "")) for p in batch if isinstance(p, dict))
         if limit and len(found) >= limit:
             break
-        if len(batch) < PAGE:
+        if len(batch) < PROJECT_PAGE:
             break
         page += 1
     return sorted({a for a in found if ACCESSION.fullmatch(a)})[: limit or None]
@@ -321,7 +322,7 @@ def main() -> int:
     ap.add_argument("--outdir", type=Path, required=True, help="New output directory (must not exist)")
     ap.add_argument("--cache", type=Path, help="Per-project JSON cache (resumable crawl)")
     ap.add_argument("--accession", action="append", default=[], help="Limit to these accessions")
-    ap.add_argument("--max-projects", type=int, help="Take the first N projects by accession")
+    ap.add_argument("--max-projects", type=int, help="Take the first N projects in API listing order")
     ap.add_argument("--processed-index", type=Path, help="export_run_index.py index.jsonl for resume")
     ap.add_argument("--sleep", type=float, default=0.2, help="Seconds after each project, per worker")
     ap.add_argument("--workers", type=int, default=1, help="Parallel project fetches (keep small, <= 4)")
