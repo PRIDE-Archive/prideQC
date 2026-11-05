@@ -140,6 +140,18 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(len(INV.list_projects(api, limit=5)), 5)
         short = FakeApi(projects, counts={"__projects__": INV.PAGE * 2 + 1})
         self.assertFalse(INV.list_projects_checked(short)[1]["verified"])
+        self.assertEqual(INV.list_projects_checked(short)[1]["gap"], 1)
+
+    def test_listing_passes_are_unioned_in_cache(self):
+        cache = self.root / "cache"
+        first = FakeApi({"PXD000001": [], "PXD000002": []}, counts={"__projects__": 3})
+        _, check1 = INV.list_projects_checked(first, cache=cache)
+        self.assertEqual((check1["gap"], check1["previous_passes"]), (1, 0))
+        second = FakeApi({"PXD000001": [], "PXD000003": []}, counts={"__projects__": 3})
+        accessions, check2 = INV.list_projects_checked(second, cache=cache)
+        self.assertEqual(accessions, ["PXD000001", "PXD000002", "PXD000003"])
+        self.assertTrue(check2["verified"])
+        self.assertEqual((check2["new_vs_previous"], check2["missing_vs_previous"]), (1, 1))
 
 
 if __name__ == "__main__":

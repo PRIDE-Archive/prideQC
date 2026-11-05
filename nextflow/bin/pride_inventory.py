@@ -130,8 +130,14 @@ def list_projects(fetch: Fetcher, limit: int | None = None) -> list[str]:
     return accessions
 
 
-def list_projects_checked(fetch: Fetcher, limit: int | None = None) -> tuple[list[str], dict[str, Any]]:
-    """Page the project list; verify it against projects/count when not limited."""
+def list_projects_checked(fetch: Fetcher, limit: int | None = None,
+                          cache: Path | None = None) -> tuple[list[str], dict[str, Any]]:
+    """Page the project list; verify it against projects/count when not limited.
+
+    The v3 list ignores sort parameters, so pages follow index order and can
+    drift between passes. Each full pass is saved in the cache, and the union of
+    all passes is used, so a repeated run can only add coverage.
+    """
     found: list[str] = []
     page = 0
     while True:
@@ -150,7 +156,22 @@ def list_projects_checked(fetch: Fetcher, limit: int | None = None) -> tuple[lis
     if not limit:
         expected = fetch(f"{API}/projects/count")
         check["expected"] = int(expected) if str(expected).isdigit() else None
-        check["verified"] = check["expected"] == len(found) == len(set(found))
+        if cache:
+            cache.mkdir(parents=True, exist_ok=True)
+            passes = sorted(cache.glob("_project-listing-*.json"))
+            previous: set[str] = set()
+            for p in passes:
+                previous |= set(json.loads(p.read_text(encoding="utf-8")))
+            stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
+            target = cache / f"_project-listing-{stamp}-{os.getpid()}-{len(passes):04d}.json"
+            target.write_text(json.dumps(unique), encoding="utf-8")
+            check["previous_passes"] = len(passes)
+            check["new_vs_previous"] = len(set(unique) - previous) if passes else None
+            check["missing_vs_previous"] = len(previous - set(unique)) if passes else None
+            unique = sorted(set(unique) | previous)
+            check["union_pxd"] = len(unique)
+        check["gap"] = (check["expected"] - len(unique)) if check["expected"] is not None else None
+        check["verified"] = check["gap"] == 0 and len(found) == len(set(found))
     return unique[: limit or None], check
 
 
@@ -340,15 +361,20 @@ def main() -> int:
     ap.add_argument("--processed-index", type=Path, help="export_run_index.py index.jsonl for resume")
     ap.add_argument("--sleep", type=float, default=0.2, help="Seconds after each project, per worker")
     ap.add_argument("--workers", type=int, default=1, help="Parallel project fetches (keep small, <= 4)")
+    ap.add_argument("--accept-listing-gap", type=int, default=0,
+                    help="Continue if projects/count exceeds the listed PXD set by at most N (recorded)")
     args = ap.parse_args()
     try:
         listing: dict[str, Any] = {"source": "explicit_accessions"}
         accessions = sorted({a.upper() for a in args.accession})
         if not accessions:
-            accessions, listing = list_projects_checked(http_fetch, args.max_projects)
+            accessions, listing = list_projects_checked(http_fetch, args.max_projects, args.cache)
             print(f"PROJECT_LISTING {json.dumps(listing)}", file=sys.stderr, flush=True)
+            gap = listing.get("gap")
             if not args.max_projects and not listing.get("verified"):
-                raise ValueError(f"Project listing not verified against projects/count: {listing}")
+                if gap is None or gap < 0 or gap > args.accept_listing_gap:
+                    raise ValueError(f"Project listing not verified against projects/count: {listing}")
+                listing["accepted_gap"] = gap
         if any(not ACCESSION.fullmatch(a) for a in accessions):
             raise ValueError("Invalid accession")
 
