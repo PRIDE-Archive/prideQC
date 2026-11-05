@@ -15,6 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load(name: str, filename: str):
+    # Pipeline scripts import siblings (e.g. archive_units) like Nextflow's bin/.
+    if str(ROOT / "nextflow/bin") not in sys.path:
+        sys.path.insert(0, str(ROOT / "nextflow/bin"))
     spec = importlib.util.spec_from_file_location(name, ROOT / "nextflow/bin" / filename)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Cannot load test module: {filename}")
@@ -134,6 +137,45 @@ class NextflowArchiveTests(unittest.TestCase):
         units = list((self.root / "prepared/units").glob("*/unit.json"))
         self.assertEqual(len(units), 1)
         self.assertEqual(json.loads(units[0].read_text())["discovery_status"], "failed")
+
+    def test_archive_preparation_records_source_bytes_and_sha256(self):
+        import hashlib
+        prep = _load("nf_prep", "prepare_archive.py")
+        source = self.root / "one.mzML"
+        payload = b"pilot payload for source provenance"
+        source.write_bytes(payload)
+        task = self.root / "task.json"
+        task.write_text(json.dumps({
+            "accession": "PXD041271", "task_id": 7, "archive_file": source.name,
+            "expected_runs": 1, "source_manifest": "test.tsv",
+        }))
+        status = prep.prepare(task, "fire", self.root / "prepared", source=source)
+        self.assertEqual(status["status"], "success")
+        evidence = status["source_evidence"]
+        self.assertEqual(evidence["size_bytes"], len(payload))
+        self.assertEqual(evidence["sha256"], hashlib.sha256(payload).hexdigest())
+        self.assertTrue(evidence["checksum_check_requested"])
+        self.assertEqual(evidence["transfer"], "local_source")
+        on_disk = json.loads((self.root / "prepared/prepare-status.json").read_text())
+        self.assertEqual(on_disk["source_evidence"], evidence)
+
+    def test_archive_preparation_keeps_sanitized_transfer_records(self):
+        prep = _load("nf_prep2", "prepare_archive.py")
+        transfer = self.root / "download"
+        transfer.mkdir()
+        (transfer / "download-manifest.json").write_text(json.dumps({
+            "engine": "pridepy", "engine_version": "0.0.16",
+            "options": {"protocol": "fire", "checksum_check": True, "username": "x"},
+            "files": [{"filename": "a.raw", "status": "downloaded", "size_bytes": 5,
+                       "expected_size_bytes": 5, "size_match": True,
+                       "url": "https://secret.example/token"}],
+        }))
+        records = prep._transfer_records(transfer)
+        self.assertEqual(records["engine_version"], "0.0.16")
+        self.assertEqual(records["files"], [{"filename": "a.raw", "status": "downloaded",
+                                             "size_bytes": 5, "expected_size_bytes": 5,
+                                             "size_match": True}])
+        self.assertNotIn("secret", json.dumps(records))
 
     def test_failed_discovery_generates_per_unit_qc_failure(self):
         unit = self.root / "unit"

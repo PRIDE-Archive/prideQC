@@ -8,11 +8,41 @@ and is managed by Nextflow's retry policy.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 from pathlib import Path
 
 from archive_units import ArchiveError, expand
+
+_TRANSFER_FIELDS = ("filename", "status", "size_bytes", "expected_size_bytes",
+                    "size_match", "error_type")
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _transfer_records(transfer: Path) -> dict | None:
+    """Copy an allow-list of pridepy transfer evidence; never URLs or credentials."""
+    manifest = transfer / "download-manifest.json"
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    options = data.get("options") or {}
+    return {
+        "engine": data.get("engine"), "engine_version": data.get("engine_version"),
+        "protocol": options.get("protocol"), "checksum_check": options.get("checksum_check"),
+        "files": [{k: rec[k] for k in _TRANSFER_FIELDS if k in rec}
+                  for rec in data.get("files") or [] if isinstance(rec, dict)],
+    }
 
 
 def prepare(task_file: Path, protocol: str, outdir: Path,
@@ -29,6 +59,8 @@ def prepare(task_file: Path, protocol: str, outdir: Path,
     transfer = outdir / "download"
     status = "success"
     error_type = None
+    evidence: dict = {"checksum_check_requested": bool(checksum),
+                      "transfer": "local_source" if source is not None else protocol}
     try:
         if source is None:
             from prideqc.pride import DownloadOptions, PrideRepository
@@ -45,6 +77,10 @@ def prepare(task_file: Path, protocol: str, outdir: Path,
             archive = paths[0]
         else:
             archive = source.resolve(strict=True)
+        # Byte-level provenance of the exact acquired source, computed on node-local
+        # scratch before expansion. This is the identity later deduplication uses.
+        evidence["size_bytes"] = archive.stat().st_size
+        evidence["sha256"] = _sha256(archive)
         # Use a temporary work area outside units; only final unit folders stage to workers.
         expanded = outdir / "extracted"
         inventory = expand(archive, expanded)
@@ -84,7 +120,11 @@ def prepare(task_file: Path, protocol: str, outdir: Path,
                "source_archive": archive_name, "status": status,
                "error_type": error_type, "emitted_units": count,
                "source_manifest": task.get("source_manifest"),
-               "source_manifest_task_count": task["expected_runs"]}
+               "source_manifest_task_count": task["expected_runs"],
+               "source_evidence": evidence}
+    transfer_records = _transfer_records(transfer)
+    if transfer_records is not None:
+        evidence["transfer_records"] = transfer_records
     (outdir / "prepare-status.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     shutil.rmtree(transfer, ignore_errors=True)
     return summary
