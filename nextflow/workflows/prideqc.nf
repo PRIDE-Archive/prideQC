@@ -35,10 +35,18 @@ workflow PRIDEQC_WORKFLOW {
     )
 
     // The frozen manifest counts SOURCE archives, not extracted logical MS runs.
+    // Largest first: Flight9 lost 17 of 57 min to a tail of large files that
+    // started last (steady state 23.3 GB/min, tail 3.8 GB/min).
     def archive_tasks = PRIDEQC_MANIFEST.out.tasks.flatten().map { task_file ->
         def record = new groovy.json.JsonSlurper().parse(task_file)
         tuple(record.accession, record.expected_runs as Integer,
-              record.task_id.toString(), (record.memory_gb ?: 32) as Integer, task_file)
+              record.task_id.toString(), (record.memory_gb ?: 32) as Integer, task_file,
+              (record.file_size_bytes ?: 0) as Long)
+    }
+    .toSortedList { a, b -> (b[5] <=> a[5]) ?: (a[2] as Long) <=> (b[2] as Long) }
+    .flatMap { sorted -> sorted }
+    .map { accession, expected, task_id, memory_gb, task_file, _size ->
+        tuple(accession, expected, task_id, memory_gb, task_file)
     }
     // A single Slurm scratch task downloads, expands and analyzes one logical
     // source run. Multi-run archives emit a failure receipt in this pilot lane.

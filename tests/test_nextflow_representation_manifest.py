@@ -184,6 +184,13 @@ class ProductionSafetySourceTests(unittest.TestCase):
         self.assertIn("executor = 'local'", block)
         self.assertIn("maxForks = 4", block)
 
+    def test_source_qc_tasks_are_submitted_largest_first(self):
+        workflow = (BIN.parent / "workflows" / "prideqc.nf").read_text()
+        self.assertIn("(record.file_size_bytes ?: 0) as Long)", workflow)
+        self.assertIn(".toSortedList { a, b -> (b[5] <=> a[5]) ?: (a[2] as Long) <=> (b[2] as Long) }", workflow)
+        planner = (BIN / "plan_manifest.py").read_text()
+        self.assertIn('"file_size_bytes": size,', planner)
+
     def test_source_qc_memory_is_tiered_by_planner_and_escalates(self):
         config = (BIN.parent / "conf" / "codon_slurm.config").read_text()
         module = (BIN.parent / "modules/local/source_qc/main.nf").read_text()
