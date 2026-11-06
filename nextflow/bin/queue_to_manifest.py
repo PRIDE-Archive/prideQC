@@ -6,7 +6,8 @@ Writes a NEW directory (refuses an existing one):
   report-manifest.tsv  report_id, pxd_accession, expected_file_tasks (= files in THIS batch)
   batch.json           selection rules, counts, bytes, memory tiers, input SHA256
 
-Rules: only QUEUE_NATIVE_RAW rows (the mzML lane is not qualified); rows already
+Rules: one --lane per batch (default QUEUE_NATIVE_RAW; QUEUE_MZML_NO_VENDOR is only for an
+explicit qualification screen); rows already
 canonical or failed in an export index are excluded; one batch never claims a
 complete study. Files above --max-file-gb are never taken. Selection is deterministic:
 1. the largest files first, up to --large-files;
@@ -26,6 +27,7 @@ from collections import defaultdict
 from pathlib import Path
 
 DECISION = "QUEUE_NATIVE_RAW"
+LANES = ("QUEUE_NATIVE_RAW", "QUEUE_MZML_NO_VENDOR")
 
 
 def sha256(path: Path) -> str:
@@ -72,8 +74,12 @@ def hash_key(r: dict) -> str:
 def select(rows: list[dict], *, max_files: int, max_bytes: int, large_files: int,
            per_accession: int, skip: set[tuple[str, str]], max_file_bytes: int | None = None,
            per_tier: int = 0, max_accessions: int | None = None,
-           first: set[tuple[str, str]] | None = None) -> list[dict]:
-    pool = [r for r in rows if r.get("decision") == DECISION
+           first: set[tuple[str, str]] | None = None, lane: str = DECISION,
+           exclude_accessions: set[str] | None = None) -> list[dict]:
+    if lane not in LANES:
+        raise ValueError(f"Unknown lane: {lane}")
+    pool = [r for r in rows if r.get("decision") == lane
+            and r["accession"] not in (exclude_accessions or set())
             and (r["accession"], r["file_name"].casefold()) not in skip
             and str(r.get("file_size_bytes", "")).isdigit() and int(r["file_size_bytes"]) > 0
             and (max_file_bytes is None or int(r["file_size_bytes"]) <= max_file_bytes)]
@@ -146,7 +152,8 @@ def write_tsv(path: Path, fields: list[str], rows: list[dict]) -> None:
 def build(queue: Path, outdir: Path, *, max_files: int, max_gb: float, large_files: int = 0,
           per_accession: int = 1_000_000, processed_index: Path | None = None,
           max_file_gb: float | None = None, per_tier: int = 0,
-          retry_download_failures: bool = False, max_accessions: int | None = None) -> dict:
+          retry_download_failures: bool = False, max_accessions: int | None = None,
+          lane: str = DECISION, exclude_accessions: set[str] | None = None) -> dict:
     if outdir.exists() or outdir.is_symlink():
         raise ValueError(f"Refusing existing output directory: {outdir}")
     with queue.open(encoding="utf-8", newline="") as handle:
@@ -156,7 +163,8 @@ def build(queue: Path, outdir: Path, *, max_files: int, max_gb: float, large_fil
                     skip=excluded(processed_index, retry_download_failures),
                     max_file_bytes=None if max_file_gb is None else int(max_file_gb * 1e9),
                     per_tier=per_tier, max_accessions=max_accessions,
-                    first=retry_keys(processed_index) if retry_download_failures else None)
+                    first=retry_keys(processed_index) if retry_download_failures else None,
+                    lane=lane, exclude_accessions=exclude_accessions)
     if not picked:
         raise ValueError("Empty batch")
     stage = outdir.with_name(f".{outdir.name}.partial")
@@ -177,11 +185,12 @@ def build(queue: Path, outdir: Path, *, max_files: int, max_gb: float, large_fil
         tiers[str(r.get("memory_gb", ""))] += 1
     summary = {"schema_version": 1, "queue": str(queue), "queue_sha256": sha256(queue),
                "processed_index": str(processed_index) if processed_index else None,
-               "rules": {"decision": DECISION, "max_files": max_files, "max_gb": max_gb,
+               "rules": {"decision": lane, "max_files": max_files, "max_gb": max_gb,
                          "large_files": large_files, "per_accession": per_accession,
                          "max_file_gb": max_file_gb, "per_tier": per_tier, "order": "sha256(accession|file)",
                          "retry_download_failures": retry_download_failures,
-                         "max_accessions": max_accessions},
+                         "max_accessions": max_accessions,
+                         "exclude_accessions": sorted(exclude_accessions or ())},
                "files": len(picked), "accessions": len(per),
                "total_gb": round(sum(r["_size"] for r in picked) / 1e9, 2),
                "largest_gb": round(max(r["_size"] for r in picked) / 1e9, 2),
@@ -209,6 +218,10 @@ def main() -> int:
                     help="Do not exclude index failures at archive_preparation (download); reader failures stay excluded")
     ap.add_argument("--max-accessions", type=int,
                     help="Use at most N accessions (fewer per-accession finalizer jobs)")
+    ap.add_argument("--lane", choices=LANES, default=DECISION,
+                    help="Queue lane; QUEUE_MZML_NO_VENDOR only for an explicit qualification screen")
+    ap.add_argument("--exclude-accession", action="append", default=[],
+                    help="Never take files from this accession (repeatable)")
     args = ap.parse_args()
     try:
         print(json.dumps(build(args.queue, args.outdir, max_files=args.max_files, max_gb=args.max_gb,
@@ -216,7 +229,8 @@ def main() -> int:
                                processed_index=args.processed_index, max_file_gb=args.max_file_gb,
                                per_tier=args.per_tier,
                                retry_download_failures=args.retry_download_failures,
-                               max_accessions=args.max_accessions), indent=2, sort_keys=True))
+                               max_accessions=args.max_accessions, lane=args.lane,
+                               exclude_accessions=set(args.exclude_accession)), indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError) as err:
         print(json.dumps({"batch": "BLOCKED", "reason": f"{type(err).__name__}: {err}"}))

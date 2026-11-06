@@ -99,6 +99,21 @@ class QueueToManifestTests(unittest.TestCase):
         self.assertNotIn("PXD000001_2.raw", names(self.root / "h"))   # reader failure stays excluded
         self.assertTrue(summary["rules"]["retry_download_failures"])
 
+    def test_mzml_lane_is_explicit_and_exclusion_applies(self):
+        out = self.root / "m"
+        summary = Q.build(self.queue, out, max_files=10, max_gb=100, lane="QUEUE_MZML_NO_VENDOR")
+        with (out / "file-manifest.tsv").open() as handle:
+            names = [r["archive_file"] for r in csv.DictReader(handle, delimiter="\t")]
+        self.assertEqual(names, ["x.mzML"])                                   # only the mzML lane
+        self.assertEqual(summary["rules"]["decision"], "QUEUE_MZML_NO_VENDOR")
+        plan = PLAN.prepare(out / "file-manifest.tsv", out / "report-manifest.tsv", self.root / "mp", set())
+        self.assertEqual(plan["tasks"], 1)                                    # planner accepts mzML
+        with self.assertRaises(ValueError):                                   # excluded -> empty batch
+            Q.build(self.queue, self.root / "m2", max_files=10, max_gb=100, lane="QUEUE_MZML_NO_VENDOR",
+                    exclude_accessions={"PXD000002"})
+        with self.assertRaises(ValueError):
+            Q.select([], max_files=1, max_bytes=1, large_files=0, per_accession=1, skip=set(), lane="BOGUS")
+
     def test_accession_cap_fills_chosen_studies_and_retry_comes_first(self):
         index = self.root / "index.jsonl"
         index.write_text(json.dumps({"accession": "PXD000002", "source_file": "PXD000002_1.raw",
