@@ -178,6 +178,12 @@ class ProductionSafetySourceTests(unittest.TestCase):
         self.assertIn("maxForks = 2", config)
         self.assertIn("queueSize = 4", config)
 
+    def test_finalizer_runs_on_controller_not_slurm(self):
+        config = (BIN.parent / "conf" / "codon_slurm.config").read_text()
+        block = config.split("withName: PRIDEQC_FINALIZE", 1)[1].split("}", 1)[0]
+        self.assertIn("executor = 'local'", block)
+        self.assertIn("maxForks = 4", block)
+
     def test_source_qc_memory_is_tiered_by_planner_and_escalates(self):
         config = (BIN.parent / "conf" / "codon_slurm.config").read_text()
         module = (BIN.parent / "modules/local/source_qc/main.nf").read_text()
