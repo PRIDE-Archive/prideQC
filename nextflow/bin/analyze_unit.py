@@ -14,6 +14,21 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+LEGACY_THERMO_VERSION_BELOW = 57
+
+
+def thermo_header_version(path: Path) -> int | None:
+    """File-format version from a Finnigan RAW header (uint16 at byte 36), else None."""
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(40)
+    except OSError:
+        return None
+    if len(head) < 38 or head[:2] != b"\x01\xa1" or head[2:18].decode("utf-16-le", "replace") != "Finnigan":
+        return None
+    return int.from_bytes(head[36:38], "little")
+
+
 class EmptySpectrumRun(ValueError):
     """The reader returned no MS spectra; a QC receipt must not claim success."""
 
@@ -36,7 +51,7 @@ def require_observed_spectra(path: Path) -> int:
         if not isinstance(item, dict):
             raise ValueError("Malformed mzQC qualityMetric")
         accession, name = item.get("accession"), item.get("name")
-        level = {"MS:4000059": 1, "MS:4000060": 2}.get(accession)
+        level = {"MS:4000059": 1, "MS:4000060": 2}.get(accession) if isinstance(accession, str) else None
         match = re.fullmatch(r"NumberOfSpectra_MS([3-9][0-9]*)", name or "") if isinstance(name, str) else None
         if level is None and match:
             level = int(match.group(1))
@@ -96,7 +111,14 @@ def analyze(unit_dir: Path, output: Path, *, mass_error: bool = False,
                 # Failure triage only: a .raw suffix does not prove Thermo
                 # content, and a reader-open error does not prove corruption.
                 if "Thermo RAW reader: Could not open RAW file" in proc.stderr:
-                    result["reader_failure_kind"] = "thermo_raw_open_error_unclassified"
+                    version = thermo_header_version(source)
+                    result["thermo_raw_header_version"] = version
+                    # Flight8 evidence: version 50 (LTQ era) files never opened; 57-66 opened.
+                    # Triage label only, not proof of the cause.
+                    result["reader_failure_kind"] = (
+                        "thermo_raw_legacy_format_suspected"
+                        if version is not None and version < LEGACY_THERMO_VERSION_BELOW
+                        else "thermo_raw_open_error_unclassified")
             else:
                 manifest = json.loads((qc / "manifest.json").read_text())
                 records = manifest.get("files", [])

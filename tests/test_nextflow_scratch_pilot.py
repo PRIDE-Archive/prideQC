@@ -99,6 +99,33 @@ class ScratchPilotTests(unittest.TestCase):
         self.assertEqual(finalized["status"], "incomplete")
         self.assertEqual(finalized["successful_runs"], 0)
 
+    def test_thermo_open_failure_records_header_version(self):
+        def header(version: int) -> bytes:
+            head = b"\x01\xa1" + "Finnigan".encode("utf-16-le") + b"\x00" * 18
+            return head + version.to_bytes(2, "little") + b"\x00" * 64
+
+        def failing(cmd, **_kwargs):
+            return SimpleNamespace(returncode=1, stdout="",
+                                   stderr="RuntimeError: Thermo RAW reader: Could not open RAW file: x")
+
+        for version, kind in ((50, "thermo_raw_legacy_format_suspected"),
+                              (66, "thermo_raw_open_error_unclassified")):
+            archive = self.root / f"v{version}.raw"
+            archive.write_bytes(header(version))
+            self.assertEqual(analyze_unit.thermo_header_version(archive), version)
+            ready = self.root / f"ready-{version}"
+            self._task(archive)
+            with patch.object(analyze_unit.subprocess, "run", side_effect=failing), \
+                    patch.object(source_qc.Path, "cwd", return_value=self.root):
+                source_qc.run(self.task, "ftp", self.root / f"scratch-{version}", ready, source=archive)
+            receipt = json.loads(next(ready.rglob("result.json")).read_text())
+            self.assertEqual(receipt["status"], "failed")
+            self.assertEqual(receipt["thermo_raw_header_version"], version)
+            self.assertEqual(receipt["reader_failure_kind"], kind)
+        junk = self.root / "junk.raw"
+        junk.write_bytes(b"not a raw file")
+        self.assertIsNone(analyze_unit.thermo_header_version(junk))
+
     def test_ms3_only_is_not_rejected_as_empty(self):
         mzqc = self.root / "ms3.mzQC"
         mzqc.write_text(json.dumps({"mzQC": {"runQualities": [{"qualityMetrics": [
