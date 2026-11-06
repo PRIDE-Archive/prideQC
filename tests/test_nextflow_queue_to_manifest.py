@@ -80,6 +80,25 @@ class QueueToManifestTests(unittest.TestCase):
         tiered = Q.build(self.queue, self.root / "f", max_files=2, max_gb=100, per_tier=1)
         self.assertEqual(tiered["memory_gb_tiers"], {"128": 1, "16": 1})  # one per tier before round-robin
 
+    def test_download_failures_retry_only_on_request(self):
+        index = self.root / "index.jsonl"
+        index.write_text("\n".join(json.dumps(r) for r in (
+            {"accession": "PXD000001", "source_file": "PXD000001_1.raw", "role": "failed",
+             "failure_stage": "archive_preparation"},
+            {"accession": "PXD000001", "source_file": "PXD000001_2.raw", "role": "failed",
+             "failure_stage": "prideqc_analysis"})) + "\n")
+
+        def names(out):
+            with (out / "file-manifest.tsv").open() as handle:
+                return {r["archive_file"] for r in csv.DictReader(handle, delimiter="\t")}
+        Q.build(self.queue, self.root / "g", max_files=10, max_gb=100, processed_index=index)
+        self.assertFalse({"PXD000001_1.raw", "PXD000001_2.raw"} & names(self.root / "g"))
+        summary = Q.build(self.queue, self.root / "h", max_files=10, max_gb=100, processed_index=index,
+                          retry_download_failures=True)
+        self.assertIn("PXD000001_1.raw", names(self.root / "h"))      # download failure retried
+        self.assertNotIn("PXD000001_2.raw", names(self.root / "h"))   # reader failure stays excluded
+        self.assertTrue(summary["rules"]["retry_download_failures"])
+
 
 if __name__ == "__main__":
     unittest.main()

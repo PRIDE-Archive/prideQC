@@ -36,13 +36,21 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def excluded(index: Path | None) -> set[tuple[str, str]]:
+RETRYABLE_STAGES = {"archive_preparation"}
+
+
+def excluded(index: Path | None, retry_download_failures: bool = False) -> set[tuple[str, str]]:
+    """Keys to skip. A download/preparation failure is skipped unless retry is requested;
+    a canonical run or a reader/analysis failure is always skipped."""
     keys: set[tuple[str, str]] = set()
     if index:
         for line in index.read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
-            if row.get("role") in ("canonical", "failed", "superseded_failure"):
-                keys.add((str(row.get("accession")), str(row.get("source_file", "")).casefold()))
+            key = (str(row.get("accession")), str(row.get("source_file", "")).casefold())
+            role = row.get("role")
+            retryable = retry_download_failures and row.get("failure_stage") in RETRYABLE_STAGES
+            if role == "canonical" or (role in ("failed", "superseded_failure") and not retryable):
+                keys.add(key)
     return keys
 
 
@@ -117,13 +125,15 @@ def write_tsv(path: Path, fields: list[str], rows: list[dict]) -> None:
 
 def build(queue: Path, outdir: Path, *, max_files: int, max_gb: float, large_files: int = 0,
           per_accession: int = 1_000_000, processed_index: Path | None = None,
-          max_file_gb: float | None = None, per_tier: int = 0) -> dict:
+          max_file_gb: float | None = None, per_tier: int = 0,
+          retry_download_failures: bool = False) -> dict:
     if outdir.exists() or outdir.is_symlink():
         raise ValueError(f"Refusing existing output directory: {outdir}")
     with queue.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle, delimiter="\t"))
     picked = select(rows, max_files=max_files, max_bytes=int(max_gb * 1e9), large_files=large_files,
-                    per_accession=per_accession, skip=excluded(processed_index),
+                    per_accession=per_accession,
+                    skip=excluded(processed_index, retry_download_failures),
                     max_file_bytes=None if max_file_gb is None else int(max_file_gb * 1e9),
                     per_tier=per_tier)
     if not picked:
@@ -148,7 +158,8 @@ def build(queue: Path, outdir: Path, *, max_files: int, max_gb: float, large_fil
                "processed_index": str(processed_index) if processed_index else None,
                "rules": {"decision": DECISION, "max_files": max_files, "max_gb": max_gb,
                          "large_files": large_files, "per_accession": per_accession,
-                         "max_file_gb": max_file_gb, "per_tier": per_tier, "order": "sha256(accession|file)"},
+                         "max_file_gb": max_file_gb, "per_tier": per_tier, "order": "sha256(accession|file)",
+                         "retry_download_failures": retry_download_failures},
                "files": len(picked), "accessions": len(per),
                "total_gb": round(sum(r["_size"] for r in picked) / 1e9, 2),
                "largest_gb": round(max(r["_size"] for r in picked) / 1e9, 2),
@@ -172,12 +183,15 @@ def main() -> int:
     ap.add_argument("--max-file-gb", type=float, help="Never take a file above this size")
     ap.add_argument("--per-tier", type=int, default=0, help="Take up to N files from each memory tier")
     ap.add_argument("--processed-index", type=Path, help="export_run_index.py index.jsonl to exclude")
+    ap.add_argument("--retry-download-failures", action="store_true",
+                    help="Do not exclude index failures at archive_preparation (download); reader failures stay excluded")
     args = ap.parse_args()
     try:
         print(json.dumps(build(args.queue, args.outdir, max_files=args.max_files, max_gb=args.max_gb,
                                large_files=args.large_files, per_accession=args.per_accession,
                                processed_index=args.processed_index, max_file_gb=args.max_file_gb,
-                               per_tier=args.per_tier), indent=2, sort_keys=True))
+                               per_tier=args.per_tier,
+                               retry_download_failures=args.retry_download_failures), indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError) as err:
         print(json.dumps({"batch": "BLOCKED", "reason": f"{type(err).__name__}: {err}"}))
