@@ -105,11 +105,14 @@ class ScratchPilotTests(unittest.TestCase):
             return head + version.to_bytes(2, "little") + b"\x00" * 64
 
         def failing(cmd, **_kwargs):
-            return SimpleNamespace(returncode=1, stdout="",
-                                   stderr="RuntimeError: Thermo RAW reader: Could not open RAW file: x")
+            return SimpleNamespace(returncode=1, stdout="", stderr=stderr)
 
-        for version, kind in ((50, "thermo_raw_legacy_format_suspected"),
-                              (66, "thermo_raw_open_error_unclassified")):
+        cases = (("Could not open RAW file: x", 50, "thermo_raw_legacy_format_suspected"),
+                 ("Could not open RAW file: x", 66, "thermo_raw_open_error_unclassified"),
+                 ("read_scan: managed exception in: x", 64, "thermo_raw_read_scan_error"),
+                 ("something new", 63, "thermo_raw_reader_error_unclassified"))
+        for message, version, kind in cases:
+            stderr = "RuntimeError: Thermo RAW reader: " + message
             archive = self.root / f"v{version}.raw"
             archive.write_bytes(header(version))
             self.assertEqual(analyze_unit.thermo_header_version(archive), version)

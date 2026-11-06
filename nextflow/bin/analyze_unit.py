@@ -110,15 +110,21 @@ def analyze(unit_dir: Path, output: Path, *, mass_error: bool = False,
                 result["exit_code"] = proc.returncode
                 # Failure triage only: a .raw suffix does not prove Thermo
                 # content, and a reader-open error does not prove corruption.
-                if "Thermo RAW reader: Could not open RAW file" in proc.stderr:
+                if "Thermo RAW reader:" in proc.stderr:
                     version = thermo_header_version(source)
                     result["thermo_raw_header_version"] = version
-                    # Flight8 evidence: version 50 (LTQ era) files never opened; 57-66 opened.
-                    # Triage label only, not proof of the cause.
-                    result["reader_failure_kind"] = (
-                        "thermo_raw_legacy_format_suspected"
-                        if version is not None and version < LEGACY_THERMO_VERSION_BELOW
-                        else "thermo_raw_open_error_unclassified")
+                    if "Could not open RAW file" in proc.stderr:
+                        # Flight8 evidence: version 50 (LTQ era) files never opened; 57-66 opened.
+                        # Triage label only, not proof of the cause.
+                        result["reader_failure_kind"] = (
+                            "thermo_raw_legacy_format_suspected"
+                            if version is not None and version < LEGACY_THERMO_VERSION_BELOW
+                            else "thermo_raw_open_error_unclassified")
+                    elif "read_scan" in proc.stderr:
+                        # Flight9 evidence: the file opened, then one scan read failed.
+                        result["reader_failure_kind"] = "thermo_raw_read_scan_error"
+                    else:
+                        result["reader_failure_kind"] = "thermo_raw_reader_error_unclassified"
             else:
                 manifest = json.loads((qc / "manifest.json").read_text())
                 records = manifest.get("files", [])
