@@ -73,6 +73,13 @@ class QueueToManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Empty batch"):
             Q.build(self.queue, self.root / "d", max_files=1, max_gb=0.01)
 
+    def test_file_cap_and_per_tier(self):
+        capped = Q.build(self.queue, self.root / "e", max_files=10, max_gb=100, max_file_gb=6,
+                         large_files=1)
+        self.assertEqual(capped["largest_gb"], 5.0)      # 7 GB file above the cap is never taken
+        tiered = Q.build(self.queue, self.root / "f", max_files=2, max_gb=100, per_tier=1)
+        self.assertEqual(tiered["memory_gb_tiers"], {"128": 1, "16": 1})  # one per tier before round-robin
+
 
 if __name__ == "__main__":
     unittest.main()
