@@ -15,6 +15,7 @@ import stat
 import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
+from typing import IO
 
 RAW_SUFFIXES = (".raw", ".mzml", ".mzml.gz")
 ARCHIVE_SUFFIXES = (".zip", ".tar.gz", ".tgz", ".raw.gz")
@@ -38,7 +39,7 @@ def _safe_name(raw: str) -> PurePosixPath:
     return path
 
 
-def _safe_copy(src, dst: Path, budget: list[int], limit: int) -> None:
+def _safe_copy(src: IO[bytes], dst: Path, budget: list[int], limit: int) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         raise ArchiveError(f"Duplicate member path: {dst.name}")
@@ -77,26 +78,26 @@ def _extract_archive(archive: Path, dest: Path, budget: list[int], limit: int) -
                         _safe_copy(stream, dest / rel, budget, limit)
     elif archive.name.casefold().endswith((".tar.gz", ".tgz")):
         with tarfile.open(archive, "r:gz") as tf:
-            entries = tf.getmembers()
-            if len(entries) > MAX_FILES:
+            members = tf.getmembers()
+            if len(members) > MAX_FILES:
                 raise ArchiveError("TAR contains too many members")
-            names: set[str] = set()
-            for item in entries:
-                rel = _safe_name(item.name)
+            tar_names: set[str] = set()
+            for member in members:
+                rel = _safe_name(member.name)
                 key = rel.as_posix().rstrip("/").casefold()
-                if key in names:
-                    raise ArchiveError(f"Duplicate case-insensitive TAR member: {item.name}")
-                names.add(key)
-                if item.isdir():
+                if key in tar_names:
+                    raise ArchiveError(f"Duplicate case-insensitive TAR member: {member.name}")
+                tar_names.add(key)
+                if member.isdir():
                     (dest / rel).mkdir(parents=True, exist_ok=True)
-                elif item.isfile():
-                    if item.size > limit:
+                elif member.isfile():
+                    if member.size > limit:
                         raise ArchiveError("TAR member exceeds maximum size")
-                    stream = tf.extractfile(item)
-                    if stream is None:
+                    tar_stream = tf.extractfile(member)
+                    if tar_stream is None:
                         raise ArchiveError("Missing TAR member stream")
-                    with stream:
-                        _safe_copy(stream, dest / rel, budget, limit)
+                    with tar_stream:
+                        _safe_copy(tar_stream, dest / rel, budget, limit)
                 else:
                     raise ArchiveError("TAR links and special files are forbidden")
     else:
