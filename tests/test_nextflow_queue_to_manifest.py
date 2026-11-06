@@ -99,6 +99,18 @@ class QueueToManifestTests(unittest.TestCase):
         self.assertNotIn("PXD000001_2.raw", names(self.root / "h"))   # reader failure stays excluded
         self.assertTrue(summary["rules"]["retry_download_failures"])
 
+    def test_accession_cap_fills_chosen_studies_and_retry_comes_first(self):
+        index = self.root / "index.jsonl"
+        index.write_text(json.dumps({"accession": "PXD000002", "source_file": "PXD000002_1.raw",
+                                     "role": "failed", "failure_stage": "archive_preparation"}) + "\n")
+        summary = Q.build(self.queue, self.root / "i", max_files=10, max_gb=100, max_accessions=1,
+                          processed_index=index, retry_download_failures=True)
+        self.assertEqual(summary["accessions"], 1)
+        with (self.root / "i" / "file-manifest.tsv").open() as handle:
+            rows = list(csv.DictReader(handle, delimiter="\t"))
+        self.assertEqual({r["pxd_accession"] for r in rows}, {"PXD000002"})   # retried study chosen first
+        self.assertEqual(len(rows), 2)                                        # and filled before others
+
 
 if __name__ == "__main__":
     unittest.main()
