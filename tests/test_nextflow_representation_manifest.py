@@ -184,6 +184,19 @@ class ProductionSafetySourceTests(unittest.TestCase):
         self.assertIn("executor = 'local'", block)
         self.assertIn("maxForks = 4", block)
 
+    def test_codon_cleans_work_dir_and_publishes_by_copy(self):
+        config = (BIN.parent / "conf" / "codon_slurm.config").read_text()
+        self.assertRegex(config, r"(?m)^cleanup = true$")
+        # cleanup deletes work/, so a published symlink would dangle: every publishDir must copy.
+        directives = 0
+        for module in (BIN.parent / "modules" / "local").glob("*/main.nf"):
+            lines = module.read_text().splitlines()
+            for i, line in enumerate(lines):
+                if line.strip().startswith("publishDir "):
+                    directives += 1
+                    self.assertIn("mode: 'copy'", "\n".join(lines[i:i + 3]), f"{module}:{i + 1}")
+        self.assertGreater(directives, 0)
+
     def test_source_qc_tasks_are_submitted_largest_first(self):
         workflow = (BIN.parent / "workflows" / "prideqc.nf").read_text()
         self.assertIn("(record.file_size_bytes ?: 0) as Long)", workflow)
