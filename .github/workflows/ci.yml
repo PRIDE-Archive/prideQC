@@ -34,3 +34,12 @@ jobs:
       - run: uv sync --group dev
       - run: uv run ruff check .
       - run: uv run mypy
+  codon-host-python39:
+    # Production loop and batch tools run on the Codon host python3 (3.9), outside the container.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: >-
+          uv run --python 3.9 --no-project python -m unittest -v
+          tests.test_nextflow_production_loop tests.test_nextflow_queue_to_manifest

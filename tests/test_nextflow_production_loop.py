@@ -1,7 +1,6 @@
 """Unattended production loop: retry rules, guards, controller layout, stop conditions."""
 from __future__ import annotations
 
-import argparse
 import csv
 import hashlib
 import importlib.util
@@ -114,8 +113,8 @@ class ProductionLoopTests(unittest.TestCase):
         result = L.Loop(self.args(dry_run=True)).run()
         self.assertEqual(result, "DRY_RUN")
         self.assertEqual([p.name for p in (self.root / "work/controllers").iterdir()], ["live"])
-        cut = [json.loads(l) for l in (self.root / "work/loops/t1/loop.jsonl").read_text().splitlines()
-               if json.loads(l)["event"] == "CUT"][0]
+        cut = [json.loads(line) for line in (self.root / "work/loops/t1/loop.jsonl").read_text().splitlines()
+               if json.loads(line)["event"] == "CUT"][0]
         self.assertEqual((cut["retry_keys"], cut["retry_in_batch"], cut["in_flight"]), (0, 0, 2))
         self.assertEqual(cut["files"], 5)
         with self.assertRaises(ValueError):   # no new controller: the dry run left nothing to collide with

@@ -33,10 +33,13 @@ import subprocess
 import sys
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any
 
-Key = Tuple[str, str]
+Key = tuple[str, str]
+# Codon host python3 is 3.9: datetime.UTC (3.11+) does not exist there.
+UTC = dt.timezone.utc  # noqa: UP017
 MAX_DOWNLOAD_RECEIPTS = 3
 COMPLETED = re.compile(r"Workflow completed > WorkflowStats\[succeededCount=(\d+); failedCount=(\d+)")
 FILE_NAME = re.compile(r"[A-Za-z0-9_.+\-]+\.raw\Z", flags=re.IGNORECASE)
@@ -52,11 +55,11 @@ def sha256(path: Path) -> str:
 
 
 def now() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # ---------------------------------------------------------------- receipts
-def scan_tag(tag_dir: Path) -> List[dict]:
+def scan_tag(tag_dir: Path) -> list[dict]:
     """One compact row per receipt of one run tag. Never raises on a bad receipt."""
     rows = []
     for receipt in sorted(tag_dir.glob("*/_run_outputs/ready/units/*/result.json")):
@@ -81,10 +84,10 @@ def tag_finished(root: Path, tag: str) -> bool:
     return (ctrl / "controller.exitcode").is_file() or not ctrl.is_dir()
 
 
-def scan_results(root: Path, cache: Path) -> List[dict]:
+def scan_results(root: Path, cache: Path) -> list[dict]:
     """Receipts of every run tag. A finished tag is scanned once and cached in `cache`."""
     cache.mkdir(parents=True, exist_ok=True)
-    rows: List[dict] = []
+    rows: list[dict] = []
     for tag_dir in sorted(p for p in (root / "results").iterdir() if p.is_dir() and not p.is_symlink()):
         cached = cache / f"{tag_dir.name}.receipts.json"
         if cached.is_file():
@@ -103,13 +106,13 @@ def is_legacy_oom(r: dict) -> bool:
     return r.get("st") == "prideqc_analysis" and r.get("x") == -9 and r.get("e") == "PrideqcNonzeroExit"
 
 
-def classify(rows: List[dict]) -> Tuple[Set[Key], Set[Key]]:
+def classify(rows: list[dict]) -> tuple[set[Key], set[Key]]:
     """Return (skip, retry_first). Keys are (ACCESSION, file casefold)."""
-    by: Dict[Key, List[dict]] = defaultdict(list)
+    by: dict[Key, list[dict]] = defaultdict(list)
     for r in rows:
         by[(r["a"], r["f"])].append(r)
-    skip: Set[Key] = set()
-    retry: Set[Key] = set()
+    skip: set[Key] = set()
+    retry: set[Key] = set()
     for key, items in by.items():
         if any(r.get("s") == "success" for r in items):
             skip.add(key)
@@ -123,7 +126,7 @@ def classify(rows: List[dict]) -> Tuple[Set[Key], Set[Key]]:
 
 
 # ---------------------------------------------------------------- guards
-def active_controllers(root: Path, exclude: str = "") -> List[str]:
+def active_controllers(root: Path, exclude: str = "") -> list[str]:
     """Controllers with a launch marker and no exit code (a Nextflow run may be live)."""
     ctrls = root / "work/controllers"
     if not ctrls.is_dir():
@@ -133,9 +136,9 @@ def active_controllers(root: Path, exclude: str = "") -> List[str]:
                   and not (c / "controller.exitcode").is_file())
 
 
-def in_flight_keys(root: Path) -> Set[Key]:
+def in_flight_keys(root: Path) -> set[Key]:
     """Files listed in the manifest of an active controller (receipts may not exist yet)."""
-    keys: Set[Key] = set()
+    keys: set[Key] = set()
     for tag in active_controllers(root):
         manifest = root / "work/controllers" / tag / "file-manifest.tsv"
         if manifest.is_file():
@@ -145,7 +148,7 @@ def in_flight_keys(root: Path) -> Set[Key]:
     return keys
 
 
-def slurm_hours_left(job_id: Optional[str]) -> Optional[float]:
+def slurm_hours_left(job_id: str | None) -> float | None:
     if not job_id:
         return None
     try:
@@ -156,7 +159,7 @@ def slurm_hours_left(job_id: Optional[str]) -> Optional[float]:
     return parse_slurm_left(out)
 
 
-def parse_slurm_left(text: str) -> Optional[float]:
+def parse_slurm_left(text: str) -> float | None:
     m = re.fullmatch(r"(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)", text.strip())
     if not m:
         return None
@@ -186,7 +189,7 @@ def memory_tier_gb(size: int) -> int:
     return 128
 
 
-def write_tsv(path: Path, fields: List[str], rows: List[dict]) -> None:
+def write_tsv(path: Path, fields: list[str], rows: list[dict]) -> None:
     with path.open("x", encoding="utf-8", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=fields, delimiter="\t", lineterminator="\n", extrasaction="ignore")
         w.writeheader()
@@ -200,7 +203,7 @@ def resources_config(max_forks: int) -> str:
             f"executor {{\n    queueSize = {max_forks + 8}\n    submitRateLimit = '5/1sec'\n}}\n")
 
 
-def write_controller(root: Path, tag: str, picked: List[dict], *, source: Path, sif: Path,
+def write_controller(root: Path, tag: str, picked: list[dict], *, source: Path, sif: Path,
                      sif_sha256: str, rules: dict, nxf_opts: str, max_forks: int, loop_id: str) -> Path:
     ctrl_root = root / "work/controllers"
     ctrl, work, out = ctrl_root / tag, root / "work" / tag, root / "results" / tag
@@ -213,7 +216,7 @@ def write_controller(root: Path, tag: str, picked: List[dict], *, source: Path, 
     tasks = [{"task_id": str(i), "pxd_accession": r["accession"], "archive_file": r["file_name"],
               "sdrf_path": "", "needs_file_map": "0", "file_size_bytes": str(r["file_size_bytes"])}
              for i, r in enumerate(picked, 1)]
-    per: Dict[str, int] = defaultdict(int)
+    per: dict[str, int] = defaultdict(int)
     for r in picked:
         per[r["accession"]] += 1
     reports = [{"report_id": str(i), "pxd_accession": a, "expected_file_tasks": str(n)}
@@ -240,7 +243,7 @@ def write_controller(root: Path, tag: str, picked: List[dict], *, source: Path, 
               'exit "$status"\n')
     (ctrl / "run-nextflow.sh").write_text(runner, encoding="utf-8")
     (ctrl / "run-nextflow.sh").chmod(0o750)
-    tiers: Dict[str, int] = defaultdict(int)
+    tiers: dict[str, int] = defaultdict(int)
     for r in picked:
         tiers[str(memory_tier_gb(int(r["file_size_bytes"])))] += 1
     names = ("file-manifest.tsv", "report-manifest.tsv", "resources.config", "params.json", "run-nextflow.sh")
@@ -256,7 +259,7 @@ def write_controller(root: Path, tag: str, picked: List[dict], *, source: Path, 
     return ctrl
 
 
-def run_controller(ctrl: Path, env: Dict[str, str]) -> int:
+def run_controller(ctrl: Path, env: dict[str, str]) -> int:
     """Create the one-shot marker, then run Nextflow in the foreground."""
     fd = os.open(str(ctrl / "launch-attempt.txt"), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640)
     with os.fdopen(fd, "w") as fh:
@@ -267,7 +270,7 @@ def run_controller(ctrl: Path, env: Dict[str, str]) -> int:
 def evaluate(root: Path, tag: str, expected: int, min_success: float) -> dict:
     ctrl = root / "work/controllers" / tag
     try:
-        rc: Optional[int] = int((ctrl / "controller.exitcode").read_text().strip())
+        rc: int | None = int((ctrl / "controller.exitcode").read_text().strip())
     except (OSError, ValueError):
         rc = None
     log = (ctrl / "nextflow.log").read_text(encoding="utf-8", errors="replace") if (ctrl / "nextflow.log").is_file() else ""
@@ -291,9 +294,9 @@ def evaluate(root: Path, tag: str, expected: int, min_success: float) -> dict:
 
 # ---------------------------------------------------------------- loop
 class Loop:
-    def __init__(self, args: argparse.Namespace, *, runner: Callable[[Path, Dict[str, str]], int] = run_controller,
+    def __init__(self, args: argparse.Namespace, *, runner: Callable[[Path, dict[str, str]], int] = run_controller,
                  sleep: Callable[[float], None] = time.sleep,
-                 hours_left: Optional[Callable[[], Optional[float]]] = None):
+                 hours_left: Callable[[], float | None] | None = None):
         self.a = args
         self.root = Path(args.root)
         self.dir = self.root / "work/loops" / args.loop_id
@@ -309,9 +312,9 @@ class Loop:
 
     def tag(self, n: int) -> str:
         rev = (Path(self.a.source) / ".source-sha").read_text().strip()[:7]
-        return f"{self.a.tag_prefix}-b{n:03d}-{rev}-{dt.datetime.now(dt.timezone.utc):%Y%m%d}-v1"
+        return f"{self.a.tag_prefix}-b{n:03d}-{rev}-{dt.datetime.now(UTC):%Y%m%d}-v1"
 
-    def guard(self) -> Optional[str]:
+    def guard(self) -> str | None:
         if (self.dir / "STOP").exists():
             return "STOP_FILE"
         if free_gb(self.root) < self.a.min_free_gb:
@@ -321,7 +324,7 @@ class Loop:
             return "SLURM_TIME_LOW"
         return None
 
-    def wait_for_idle(self) -> Optional[str]:
+    def wait_for_idle(self) -> str | None:
         deadline = time.time() + self.a.wait_active_hours * 3600
         while True:
             busy = active_controllers(self.root)
@@ -332,7 +335,7 @@ class Loop:
             self.log("WAIT_ACTIVE_CONTROLLER", active=busy)
             self.sleep(600)
 
-    def cut(self, Q: Any, rows: List[dict]) -> Tuple[List[dict], dict]:
+    def cut(self, Q: Any, rows: list[dict]) -> tuple[list[dict], dict]:
         receipts = scan_results(self.root, self.dir / "receipt-cache")
         skip, retry = classify(receipts)
         busy = in_flight_keys(self.root)
