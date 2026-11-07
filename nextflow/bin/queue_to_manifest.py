@@ -41,28 +41,43 @@ def sha256(path: Path) -> str:
 RETRYABLE_STAGES = {"archive_preparation"}
 
 
-def excluded(index: Path | None, retry_download_failures: bool = False) -> set[tuple[str, str]]:
-    """Keys to skip. A download/preparation failure is skipped unless retry is requested;
-    a canonical run or a reader/analysis failure is always skipped."""
+def is_legacy_oom(row: dict) -> bool:
+    """SIGKILL from an engine before the in-run 2x memory retry (exit -9, generic error type).
+    New AnalysisKilledResourceLimit rows already had that retry, so they are not retried again."""
+    return (row.get("failure_stage") == "prideqc_analysis" and row.get("exit_code") == -9
+            and row.get("error_type") == "PrideqcNonzeroExit")
+
+
+def retryable(row: dict, retry_download_failures: bool, retry_legacy_oom: bool) -> bool:
+    return row.get("role") in ("failed", "superseded_failure") and (
+        (retry_download_failures and row.get("failure_stage") in RETRYABLE_STAGES)
+        or (retry_legacy_oom and is_legacy_oom(row)))
+
+
+def excluded(index: Path | None, retry_download_failures: bool = False,
+             retry_legacy_oom: bool = False) -> set[tuple[str, str]]:
+    """Keys to skip. A download failure or legacy OOM is skipped unless its retry is requested;
+    a canonical run or another reader/analysis failure is always skipped."""
     keys: set[tuple[str, str]] = set()
     if index:
         for line in index.read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
             key = (str(row.get("accession")), str(row.get("source_file", "")).casefold())
             role = row.get("role")
-            retryable = retry_download_failures and row.get("failure_stage") in RETRYABLE_STAGES
-            if role == "canonical" or (role in ("failed", "superseded_failure") and not retryable):
+            if role == "canonical" or (role in ("failed", "superseded_failure")
+                                       and not retryable(row, retry_download_failures, retry_legacy_oom)):
                 keys.add(key)
     return keys
 
 
-def retry_keys(index: Path | None) -> set[tuple[str, str]]:
-    """Index failures at a retryable stage (download/preparation)."""
+def retry_keys(index: Path | None, retry_download_failures: bool = True,
+               retry_legacy_oom: bool = False) -> set[tuple[str, str]]:
+    """Index failures that the requested retry classes cover."""
     keys: set[tuple[str, str]] = set()
     if index:
         for line in index.read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
-            if row.get("role") in ("failed", "superseded_failure") and row.get("failure_stage") in RETRYABLE_STAGES:
+            if retryable(row, retry_download_failures, retry_legacy_oom):
                 keys.add((str(row.get("accession")), str(row.get("source_file", "")).casefold()))
     return keys
 
@@ -153,17 +168,19 @@ def build(queue: Path, outdir: Path, *, max_files: int, max_gb: float, large_fil
           per_accession: int = 1_000_000, processed_index: Path | None = None,
           max_file_gb: float | None = None, per_tier: int = 0,
           retry_download_failures: bool = False, max_accessions: int | None = None,
-          lane: str = DECISION, exclude_accessions: set[str] | None = None) -> dict:
+          lane: str = DECISION, exclude_accessions: set[str] | None = None,
+          retry_legacy_oom: bool = False) -> dict:
     if outdir.exists() or outdir.is_symlink():
         raise ValueError(f"Refusing existing output directory: {outdir}")
     with queue.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle, delimiter="\t"))
     picked = select(rows, max_files=max_files, max_bytes=int(max_gb * 1e9), large_files=large_files,
                     per_accession=per_accession,
-                    skip=excluded(processed_index, retry_download_failures),
+                    skip=excluded(processed_index, retry_download_failures, retry_legacy_oom),
                     max_file_bytes=None if max_file_gb is None else int(max_file_gb * 1e9),
                     per_tier=per_tier, max_accessions=max_accessions,
-                    first=retry_keys(processed_index) if retry_download_failures else None,
+                    first=(retry_keys(processed_index, retry_download_failures, retry_legacy_oom)
+                           if retry_download_failures or retry_legacy_oom else None),
                     lane=lane, exclude_accessions=exclude_accessions)
     if not picked:
         raise ValueError("Empty batch")
@@ -189,6 +206,7 @@ def build(queue: Path, outdir: Path, *, max_files: int, max_gb: float, large_fil
                          "large_files": large_files, "per_accession": per_accession,
                          "max_file_gb": max_file_gb, "per_tier": per_tier, "order": "sha256(accession|file)",
                          "retry_download_failures": retry_download_failures,
+                         "retry_legacy_oom": retry_legacy_oom,
                          "max_accessions": max_accessions,
                          "exclude_accessions": sorted(exclude_accessions or ())},
                "files": len(picked), "accessions": len(per),
@@ -216,6 +234,8 @@ def main() -> int:
     ap.add_argument("--processed-index", type=Path, help="export_run_index.py index.jsonl to exclude")
     ap.add_argument("--retry-download-failures", action="store_true",
                     help="Do not exclude index failures at archive_preparation (download); reader failures stay excluded")
+    ap.add_argument("--retry-legacy-oom", action="store_true",
+                    help="Do not exclude exit -9 analysis failures from engines without the in-run memory retry")
     ap.add_argument("--max-accessions", type=int,
                     help="Use at most N accessions (fewer per-accession finalizer jobs)")
     ap.add_argument("--lane", choices=LANES, default=DECISION,
@@ -230,7 +250,8 @@ def main() -> int:
                                per_tier=args.per_tier,
                                retry_download_failures=args.retry_download_failures,
                                max_accessions=args.max_accessions, lane=args.lane,
-                               exclude_accessions=set(args.exclude_accession)), indent=2, sort_keys=True))
+                               exclude_accessions=set(args.exclude_accession),
+                               retry_legacy_oom=args.retry_legacy_oom), indent=2, sort_keys=True))
         return 0
     except (ValueError, OSError) as err:
         print(json.dumps({"batch": "BLOCKED", "reason": f"{type(err).__name__}: {err}"}))

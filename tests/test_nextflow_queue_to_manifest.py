@@ -99,6 +99,29 @@ class QueueToManifestTests(unittest.TestCase):
         self.assertNotIn("PXD000001_2.raw", names(self.root / "h"))   # reader failure stays excluded
         self.assertTrue(summary["rules"]["retry_download_failures"])
 
+    def test_legacy_oom_retry_only_on_request_and_new_kills_stay_excluded(self):
+        index = self.root / "index.jsonl"
+        index.write_text("\n".join(json.dumps(r) for r in (
+            {"accession": "PXD000001", "source_file": "PXD000001_1.raw", "role": "failed",
+             "failure_stage": "prideqc_analysis", "error_type": "PrideqcNonzeroExit", "exit_code": -9},
+            {"accession": "PXD000001", "source_file": "PXD000001_2.raw", "role": "failed",
+             "failure_stage": "prideqc_analysis", "error_type": "AnalysisKilledResourceLimit",
+             "exit_code": -9})) + "\n")
+
+        def names(out):
+            with (out / "file-manifest.tsv").open() as handle:
+                return {r["archive_file"] for r in csv.DictReader(handle, delimiter="\t")}
+        Q.build(self.queue, self.root / "o1", max_files=10, max_gb=100, processed_index=index,
+                retry_download_failures=True)
+        self.assertFalse({"PXD000001_1.raw", "PXD000001_2.raw"} & names(self.root / "o1"))
+        summary = Q.build(self.queue, self.root / "o2", max_files=1, max_gb=100, processed_index=index,
+                          retry_legacy_oom=True)
+        self.assertEqual(names(self.root / "o2"), {"PXD000001_1.raw"})  # legacy OOM first
+        self.assertTrue(summary["rules"]["retry_legacy_oom"])
+        Q.build(self.queue, self.root / "o3", max_files=10, max_gb=100, processed_index=index,
+                retry_legacy_oom=True)
+        self.assertNotIn("PXD000001_2.raw", names(self.root / "o3"))  # already had the 2x retry
+
     def test_mzml_lane_is_explicit_and_exclusion_applies(self):
         out = self.root / "m"
         summary = Q.build(self.queue, out, max_files=10, max_gb=100, lane="QUEUE_MZML_NO_VENDOR")

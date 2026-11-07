@@ -93,7 +93,7 @@ def collect(roots: list) -> list:
             rec: dict[str, Any] = dict(base, accession=accession, source_file=source_file,
                        unit_id=data.get("unit_id"), task_id=data.get("task_id"),
                        status=data.get("status"), failure_stage=data.get("failure_stage"),
-                       error_type=data.get("error_type"),
+                       error_type=data.get("error_type"), exit_code=data.get("exit_code"),
                        reader_failure_kind=data.get("reader_failure_kind"))
             if not ACCESSION.fullmatch(accession) or accession_dir.name != accession:
                 records.append(dict(rec, role="rejected", reject_reason="accession_mismatch"))
