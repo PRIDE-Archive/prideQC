@@ -26,6 +26,7 @@ process PRIDEQC_SOURCE_QC {
     mkdir -p "\$TMPDIR" "\$XDG_CACHE_HOME"
     python3 ${runner} --task ${task_json} --protocol ${params.protocol} \
         --scratch-dir node-local-raw --outdir ready \
+        --attempt ${task.attempt} --max-attempts ${(task.maxRetries ?: 0) + 1} \
         ${params.checksum_check ? '' : '--no-checksum-check'} \
         ${params.estimate_mass_error ? '--estimate-mass-error' : ''} \
         ${params.estimate_mass_shifts ? '--estimate-mass-shifts' : ''} \

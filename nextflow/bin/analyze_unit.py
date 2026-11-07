@@ -108,6 +108,11 @@ def analyze(unit_dir: Path, output: Path, *, mass_error: bool = False,
                 result["failure_stage"] = "prideqc_analysis"
                 result["error_type"] = "PrideqcNonzeroExit"
                 result["exit_code"] = proc.returncode
+                if proc.returncode == -9:
+                    # Production batch 001: 20 analyses were SIGKILLed by the Slurm
+                    # memory cgroup (sacct OUT_OF_MEMORY). Not a reader fault.
+                    result["error_type"] = "AnalysisKilledResourceLimit"
+                    result["resource_failure_kind"] = "memory_limit_suspected"
                 # Failure triage only: a .raw suffix does not prove Thermo
                 # content, and a reader-open error does not prove corruption.
                 if "Thermo RAW reader:" in proc.stderr:

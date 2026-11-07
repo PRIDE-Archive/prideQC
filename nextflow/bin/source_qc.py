@@ -96,13 +96,25 @@ def main() -> None:
     ap.add_argument("--estimate-mass-shifts", action="store_true")
     ap.add_argument("--tmt-reporter-evidence", action="store_true")
     ap.add_argument("--tmt-profile-reporter-evidence", action="store_true")
+    ap.add_argument("--attempt", type=int, default=1, help="Nextflow task.attempt")
+    ap.add_argument("--max-attempts", type=int, default=1, help="Nextflow maxRetries + 1")
     args = ap.parse_args()
-    print(json.dumps(run(args.task, args.protocol, args.scratch_dir, args.outdir,
-                         source=args.local_source, checksum=not args.no_checksum_check,
-                         mass_error=args.estimate_mass_error,
-                         mass_shifts=args.estimate_mass_shifts,
-                         tmt_reporter=args.tmt_reporter_evidence,
-                         tmt_profile=args.tmt_profile_reporter_evidence), sort_keys=True))
+    result = run(args.task, args.protocol, args.scratch_dir, args.outdir,
+                 source=args.local_source, checksum=not args.no_checksum_check,
+                 mass_error=args.estimate_mass_error,
+                 mass_shifts=args.estimate_mass_shifts,
+                 tmt_reporter=args.tmt_reporter_evidence,
+                 tmt_profile=args.tmt_profile_reporter_evidence)
+    print(json.dumps(result, sort_keys=True))
+    raise SystemExit(retry_exit_code(result, args.attempt, args.max_attempts))
+
+
+def retry_exit_code(result: dict, attempt: int, max_attempts: int) -> int:
+    """137 asks Nextflow to retry with more memory; only for a resource kill before the last attempt.
+    On the last attempt the fail-closed receipt stands and the task exits 0."""
+    if result.get("error_type") == "AnalysisKilledResourceLimit" and attempt < max_attempts:
+        return 137
+    return 0
 
 
 if __name__ == "__main__":

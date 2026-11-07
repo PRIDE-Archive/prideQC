@@ -197,6 +197,12 @@ class ProductionSafetySourceTests(unittest.TestCase):
                     self.assertIn("mode: 'copy'", "\n".join(lines[i:i + 3]), f"{module}:{i + 1}")
         self.assertGreater(directives, 0)
 
+    def test_source_qc_passes_attempt_so_resource_kills_retry(self):
+        module = (BIN.parent / "modules/local/source_qc/main.nf").read_text()
+        config = (BIN.parent / "conf" / "codon_slurm.config").read_text()
+        self.assertIn("--attempt ${task.attempt} --max-attempts ${(task.maxRetries ?: 0) + 1}", module)
+        self.assertIn("task.exitStatus in [137, 143] ? 'retry'", config)
+
     def test_source_qc_tasks_are_submitted_largest_first(self):
         workflow = (BIN.parent / "workflows" / "prideqc.nf").read_text()
         self.assertIn("(record.file_size_bytes ?: 0) as Long)", workflow)

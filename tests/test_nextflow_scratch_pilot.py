@@ -99,6 +99,25 @@ class ScratchPilotTests(unittest.TestCase):
         self.assertEqual(finalized["status"], "incomplete")
         self.assertEqual(finalized["successful_runs"], 0)
 
+    def test_sigkilled_analysis_is_a_resource_failure_and_retries_until_last_attempt(self):
+        archive = self.root / "big.raw"
+        archive.write_bytes(b"x" * 64)
+        self._task(archive)
+
+        def killed(cmd, **_kwargs):
+            return SimpleNamespace(returncode=-9, stdout="", stderr="")
+
+        with patch.object(analyze_unit.subprocess, "run", side_effect=killed), \
+                patch.object(source_qc.Path, "cwd", return_value=self.root):
+            result = source_qc.run(self.task, "ftp", self.root / "scratch-k", self.root / "ready-k", source=archive)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error_type"], "AnalysisKilledResourceLimit")
+        self.assertEqual(result["resource_failure_kind"], "memory_limit_suspected")
+        self.assertNotIn("reader_failure_kind", result)
+        self.assertEqual(source_qc.retry_exit_code(result, 1, 2), 137)   # Nextflow retries with 2x memory
+        self.assertEqual(source_qc.retry_exit_code(result, 2, 2), 0)     # last attempt: receipt stands
+        self.assertEqual(source_qc.retry_exit_code({"error_type": "PrideqcNonzeroExit"}, 1, 2), 0)
+
     def test_thermo_open_failure_records_header_version(self):
         def header(version: int) -> bytes:
             head = b"\x01\xa1" + "Finnigan".encode("utf-16-le") + b"\x00" * 18
