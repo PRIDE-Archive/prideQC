@@ -133,6 +133,18 @@ def active_controllers(root: Path, exclude: str = "") -> List[str]:
                   and not (c / "controller.exitcode").is_file())
 
 
+def in_flight_keys(root: Path) -> Set[Key]:
+    """Files listed in the manifest of an active controller (receipts may not exist yet)."""
+    keys: Set[Key] = set()
+    for tag in active_controllers(root):
+        manifest = root / "work/controllers" / tag / "file-manifest.tsv"
+        if manifest.is_file():
+            with manifest.open(encoding="utf-8", newline="") as fh:
+                for r in csv.DictReader(fh, delimiter="\t"):
+                    keys.add((r["pxd_accession"].upper(), r["archive_file"].casefold()))
+    return keys
+
+
 def slurm_hours_left(job_id: Optional[str]) -> Optional[float]:
     if not job_id:
         return None
@@ -323,13 +335,16 @@ class Loop:
     def cut(self, Q: Any, rows: List[dict]) -> Tuple[List[dict], dict]:
         receipts = scan_results(self.root, self.dir / "receipt-cache")
         skip, retry = classify(receipts)
+        busy = in_flight_keys(self.root)
+        skip |= busy
+        retry -= busy
         picked = Q.select(rows, max_files=self.a.max_files, max_bytes=int(self.a.max_gb * 1e9), large_files=0,
                           per_accession=self.a.per_accession, skip=skip,
                           max_file_bytes=int(self.a.max_file_gb * 1e9), max_accessions=self.a.max_accessions,
                           first=retry, lane="QUEUE_NATIVE_RAW")
         for r in picked:
             r["accession"] = r["accession"].upper()
-        info = {"receipts": len(receipts), "skip_keys": len(skip), "retry_keys": len(retry),
+        info = {"receipts": len(receipts), "skip_keys": len(skip), "retry_keys": len(retry), "in_flight": len(busy),
                 "retry_in_batch": sum(1 for r in picked if (r["accession"], r["file_name"].casefold()) in retry),
                 "files": len(picked), "total_gb": round(sum(int(r["file_size_bytes"]) for r in picked) / 1e9, 2)}
         return picked, info

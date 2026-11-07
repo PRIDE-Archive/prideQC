@@ -107,6 +107,8 @@ class ProductionLoopTests(unittest.TestCase):
         busy = self.root / "work/controllers/live"
         busy.mkdir()
         (busy / "launch-attempt.txt").write_text("x")                      # dry run may run beside a live batch
+        (busy / "file-manifest.tsv").write_text("task_id\tpxd_accession\tarchive_file\n1\tPXD000002\tr2_0.raw\n"
+                                              "2\tPXD000003\tr3_1.raw\n")
         receipt(self.root, "old", "PXD000001", "r1_0.raw", "u1", status="success")
         receipt(self.root, "old", "PXD000002", "R2_0.RAW", "u2", status="failed", failure_stage="archive_preparation")
         result = L.Loop(self.args(dry_run=True)).run()
@@ -114,8 +116,11 @@ class ProductionLoopTests(unittest.TestCase):
         self.assertEqual([p.name for p in (self.root / "work/controllers").iterdir()], ["live"])
         cut = [json.loads(l) for l in (self.root / "work/loops/t1/loop.jsonl").read_text().splitlines()
                if json.loads(l)["event"] == "CUT"][0]
-        self.assertEqual((cut["retry_keys"], cut["retry_in_batch"], cut["skip_keys"]), (1, 1, 1))
+        self.assertEqual((cut["retry_keys"], cut["retry_in_batch"], cut["in_flight"]), (0, 0, 2))
         self.assertEqual(cut["files"], 5)
+        with self.assertRaises(ValueError):   # no new controller: the dry run left nothing to collide with
+            L.write_controller(self.root, "live", [], source=self.root / "src", sif=self.sif, sif_sha256="",
+                               rules={}, nxf_opts="", max_forks=1, loop_id="t1")
 
     def test_two_batches_disjoint_and_controller_layout(self):
         result = L.Loop(self.args(), runner=self.fake_runner(), sleep=lambda s: None).run()
