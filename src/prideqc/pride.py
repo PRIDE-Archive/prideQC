@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
@@ -54,6 +55,38 @@ def _expected_size_bytes(client: Any, accession: str, name: str) -> int | None:
     if len(sizes) == 1:
         return sizes.pop()
     return None
+
+
+def _listing_records(client: Any, accession: str, name: str) -> list[dict]:
+    lookup = getattr(client, "get_file_from_api", None)
+    if not callable(lookup):
+        return []
+    try:
+        records = lookup(accession, name)
+    except Exception:
+        return []
+    return [r for r in records or [] if isinstance(r, dict) and r.get("fileName") == name]
+
+
+def _expected_sha1(client: Any, accession: str, name: str) -> str | None:
+    """Return the unique SHA1 from the PRIDE project file listing, if any.
+
+    2026-11-08: /ws/archive/v3/files/checksum/<PXD> returned HTTP 500 for 38 of 40
+    sampled projects, and pridepy aborts the download when that call fails. The file
+    listing carries a per-file SHA1 (verified equal to sha1sum on complete downloads),
+    so we verify that instead and do not depend on the checksum endpoint.
+    """
+    values = {str(r.get("checksum", "")).strip().lower() for r in _listing_records(client, accession, name)}
+    values = {v for v in values if re.fullmatch(r"[0-9a-f]{40}", v)}
+    return values.pop() if len(values) == 1 else None
+
+
+def _sha1(path: Path) -> str:
+    digest = hashlib.sha1()  # noqa: S324 - integrity check against PRIDE's published SHA1
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def _gzip_isize(path: Path) -> int | None:
@@ -170,6 +203,11 @@ class PrideRepository:
                 expected_size = _expected_size_bytes(client, accession, name)
                 if expected_size is not None:
                     record["expected_size_bytes"] = expected_size
+                # With a listing SHA1, verify it ourselves and skip pridepy's checksum-endpoint path.
+                expected_sha1 = _expected_sha1(client, accession, name) if options.checksum_check else None
+                pridepy_checksum = options.checksum_check and expected_sha1 is None
+                record["checksum_method"] = ("listing_sha1" if expected_sha1 else
+                                             "pridepy" if pridepy_checksum else "none")
                 try:
                     with TemporaryDirectory(prefix=".prideqc-", dir=target) as staging:
                         transfer_result = client.download_file_by_name(
@@ -177,7 +215,7 @@ class PrideRepository:
                             skip_if_downloaded_already=False, protocol=options.protocol,
                             username=username, password=password,
                             aspera_maximum_bandwidth=options.aspera_maximum_bandwidth,
-                            checksum_check=options.checksum_check,
+                            checksum_check=pridepy_checksum,
                         )
                         if transfer_result is False:
                             raise RuntimeError("pridepy reported an unsuccessful transfer.")
@@ -197,6 +235,10 @@ class PrideRepository:
                         if expected_size is not None:
                             record["size_match"] = True
                             record["size_match_basis"] = basis
+                        if expected_sha1 is not None:
+                            record["sha1_match"] = _sha1(downloaded) == expected_sha1
+                            if not record["sha1_match"]:
+                                raise RuntimeError("Downloaded file SHA1 does not match the PRIDE listing.")
                         final = target / name
                         downloaded.replace(final)
                         paths.append(final)

@@ -370,6 +370,32 @@ class PrideTests(unittest.TestCase):
             PrideRepository(client).download_files("PXD000001", ["run.raw"], Path(folder) / "d",
                                                    options=DownloadOptions(checksum_check=False))
 
+    def test_listing_sha1_replaces_failing_checksum_endpoint(self):
+        # 2026-11-08: /files/checksum/<PXD> returns HTTP 500; the listing SHA1 is used instead.
+        import hashlib as _hashlib
+        payload = b"thermo raw bytes"
+        good = _hashlib.sha1(payload).hexdigest()
+        for listed, ok in ((good, True), ("0" * 40, False)):
+            client = MagicMock()
+            client.get_file_from_api.return_value = [
+                {"fileName": "run.raw", "fileSizeBytes": len(payload), "checksum": listed}]
+            client.download_file_by_name.side_effect = lambda **a: (
+                Path(a["output_folder"]) / a["file_name"]).write_bytes(payload)
+            with tempfile.TemporaryDirectory() as folder:
+                destination = Path(folder) / "d"
+                if ok:
+                    PrideRepository(client).download_files("PXD000001", ["run.raw"], destination)
+                    rec = json.loads((destination / "download-manifest.json").read_text())["files"][0]
+                    self.assertEqual((rec["checksum_method"], rec["sha1_match"]), ("listing_sha1", True))
+                else:
+                    with self.assertRaises(RuntimeError):
+                        PrideRepository(client).download_files("PXD000001", ["run.raw"], destination)
+                    self.assertFalse((destination / "run.raw").exists())
+                    rec = json.loads((destination / "download-manifest.json").read_text())["files"][0]
+                    self.assertFalse(rec["sha1_match"])
+                # pridepy is never asked to fetch the checksum endpoint when a listing SHA1 exists
+                self.assertFalse(client.download_file_by_name.call_args.kwargs["checksum_check"])
+
     def test_existing_files_unsafe_selection_and_collisions_fail_before_download(self):
         client = MagicMock()
         with tempfile.TemporaryDirectory() as folder:
