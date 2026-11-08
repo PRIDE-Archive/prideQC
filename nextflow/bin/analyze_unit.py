@@ -69,9 +69,28 @@ def require_observed_spectra(path: Path) -> int:
     return total
 
 
+def analysis_timeout_s(size_bytes: int) -> int:
+    """Wall-clock limit for one `prideqc analyze`, scaled by file size.
+
+    Batch 003 (2026-11-07): 9 of 9,556 analyses (PXD004152, PXD017778; 1.4-2.7 GB)
+    ran at 100% CPU for >5 h. They were first killed at 2-7 min (exit 137, a memory kill),
+    then the 2x-memory retry hung until the Slurm time limit (exit 140, run terminated).
+    Normal tasks: b002 p99.9 16.7 min/GB, slowest 126 min (1.9 GB, download included).
+    Limit: 1 h per GB, at least 1 h, at most 3 h (below the 4 h Slurm limit of attempt 1).
+    A hung analysis must fail closed with a receipt instead of holding the batch.
+    """
+    gb = max(size_bytes, 0) / 1e9
+    return int(min(MAX_ANALYSIS_TIMEOUT_S, max(MIN_ANALYSIS_TIMEOUT_S, ANALYSIS_TIMEOUT_S_PER_GB * gb)))
+
+
+MIN_ANALYSIS_TIMEOUT_S = 60 * 60
+ANALYSIS_TIMEOUT_S_PER_GB = 60 * 60
+MAX_ANALYSIS_TIMEOUT_S = 3 * 3600
+
+
 def analyze(unit_dir: Path, output: Path, *, mass_error: bool = False,
             mass_shifts: bool = False, tmt_reporter: bool = False,
-            tmt_profile: bool = False) -> dict:
+            tmt_profile: bool = False, timeout_s: int | None = None) -> dict:
     unit = json.loads((unit_dir / "unit.json").read_text(encoding="utf-8"))
     if output.exists() and any(output.iterdir()):
         raise ValueError("Refusing nonempty unit result directory")
@@ -100,7 +119,21 @@ def analyze(unit_dir: Path, output: Path, *, mass_error: bool = False,
                 cmd.append("--tmt-reporter-evidence")
             if tmt_profile:
                 cmd.append("--tmt-profile-reporter-evidence")
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            limit = timeout_s if timeout_s is not None else analysis_timeout_s(source.stat().st_size)
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=limit)
+            except subprocess.TimeoutExpired as exc:
+                # subprocess.run kills the child on timeout. Fail closed, never retry:
+                # a retry with more memory does not help a hung analysis.
+                def tail(data: object) -> str:
+                    if isinstance(data, bytes):
+                        data = data.decode("utf-8", "replace")
+                    return data[-16000:] if isinstance(data, str) else ""
+                (output / "prideqc.stdout.log").write_text(tail(exc.stdout), encoding="utf-8")
+                (output / "prideqc.stderr.log").write_text(tail(exc.stderr), encoding="utf-8")
+                result.update(failure_stage="prideqc_analysis", error_type="AnalysisTimeout",
+                              resource_failure_kind="wall_clock_limit", analysis_timeout_s=limit)
+                return result
             # Keep bounded local logs; do not include full command, credentials, or URLs.
             (output / "prideqc.stdout.log").write_text(proc.stdout[-16000:], encoding="utf-8")
             (output / "prideqc.stderr.log").write_text(proc.stderr[-16000:], encoding="utf-8")

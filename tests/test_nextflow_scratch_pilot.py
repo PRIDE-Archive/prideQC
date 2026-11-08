@@ -118,6 +118,36 @@ class ScratchPilotTests(unittest.TestCase):
         self.assertEqual(source_qc.retry_exit_code(result, 2, 2), 0)     # last attempt: receipt stands
         self.assertEqual(source_qc.retry_exit_code({"error_type": "PrideqcNonzeroExit"}, 1, 2), 0)
 
+    def test_hung_analysis_times_out_fail_closed_and_is_not_retried(self):
+        archive = self.root / "hung.raw"
+        archive.write_bytes(b"x" * 64)
+        self._task(archive)
+        seen = {}
+
+        def hung(cmd, **kwargs):
+            seen["timeout"] = kwargs.get("timeout")
+            raise analyze_unit.subprocess.TimeoutExpired(cmd, kwargs.get("timeout"), output=b"partial", stderr=None)
+
+        with patch.object(analyze_unit.subprocess, "run", side_effect=hung), \
+                patch.object(source_qc.Path, "cwd", return_value=self.root):
+            result = source_qc.run(self.task, "ftp", self.root / "scratch-t", self.root / "ready-t", source=archive)
+        self.assertEqual(seen["timeout"], analyze_unit.MIN_ANALYSIS_TIMEOUT_S)   # 64 bytes: the floor
+        self.assertEqual((result["status"], result["failure_stage"], result["error_type"]),
+                         ("failed", "prideqc_analysis", "AnalysisTimeout"))
+        self.assertEqual(result["resource_failure_kind"], "wall_clock_limit")
+        self.assertEqual(source_qc.retry_exit_code(result, 1, 2), 0)            # never retried
+        self.assertFalse((self.root / "scratch-t").exists())                    # RAW scratch removed
+        receipt = next((self.root / "ready-t" / "units").glob("*/result.json"))
+        self.assertEqual(json.loads(receipt.read_text())["error_type"], "AnalysisTimeout")
+
+    def test_analysis_timeout_scales_with_size_and_is_bounded(self):
+        t = analyze_unit.analysis_timeout_s
+        self.assertEqual(t(0), 3600)
+        self.assertEqual(t(1_900_000_000), 6840)         # 1.9 GB: 1 h 54 min (b002 slowest task 126 min incl. download)
+        self.assertEqual(t(2_500_000_000), 9000)         # 2.5 GB: 2.5 h
+        self.assertEqual(t(5_900_000_000), 3 * 3600)     # capped below the 4 h Slurm limit
+        self.assertEqual(t(50_000_000_000), 3 * 3600)
+
     def test_thermo_open_failure_records_header_version(self):
         def header(version: int) -> bytes:
             head = b"\x01\xa1" + "Finnigan".encode("utf-16-le") + b"\x00" * 18
