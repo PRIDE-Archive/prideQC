@@ -6,8 +6,9 @@ listing against the project file count, classify each file by format, select one
 representation per logical run, and decide one of:
 
   QUEUE_NATIVE_RAW        Thermo .raw, qualified reader: send to the QC pipeline.
-  QUEUE_MZML_NO_VENDOR    .mzML with no vendor file of the same stem; reader
-                          qualification pending, so a separate lane.
+  QUEUE_MZML_NO_VENDOR    .mzML / .mzML.gz with no readable vendor file of the same stem
+                          (no vendor file, or only a vendor file without a supported
+                          reader: WIFF, Bruker, .raw.gz). Separate lane.
   DONE                    already canonical in a run index (export index.jsonl).
   FAILED_PREVIOUSLY       a failure receipt exists and no success; do not retry blindly.
   SKIP_<reason>           not queued; the reason is explicit.
@@ -244,6 +245,8 @@ def decide(project: dict[str, Any], processed: dict[tuple, str]) -> list[dict]:
     vendor_stems = {r["run_stem"] for r in rows if r["file_format"] in VENDOR_FORMATS}
     unsupported_vendor_stems = {r["run_stem"] for r in rows
                                 if r["file_format"] in VENDOR_FORMATS and r["file_format"] != "thermo_raw"}
+    # A stem with a readable Thermo .raw is never "unsupported", even if a .raw.gz copy also exists.
+    unsupported_vendor_stems -= {r["run_stem"] for r in rows if r["file_format"] == "thermo_raw"}
     for r in rows:
         kind = r["file_format"]
         done = processed.get((accession, r["file_name"].casefold()))
@@ -261,11 +264,16 @@ def decide(project: dict[str, Any], processed: dict[tuple, str]) -> list[dict]:
             r["decision"] = done or "QUEUE_NATIVE_RAW"
             r["reason"] = "VENDOR_RAW_PREFERRED"
         elif kind == "mzml":
-            if r["run_stem"] in vendor_stems:
+            # Policy (user, 2026-11-08): read mzML only when no vendor file exists for the
+            # run, or when the vendor file has no supported reader. A readable vendor file
+            # (Thermo .raw) always wins.
+            if r["run_stem"] in vendor_stems and r["run_stem"] not in unsupported_vendor_stems:
                 r["decision"] = "SKIP"
-                r["reason"] = ("SKIP_MZML_VENDOR_RAW_PREFERRED"
-                               if r["run_stem"] not in unsupported_vendor_stems
-                               else "SKIP_MZML_VENDOR_PRESENT_BUT_UNSUPPORTED_POLICY_PENDING")
+                r["reason"] = "SKIP_MZML_VENDOR_RAW_PREFERRED"
+                r["representation_evidence"] = "stem_match_unverified"
+            elif r["run_stem"] in unsupported_vendor_stems:
+                r["decision"] = done or "QUEUE_MZML_NO_VENDOR"
+                r["reason"] = "VENDOR_FILE_HAS_NO_SUPPORTED_READER"
                 r["representation_evidence"] = "stem_match_unverified"
             else:
                 r["decision"] = done or "QUEUE_MZML_NO_VENDOR"

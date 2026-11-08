@@ -56,6 +56,34 @@ def _expected_size_bytes(client: Any, accession: str, name: str) -> int | None:
     return None
 
 
+def _gzip_isize(path: Path) -> int | None:
+    """Uncompressed size modulo 2**32 from the gzip trailer, or None if not gzip."""
+    try:
+        with path.open("rb") as handle:
+            if handle.read(2) != b"\x1f\x8b":
+                return None
+            handle.seek(-4, 2)
+            return int.from_bytes(handle.read(4), "little")
+    except OSError:
+        return None
+
+
+def _size_matches(path: Path, actual: int, expected: int) -> str | None:
+    """Return the basis on which the downloaded size matches the PRIDE listing.
+
+    PRIDE lists some gzip files (e.g. PXD006392 *.mzML.gz, 2026-11-08) with the
+    UNCOMPRESSED size: the server sent 183,645,619 bytes, the listing says
+    460,186,169, and the gzip trailer ISIZE is 460,186,169. Accept that case only
+    when the trailer agrees. Gzip CRC and full length are verified later by
+    archive_units when the stream is read to EOF.
+    """
+    if actual == expected:
+        return "bytes"
+    if path.name.casefold().endswith(".gz") and _gzip_isize(path) == expected % (1 << 32):
+        return "gzip_isize"
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class DownloadOptions:
     protocol: str = "ftp"
@@ -158,7 +186,9 @@ class PrideRepository:
                             raise RuntimeError("pridepy did not produce a nonempty regular file.")
                         actual_size = downloaded.stat().st_size
                         record["size_bytes"] = actual_size
-                        if expected_size is not None and actual_size != expected_size:
+                        basis = (_size_matches(downloaded, actual_size, expected_size)
+                                 if expected_size is not None else None)
+                        if expected_size is not None and basis is None:
                             record["size_match"] = False
                             raise RuntimeError(
                                 "pridepy produced an incomplete download: "
@@ -166,6 +196,7 @@ class PrideRepository:
                             )
                         if expected_size is not None:
                             record["size_match"] = True
+                            record["size_match_basis"] = basis
                         final = target / name
                         downloaded.replace(final)
                         paths.append(final)

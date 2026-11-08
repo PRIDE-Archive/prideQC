@@ -334,6 +334,42 @@ class PrideTests(unittest.TestCase):
             self.assertEqual(file_record["size_bytes"], len(payload))
             self.assertTrue(file_record["size_match"])
 
+    def test_gzip_listed_with_uncompressed_size_is_accepted_only_on_trailer_match(self):
+        # PXD006392 *.mzML.gz: PRIDE lists the uncompressed size; the trailer ISIZE agrees.
+        import gzip as _gzip
+        body = b"<mzML>" + b"x" * 5000 + b"</mzML>"
+        payload = _gzip.compress(body)
+        for listed, ok in ((len(body), True), (len(body) + 1, False), (len(payload), True)):
+            client = MagicMock()
+            client.get_file_from_api.return_value = [{"fileName": "run.mzML.gz", "fileSizeBytes": listed}]
+            client.download_file_by_name.side_effect = lambda **a: (
+                Path(a["output_folder"]) / a["file_name"]).write_bytes(payload)
+            with tempfile.TemporaryDirectory() as folder:
+                destination = Path(folder) / "downloads"
+                if ok:
+                    PrideRepository(client).download_files(
+                        "PXD006392", ["run.mzML.gz"], destination,
+                        options=DownloadOptions(checksum_check=False))
+                    rec = json.loads((destination / "download-manifest.json").read_text())["files"][0]
+                    self.assertTrue(rec["size_match"])
+                    self.assertEqual(rec["size_match_basis"],
+                                     "bytes" if listed == len(payload) else "gzip_isize")
+                else:
+                    with self.assertRaises(RuntimeError):
+                        PrideRepository(client).download_files(
+                            "PXD006392", ["run.mzML.gz"], destination,
+                            options=DownloadOptions(checksum_check=False))
+                    self.assertFalse((destination / "run.mzML.gz").exists())
+
+    def test_non_gzip_file_never_uses_trailer_rule(self):
+        client = MagicMock()
+        client.get_file_from_api.return_value = [{"fileName": "run.raw", "fileSizeBytes": 999}]
+        client.download_file_by_name.side_effect = lambda **a: (
+            Path(a["output_folder"]) / a["file_name"]).write_bytes(b"\x1f\x8b" + b"\x00" * 6 + (999).to_bytes(4, "little"))
+        with tempfile.TemporaryDirectory() as folder, self.assertRaises(RuntimeError):
+            PrideRepository(client).download_files("PXD000001", ["run.raw"], Path(folder) / "d",
+                                                   options=DownloadOptions(checksum_check=False))
+
     def test_existing_files_unsafe_selection_and_collisions_fail_before_download(self):
         client = MagicMock()
         with tempfile.TemporaryDirectory() as folder:

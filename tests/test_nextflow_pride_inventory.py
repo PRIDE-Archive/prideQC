@@ -53,6 +53,24 @@ class InventoryTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
 
+    def test_mzml_used_only_when_no_readable_vendor_file(self):
+        api = FakeApi({"PXD000001": [
+            record("r1.raw"), record("r1.raw.gz"), record("r1.mzML.gz"),   # readable .raw wins over gz copy
+            record("b1.d.zip"), record("b1.mzML.gz"),                        # Bruker: no reader, use mzML
+            record("g1.raw.gz"), record("g1.mzML"),                          # only compressed RAW: use mzML
+            record("n1.mzML.gz"),                                            # no vendor file at all
+        ]})
+        INV.build(["PXD000001"], api, self.root / "p", workers=1)
+        r = rows(self.root / "p")
+        self.assertEqual(r["r1.raw"]["decision"], "QUEUE_NATIVE_RAW")
+        self.assertEqual((r["r1.mzML.gz"]["decision"], r["r1.mzML.gz"]["reason"]),
+                         ("SKIP", "SKIP_MZML_VENDOR_RAW_PREFERRED"))
+        for name in ("b1.mzML.gz", "g1.mzML"):
+            self.assertEqual((r[name]["decision"], r[name]["reason"]),
+                             ("QUEUE_MZML_NO_VENDOR", "VENDOR_FILE_HAS_NO_SUPPORTED_READER"))
+        self.assertEqual((r["n1.mzML.gz"]["decision"], r["n1.mzML.gz"]["reason"]),
+                         ("QUEUE_MZML_NO_VENDOR", "NO_VENDOR_FILE_WITH_SAME_STEM"))
+
     def test_formats_and_representation_choice(self):
         api = FakeApi({"PXD000001": [
             record("a.raw", 2_000_000_000), record("a.mzML"),            # RAW preferred
@@ -72,7 +90,8 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(r["b.mzML.gz"]["decision"], "QUEUE_MZML_NO_VENDOR")
         self.assertEqual(r["c.wiff"]["reason"], "SKIP_SCIEX_WIFF_NO_QUALIFIED_READER")
         self.assertEqual(r["c.wiff.scan"]["reason"], "SKIP_SCIEX_WIFF_SCAN_COMPANION")
-        self.assertEqual(r["c.mzML"]["reason"], "SKIP_MZML_VENDOR_PRESENT_BUT_UNSUPPORTED_POLICY_PENDING")
+        self.assertEqual(r["c.mzML"]["decision"], "QUEUE_MZML_NO_VENDOR")       # vendor WIFF has no reader
+        self.assertEqual(r["c.mzML"]["reason"], "VENDOR_FILE_HAS_NO_SUPPORTED_READER")
         self.assertEqual(r["d.zip"]["reason"], "SKIP_ARCHIVE_CONTENTS_NOT_INSPECTED")
         self.assertEqual(r["e.mzXML"]["reason"], "SKIP_MZXML_READER_NOT_QUALIFIED")
         self.assertEqual(r["f.d.zip"]["reason"], "SKIP_BRUKER_D_NO_QUALIFIED_READER")
@@ -81,11 +100,11 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(r["peaks.mgf"]["reason"], "SKIP_PEAK_LIST_NOT_A_RUN_REPRESENTATION")
         self.assertEqual(r["bad name.raw"]["reason"], "SKIP_UNSAFE_FILE_NAME")
         self.assertEqual(r["zero.raw"]["reason"], "SKIP_SIZE_UNKNOWN_OR_ZERO")
-        self.assertEqual(summary["queue_files"], 2)
+        self.assertEqual(summary["queue_files"], 3)
         self.assertFalse(summary["complete_study_asserted"])
         with (self.root / "out/queue.tsv").open() as handle:
             queue = list(csv.DictReader(handle, delimiter="\t"))
-        self.assertEqual({q["file_name"] for q in queue}, {"a.raw", "b.mzML.gz"})
+        self.assertEqual({q["file_name"] for q in queue}, {"a.raw", "b.mzML.gz", "c.mzML"})
 
     def test_count_mismatch_blocks_queueing_and_pages_are_followed(self):
         many = [record(f"r{i:03d}.raw") for i in range(INV.PAGE + 5)]
