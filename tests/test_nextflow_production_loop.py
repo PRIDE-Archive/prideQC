@@ -159,6 +159,21 @@ class ProductionLoopTests(unittest.TestCase):
                         runner=self.fake_runner(rc=1, completed=False), sleep=lambda s: None).run()
         self.assertEqual(result, "STOP_CONTROLLER_FAILED")
 
+    def test_excluded_accession_is_never_cut(self):
+        result = L.Loop(self.args(batches=1, dry_run=True, exclude_accession=["pxd000001"])).run()
+        self.assertEqual(result, "DRY_RUN")
+        cut = [json.loads(line) for line in (self.root / "work/loops/t1/loop.jsonl").read_text().splitlines()
+               if json.loads(line)["event"] == "CUT"][0]
+        self.assertEqual(cut["files"], 5)
+        L.Loop(self.args(batches=1, loop_id="t3", exclude_accession=["PXD000001", "PXD000002"]),
+               runner=self.fake_runner(), sleep=lambda s: None).run()
+        ctrl = next((self.root / "work/controllers").iterdir())
+        with (ctrl / "file-manifest.tsv").open() as fh:
+            accs = {r["pxd_accession"] for r in csv.DictReader(fh, delimiter="\t")}
+        self.assertEqual(accs, {"PXD000003"})
+        prov = json.loads((ctrl / "screen-provenance.json").read_text())
+        self.assertEqual(prov["rules"]["exclude_accession"], ["PXD000001", "PXD000002"])
+
     def test_killed_runner_still_gets_exitcode(self):
         def killed(ctrl, env):
             (ctrl / "launch-attempt.txt").write_text("x")

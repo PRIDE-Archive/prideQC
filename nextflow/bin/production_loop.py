@@ -344,7 +344,8 @@ class Loop:
         picked = Q.select(rows, max_files=self.a.max_files, max_bytes=int(self.a.max_gb * 1e9), large_files=0,
                           per_accession=self.a.per_accession, skip=skip,
                           max_file_bytes=int(self.a.max_file_gb * 1e9), max_accessions=self.a.max_accessions,
-                          first=retry, lane="QUEUE_NATIVE_RAW")
+                          first=retry, lane="QUEUE_NATIVE_RAW",
+                          exclude_accessions={a.upper() for a in self.a.exclude_accession})
         for r in picked:
             r["accession"] = r["accession"].upper()
         info = {"receipts": len(receipts), "skip_keys": len(skip), "retry_keys": len(retry), "in_flight": len(busy),
@@ -369,7 +370,8 @@ class Loop:
                  queue=self.a.queue, queue_sha256=sha256(Path(self.a.queue)), queue_rows=len(rows),
                  source=str(src), sif=str(sif), dry_run=self.a.dry_run)
         rules = {k: getattr(self.a, k) for k in ("max_files", "max_gb", "max_file_gb", "per_accession",
-                                                  "max_accessions", "min_success", "max_forks")}
+                                                  "max_accessions", "min_success", "max_forks",
+                                                  "exclude_accession")}
         for i in range(self.a.batches):
             n = self.a.first_batch + i
             reason = self.guard() or (None if self.a.dry_run else self.wait_for_idle())
@@ -430,6 +432,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--min-hours-left", type=float, default=8.0)
     ap.add_argument("--wait-active-hours", type=float, default=0.0,
                     help="Wait up to N hours for another active controller to finish")
+    ap.add_argument("--exclude-accession", action="append", default=[],
+                    help="Never take files from this accession (repeatable), e.g. known analysis hangs")
     ap.add_argument("--dry-run", action="store_true",
                     help="Scan and cut the first batch; write only the loop log and receipt cache; launch nothing")
     return ap
