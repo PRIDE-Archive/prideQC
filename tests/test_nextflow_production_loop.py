@@ -174,6 +174,35 @@ class ProductionLoopTests(unittest.TestCase):
         prov = json.loads((ctrl / "screen-provenance.json").read_text())
         self.assertEqual(prov["rules"]["exclude_accession"], ["PXD000001", "PXD000002"])
 
+    def test_download_failures_do_not_count_as_analysis_failures_until_outage_limit(self):
+        def runner(fail_first):
+            def run(ctrl, env):
+                prov = json.loads((ctrl / "screen-provenance.json").read_text())
+                (ctrl / "launch-attempt.txt").write_text("x")
+                with (ctrl / "file-manifest.tsv").open() as fh:
+                    tasks = list(csv.DictReader(fh, delimiter="\t"))
+                for i, r in enumerate(tasks):
+                    dl = i < fail_first
+                    receipt(self.root, prov["tag"], r["pxd_accession"], r["archive_file"], f"u{r['task_id']}",
+                            status="failed" if dl else "success",
+                            failure_stage="archive_preparation" if dl else None)
+                (ctrl / "nextflow.log").write_text(
+                    f"Workflow completed > WorkflowStats[succeededCount={len(tasks)}; failedCount=0; ...]")
+                (ctrl / "controller.exitcode").write_text("0\n")
+                return 0
+            return run
+        # 1 of 5 downloads fails (20%): below the 25% limit, analysis 4/4 = 100% -> PASS.
+        result = L.Loop(self.args(batches=1), runner=runner(1), sleep=lambda s: None).run()
+        self.assertEqual(result, "DONE")
+        last = [json.loads(line) for line in (self.root / "work/loops/t1/loop.jsonl").read_text().splitlines()
+                if json.loads(line)["event"] == "RESULT"][-1]
+        self.assertEqual((last["success_rate"], last["analysis_success_rate"], last["download_failures"]),
+                         (0.8, 1.0, 1))
+        # 2 of 5 (40%): above the limit -> STOP_DOWNLOAD_OUTAGE.
+        result = L.Loop(self.args(batches=1, first_batch=8, loop_id="t5"), runner=runner(2),
+                        sleep=lambda s: None).run()
+        self.assertEqual(result, "STOP_DOWNLOAD_OUTAGE")
+
     def test_killed_runner_still_gets_exitcode(self):
         def killed(ctrl, env):
             (ctrl / "launch-attempt.txt").write_text("x")

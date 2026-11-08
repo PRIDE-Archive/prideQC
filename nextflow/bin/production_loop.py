@@ -267,7 +267,16 @@ def run_controller(ctrl: Path, env: dict[str, str]) -> int:
     return subprocess.run(["bash", str(ctrl / "run-nextflow.sh")], env=env).returncode
 
 
-def evaluate(root: Path, tag: str, expected: int, min_success: float) -> dict:
+def evaluate(root: Path, tag: str, expected: int, min_success: float,
+             max_download_failure: float = 1.0) -> dict:
+    """Judge one finished batch.
+
+    Download failures (archive_preparation) are a PRIDE/FIRE availability problem, not an
+    engine problem, and the next batch retries them first (fewer than 3 attempts). Batch 004
+    (2026-11-08): a 03:00-04:20 UTC FIRE outage gave 1,216 HTTPError downloads (12.8%) while
+    analysis success was 99.9%. So the analysis rate is judged on attempted analyses only,
+    and download failures have their own limit (an outage above it stops the loop).
+    """
     ctrl = root / "work/controllers" / tag
     try:
         rc: int | None = int((ctrl / "controller.exitcode").read_text().strip())
@@ -279,17 +288,26 @@ def evaluate(root: Path, tag: str, expected: int, min_success: float) -> dict:
     rows = scan_tag(root / "results" / tag) if (root / "results" / tag).is_dir() else []
     keys = {(r["a"], r["f"]) for r in rows}
     ok_keys = {(r["a"], r["f"]) for r in rows if r.get("s") == "success"}
+    dl_keys = {(r["a"], r["f"]) for r in rows
+               if r.get("s") != "success" and r.get("st") == "archive_preparation"} - ok_keys
     rate = len(ok_keys) / expected if expected else 0.0
+    analysed = len(keys - dl_keys)
+    analysis_rate = len(ok_keys) / analysed if analysed else 0.0
+    download_failure_rate = len(dl_keys) / expected if expected else 0.0
     verdict = "PASS"
     if rc != 0 and not completed:
         verdict = "STOP_CONTROLLER_FAILED"
     elif len(keys) < expected:
         verdict = "STOP_MISSING_RECEIPTS"
-    elif rate < min_success:
+    elif download_failure_rate > max_download_failure:
+        verdict = "STOP_DOWNLOAD_OUTAGE"
+    elif analysis_rate < min_success:
         verdict = "STOP_LOW_SUCCESS"
     return {"tag": tag, "exitcode": rc, "workflow_completed_no_failed_tasks": completed,
             "receipts": len(keys), "success": len(ok_keys), "expected": expected,
-            "success_rate": round(rate, 4), "work_left": (root / "work" / tag).exists(), "verdict": verdict}
+            "success_rate": round(rate, 4), "analysis_success_rate": round(analysis_rate, 4),
+            "download_failures": len(dl_keys), "download_failure_rate": round(download_failure_rate, 4),
+            "work_left": (root / "work" / tag).exists(), "verdict": verdict}
 
 
 # ---------------------------------------------------------------- loop
@@ -370,7 +388,8 @@ class Loop:
                  queue=self.a.queue, queue_sha256=sha256(Path(self.a.queue)), queue_rows=len(rows),
                  source=str(src), sif=str(sif), dry_run=self.a.dry_run)
         rules = {k: getattr(self.a, k) for k in ("max_files", "max_gb", "max_file_gb", "per_accession",
-                                                  "max_accessions", "min_success", "max_forks",
+                                                  "max_accessions", "min_success", "max_download_failure",
+                                                  "max_forks",
                                                   "exclude_accession")}
         for i in range(self.a.batches):
             n = self.a.first_batch + i
@@ -397,7 +416,7 @@ class Loop:
             rc = self.runner(ctrl, dict(os.environ))
             if not (ctrl / "controller.exitcode").is_file():   # runner shell killed: record it, do not hang
                 (ctrl / "controller.exitcode").write_text(f"{rc}\n", encoding="utf-8")
-            result = evaluate(self.root, tag, len(picked), self.a.min_success)
+            result = evaluate(self.root, tag, len(picked), self.a.min_success, self.a.max_download_failure)
             result["hours"] = round((time.time() - start) / 3600, 2)
             result["gb_per_min"] = round(info["total_gb"] / max((time.time() - start) / 60, 1e-9), 1)
             self.log("RESULT", batch=n, **result)
@@ -425,7 +444,11 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--per-accession", type=int, default=200)
     ap.add_argument("--max-accessions", type=int, default=300)
     ap.add_argument("--min-files", type=int, default=1000)
-    ap.add_argument("--min-success", type=float, default=0.95)
+    ap.add_argument("--min-success", type=float, default=0.95,
+                    help="Minimum success rate of ATTEMPTED analyses (download failures excluded)")
+    ap.add_argument("--max-download-failure", type=float, default=0.25,
+                    help="Stop when download failures exceed this fraction of the batch (sustained FIRE outage); "
+                         "below it the next batch retries them first")
     ap.add_argument("--max-forks", type=int, default=120)
     ap.add_argument("--nxf-opts", default="-Xms1g -Xmx4g")
     ap.add_argument("--min-free-gb", type=float, default=500.0)
