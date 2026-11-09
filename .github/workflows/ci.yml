@@ -43,3 +43,4 @@ jobs:
       - run: >-
           uv run --python 3.9 --no-project python -m unittest -v
           tests.test_nextflow_production_loop tests.test_nextflow_queue_to_manifest tests.test_nextflow_pride_inventory
+          tests.test_nextflow_upload_qc_mongo
