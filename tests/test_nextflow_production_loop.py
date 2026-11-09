@@ -203,6 +203,29 @@ class ProductionLoopTests(unittest.TestCase):
                         sleep=lambda s: None).run()
         self.assertEqual(result, "STOP_DOWNLOAD_OUTAGE")
 
+    def test_mzml_lane_only_accession_runs_beside_raw_loop(self):
+        with self.queue.open("a", newline="") as fh:
+            for i in range(3):
+                fh.write(f"PXD082223\tm{i}.mzML\tmzml\t230000\t\t16\tQUEUE_MZML_NO_VENDOR\n")
+        raw = self.root / "work/controllers/prideqc-prod-raw-b005-x"
+        raw.mkdir()
+        (raw / "launch-attempt.txt").write_text("x")
+        # Without --concurrent-with the mzML loop waits for (and here stops on) the RAW controller.
+        self.assertTrue(L.Loop(self.args(lane="QUEUE_MZML_NO_VENDOR", only_accession=["PXD082223"]),
+                               runner=self.fake_runner(), sleep=lambda s: None).run().startswith("ACTIVE"))
+        result = L.Loop(self.args(batches=1, loop_id="m1", lane="QUEUE_MZML_NO_VENDOR",
+                                  only_accession=["PXD082223"], concurrent_with=["prideqc-prod-raw-"],
+                                  tag_prefix="prideqc-prod-mzml"),
+                        runner=self.fake_runner(), sleep=lambda s: None).run()
+        self.assertEqual(result, "DONE")
+        ctrl = next(c for c in (self.root / "work/controllers").iterdir() if c.name.startswith("prideqc-prod-mzml"))
+        with (ctrl / "file-manifest.tsv").open() as fh:
+            names = {r["archive_file"] for r in csv.DictReader(fh, delimiter="\t")}
+        self.assertEqual(names, {"m0.mzML", "m1.mzML", "m2.mzML"})     # mzML only, PXD082223 only
+        prov = json.loads((ctrl / "screen-provenance.json").read_text())
+        self.assertEqual((prov["rules"]["lane"], prov["rules"]["only_accession"]),
+                         ("QUEUE_MZML_NO_VENDOR", ["PXD082223"]))
+
     def test_killed_runner_still_gets_exitcode(self):
         def killed(ctrl, env):
             (ctrl / "launch-attempt.txt").write_text("x")

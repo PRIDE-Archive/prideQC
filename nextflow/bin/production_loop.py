@@ -43,6 +43,10 @@ UTC = dt.timezone.utc  # noqa: UP017
 MAX_DOWNLOAD_RECEIPTS = 3
 COMPLETED = re.compile(r"Workflow completed > WorkflowStats\[succeededCount=(\d+); failedCount=(\d+)")
 FILE_NAME = re.compile(r"[A-Za-z0-9_.+\-]+\.raw\Z", flags=re.IGNORECASE)
+LANE_FILE_NAME = {
+    "QUEUE_NATIVE_RAW": FILE_NAME,
+    "QUEUE_MZML_NO_VENDOR": re.compile(r"[A-Za-z0-9_.+\-]+\.mzml(\.gz)?\Z", flags=re.IGNORECASE),
+}
 ACCESSION = re.compile(r"PXD\d{6,}\Z")
 
 
@@ -204,13 +208,14 @@ def resources_config(max_forks: int) -> str:
 
 
 def write_controller(root: Path, tag: str, picked: list[dict], *, source: Path, sif: Path,
-                     sif_sha256: str, rules: dict, nxf_opts: str, max_forks: int, loop_id: str) -> Path:
+                     sif_sha256: str, rules: dict, nxf_opts: str, max_forks: int, loop_id: str,
+                     lane: str = "QUEUE_NATIVE_RAW") -> Path:
     ctrl_root = root / "work/controllers"
     ctrl, work, out = ctrl_root / tag, root / "work" / tag, root / "results" / tag
     if any(p.exists() or p.is_symlink() for p in (ctrl, work, out)):
         raise ValueError(f"EXISTING_CONTROLLER_OUTPUT_OR_WORK_{tag}")
     for r in picked:
-        if not ACCESSION.fullmatch(r["accession"]) or not FILE_NAME.fullmatch(r["file_name"]):
+        if not ACCESSION.fullmatch(r["accession"]) or not LANE_FILE_NAME[lane].fullmatch(r["file_name"]):
             raise ValueError(f"UNSAFE_ROW_{r['accession']}_{r['file_name']}")
     ctrl.mkdir(mode=0o750)
     tasks = [{"task_id": str(i), "pxd_accession": r["accession"], "archive_file": r["file_name"],
@@ -345,7 +350,8 @@ class Loop:
     def wait_for_idle(self) -> str | None:
         deadline = time.time() + self.a.wait_active_hours * 3600
         while True:
-            busy = active_controllers(self.root)
+            busy = [t for t in active_controllers(self.root)
+                    if not any(t.startswith(p) for p in self.a.concurrent_with)]
             if not busy:
                 return None
             if time.time() >= deadline:
@@ -362,7 +368,7 @@ class Loop:
         picked = Q.select(rows, max_files=self.a.max_files, max_bytes=int(self.a.max_gb * 1e9), large_files=0,
                           per_accession=self.a.per_accession, skip=skip,
                           max_file_bytes=int(self.a.max_file_gb * 1e9), max_accessions=self.a.max_accessions,
-                          first=retry, lane="QUEUE_NATIVE_RAW",
+                          first=retry, lane=self.a.lane,
                           exclude_accessions={a.upper() for a in self.a.exclude_accession})
         for r in picked:
             r["accession"] = r["accession"].upper()
@@ -378,10 +384,12 @@ class Loop:
             self.log("STOP", reason="SIF_HASH_MISMATCH")
             return "SIF_HASH_MISMATCH"
         Q = load_queue_module(src)
+        only = {a.upper() for a in self.a.only_accession}
         with Path(self.a.queue).open(encoding="utf-8", newline="") as fh:
             keep = ("accession", "file_name", "file_size_bytes", "memory_gb", "decision")
             rows = [{k: r.get(k, "") for k in keep} for r in csv.DictReader(fh, delimiter="\t")
-                    if r.get("decision") == "QUEUE_NATIVE_RAW"]
+                    if r.get("decision") == self.a.lane
+                    and (not only or r.get("accession", "").upper() in only)]
         for r in rows:
             r["accession"] = r["accession"].upper()
         self.log("START", loop_id=self.a.loop_id, batches=self.a.batches, first_batch=self.a.first_batch,
@@ -389,7 +397,7 @@ class Loop:
                  source=str(src), sif=str(sif), dry_run=self.a.dry_run)
         rules = {k: getattr(self.a, k) for k in ("max_files", "max_gb", "max_file_gb", "per_accession",
                                                   "max_accessions", "min_success", "max_download_failure",
-                                                  "max_forks",
+                                                  "max_forks", "lane", "only_accession",
                                                   "exclude_accession")}
         for i in range(self.a.batches):
             n = self.a.first_batch + i
@@ -410,7 +418,7 @@ class Loop:
                 return "DRY_RUN"
             ctrl = write_controller(self.root, tag, picked, source=src, sif=sif, sif_sha256=self.a.sif_sha256,
                                     rules=rules, nxf_opts=self.a.nxf_opts, max_forks=self.a.max_forks,
-                                    loop_id=self.a.loop_id)
+                                    loop_id=self.a.loop_id, lane=self.a.lane)
             self.log("LAUNCH", batch=n, tag=tag, controller=str(ctrl))
             start = time.time()
             rc = self.runner(ctrl, dict(os.environ))
@@ -457,6 +465,12 @@ def parser() -> argparse.ArgumentParser:
                     help="Wait up to N hours for another active controller to finish")
     ap.add_argument("--exclude-accession", action="append", default=[],
                     help="Never take files from this accession (repeatable), e.g. known analysis hangs")
+    ap.add_argument("--only-accession", action="append", default=[],
+                    help="Take files only from these accessions (repeatable)")
+    ap.add_argument("--lane", choices=sorted(LANE_FILE_NAME), default="QUEUE_NATIVE_RAW")
+    ap.add_argument("--concurrent-with", action="append", default=[],
+                    help="Do not wait for active controllers whose tag starts with this prefix "
+                         "(repeatable); lets a separate lane run beside another loop")
     ap.add_argument("--dry-run", action="store_true",
                     help="Scan and cut the first batch; write only the loop log and receipt cache; launch nothing")
     return ap
