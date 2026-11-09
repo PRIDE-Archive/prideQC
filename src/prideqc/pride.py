@@ -24,7 +24,8 @@ class DownloadClient(Protocol):
     ) -> Any: ...
 
 
-def _expected_size_bytes(client: Any, accession: str, name: str) -> int | None:
+def _expected_size_bytes(client: Any, accession: str, name: str,
+                        records: list[dict] | None = None) -> int | None:
     """Return a unique positive PRIDE API file size when available.
 
     pridepy validates only existence/non-emptiness when checksum checking is
@@ -32,15 +33,10 @@ def _expected_size_bytes(client: Any, accession: str, name: str) -> int | None:
     file that looks valid to pridepy. Use the normal project file listing as
     an independent size guard without depending on the checksum endpoint.
     """
-    lookup = getattr(client, "get_file_from_api", None)
-    if not callable(lookup):
-        return None
-    try:
-        records = lookup(accession, name)
-    except Exception:
-        return None
+    if records is None:
+        records = _listing_records(client, accession, name)
     sizes: set[int] = set()
-    for record in records or []:
+    for record in records:
         if not isinstance(record, dict) or record.get("fileName") != name:
             continue
         value = record.get("fileSizeBytes")
@@ -57,6 +53,60 @@ def _expected_size_bytes(client: Any, accession: str, name: str) -> int | None:
     return None
 
 
+PRIDE_V3 = "https://www.ebi.ac.uk/pride/ws/archive/v3"
+
+
+def _fetch_json(url: str, timeout: int = 120) -> Any:
+    import json
+    import urllib.request
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - fixed https PRIDE API
+        return json.loads(response.read().decode("utf-8"))
+
+
+HUGE_PROJECT_FILES = 20_000
+
+
+def _is_huge(accession: str) -> bool:
+    """True when the project has more than HUGE_PROJECT_FILES files (cheap count call)."""
+    try:
+        return int(_fetch_json(f"{PRIDE_V3}/projects/{accession}/files/count", timeout=60)) > HUGE_PROJECT_FILES
+    except Exception:
+        return False
+
+
+def _provider(client: Any, accession: str) -> Any:
+    """The pridepy provider that owns this accession (PRIDE for PXD), or None."""
+    test_provider = getattr(client, "_provider_for_tests", None)
+    if test_provider is not None:
+        return test_provider
+    try:
+        from pridepy.download import registry
+        return registry.resolve(accession)
+    except Exception:
+        return None
+
+
+def _single_file_records(accession: str, name: str) -> list[dict] | None:
+    """One-file PRIDE listing lookup; None if the API call fails.
+
+    pridepy's find_file() streams /projects/{acc}/files/all for every file. For
+    PXD082223 (237,219 files) one such stream takes more than 10 minutes, and it
+    runs up to 3 times per download. `filenameFilter` returns the one record in
+    about 2-6 s. It is a substring filter, so keep exact name matches only.
+    """
+    from urllib.parse import quote
+    url = (f"{PRIDE_V3}/projects/{accession}/files?filenameFilter={quote(name)}"
+           "&pageSize=100&page=0")
+    try:
+        data = _fetch_json(url)
+    except Exception:
+        return None
+    if not isinstance(data, list):
+        return None
+    return [r for r in data if isinstance(r, dict) and r.get("fileName") == name]
+
+
 def _listing_records(client: Any, accession: str, name: str) -> list[dict]:
     lookup = getattr(client, "get_file_from_api", None)
     if not callable(lookup):
@@ -68,7 +118,8 @@ def _listing_records(client: Any, accession: str, name: str) -> list[dict]:
     return [r for r in records or [] if isinstance(r, dict) and r.get("fileName") == name]
 
 
-def _expected_sha1(client: Any, accession: str, name: str) -> str | None:
+def _expected_sha1(client: Any, accession: str, name: str,
+                   records: list[dict] | None = None) -> str | None:
     """Return the unique SHA1 from the PRIDE project file listing, if any.
 
     2026-11-08: /ws/archive/v3/files/checksum/<PXD> returned HTTP 500 for 38 of 40
@@ -76,7 +127,9 @@ def _expected_sha1(client: Any, accession: str, name: str) -> str | None:
     listing carries a per-file SHA1 (verified equal to sha1sum on complete downloads),
     so we verify that instead and do not depend on the checksum endpoint.
     """
-    values = {str(r.get("checksum", "")).strip().lower() for r in _listing_records(client, accession, name)}
+    if records is None:
+        records = _listing_records(client, accession, name)
+    values = {str(r.get("checksum", "")).strip().lower() for r in records}
     values = {v for v in values if re.fullmatch(r"[0-9a-f]{40}", v)}
     return values.pop() if len(values) == 1 else None
 
@@ -164,8 +217,10 @@ class PrideRepository:
     serialized.
     """
 
-    def __init__(self, client: DownloadClient | None = None) -> None:
+    def __init__(self, client: DownloadClient | None = None, *, direct_lookup: bool | None = None) -> None:
         self._client = client
+        # Real pridepy client: use the one-file lookup. Injected test clients: opt in only.
+        self._direct_lookup = (client is None) if direct_lookup is None else direct_lookup
 
     def _get_client(self) -> DownloadClient:
         if self._client is None:
@@ -200,23 +255,40 @@ class PrideRepository:
             for name in names:
                 record: dict[str, Any] = {"filename": name, "status": "failed"}
                 records.append(record)
-                expected_size = _expected_size_bytes(client, accession, name)
+                single = _single_file_records(accession, name) if self._direct_lookup else None
+                listing = single if single else _listing_records(client, accession, name)
+                record["lookup"] = "filename_filter" if single else "pridepy_listing"
+                expected_size = _expected_size_bytes(client, accession, name, listing)
                 if expected_size is not None:
                     record["expected_size_bytes"] = expected_size
                 # With a listing SHA1, verify it ourselves and skip pridepy's checksum-endpoint path.
-                expected_sha1 = _expected_sha1(client, accession, name) if options.checksum_check else None
-                pridepy_checksum = options.checksum_check and expected_sha1 is None
+                expected_sha1 = _expected_sha1(client, accession, name, listing) if options.checksum_check else None
+                # Huge projects: /files/checksum/<PXD> takes about 3 min and returns HTTP 500
+                # (PXD082223, 2026-11-09). Without a listing SHA1 we keep the size guard only.
+                pridepy_checksum = (options.checksum_check and expected_sha1 is None
+                                    and not (single and _is_huge(accession)))
                 record["checksum_method"] = ("listing_sha1" if expected_sha1 else
-                                             "pridepy" if pridepy_checksum else "none")
+                                             "pridepy" if pridepy_checksum else
+                                             "size_only" if expected_size is not None else "none")
                 try:
                     with TemporaryDirectory(prefix=".prideqc-", dir=target) as staging:
-                        transfer_result = client.download_file_by_name(
-                            accession=accession, file_name=name, output_folder=staging,
-                            skip_if_downloaded_already=False, protocol=options.protocol,
-                            username=username, password=password,
-                            aspera_maximum_bandwidth=options.aspera_maximum_bandwidth,
-                            checksum_check=pridepy_checksum,
-                        )
+                        by_records = getattr(_provider(client, accession), "download_files", None)
+                        if single and callable(by_records) and not username:
+                            # Same pridepy transport and protocol fallback, without find_file().
+                            transfer_result = by_records(
+                                accession=accession, records=single, output_folder=staging,
+                                skip_if_downloaded_already=False, protocol=options.protocol,
+                                checksum_check=pridepy_checksum,
+                                aspera_maximum_bandwidth=options.aspera_maximum_bandwidth,
+                            )
+                        else:
+                            transfer_result = client.download_file_by_name(
+                                accession=accession, file_name=name, output_folder=staging,
+                                skip_if_downloaded_already=False, protocol=options.protocol,
+                                username=username, password=password,
+                                aspera_maximum_bandwidth=options.aspera_maximum_bandwidth,
+                                checksum_check=pridepy_checksum,
+                            )
                         if transfer_result is False:
                             raise RuntimeError("pridepy reported an unsuccessful transfer.")
                         downloaded = Path(staging) / name

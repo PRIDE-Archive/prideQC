@@ -396,6 +396,49 @@ class PrideTests(unittest.TestCase):
                 # pridepy is never asked to fetch the checksum endpoint when a listing SHA1 exists
                 self.assertFalse(client.download_file_by_name.call_args.kwargs["checksum_check"])
 
+    def test_single_file_lookup_skips_project_listing_and_checksum_endpoint(self):
+        # PXD082223: 237k files; pridepy's find_file() streams /files/all per file (>10 min).
+        from unittest.mock import patch
+
+        import prideqc.pride as pride_module
+        payload = b"<mzML>maldi</mzML>"
+        rec = {"fileName": "s.mzML", "fileSizeBytes": len(payload), "checksum": "",
+               "publicFileLocations": [{"name": "FTP Protocol", "value": "ftp://x/s.mzML"}]}
+        provider = MagicMock()
+        provider.download_files.side_effect = lambda **a: (
+            Path(a["output_folder"]) / a["records"][0]["fileName"]).write_bytes(payload)
+        client = MagicMock()
+        client._provider_for_tests = provider
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(pride_module, "_single_file_records", return_value=[rec]) as one, \
+                patch.object(pride_module, "_is_huge", return_value=True):
+            destination = Path(folder) / "d"
+            paths = PrideRepository(client, direct_lookup=True).download_files(
+                "PXD082223", ["s.mzML"], destination)
+            self.assertEqual(paths, [destination / "s.mzML"])
+            one.assert_called_once_with("PXD082223", "s.mzML")
+            client.get_file_from_api.assert_not_called()          # no /files/all stream
+            client.download_file_by_name.assert_not_called()      # no find_file()
+            kwargs = provider.download_files.call_args.kwargs
+            self.assertEqual(kwargs["records"], [rec])
+            self.assertFalse(kwargs["checksum_check"])            # huge: skip /files/checksum
+            got = json.loads((destination / "download-manifest.json").read_text())["files"][0]
+            self.assertEqual((got["lookup"], got["checksum_method"], got["size_match"]),
+                             ("filename_filter", "size_only", True))
+
+    def test_single_file_lookup_failure_falls_back_to_pridepy(self):
+        from unittest.mock import patch
+
+        import prideqc.pride as pride_module
+        client = MagicMock()
+        client.download_file_by_name.side_effect = write_download
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(pride_module, "_single_file_records", return_value=None):
+            PrideRepository(client, direct_lookup=True).download_files("PXD008644", ["run.mzML"], Path(folder) / "d")
+            client.download_file_by_name.assert_called_once()
+            got = json.loads((Path(folder) / "d/download-manifest.json").read_text())["files"][0]
+            self.assertEqual(got["lookup"], "pridepy_listing")
+
     def test_existing_files_unsafe_selection_and_collisions_fail_before_download(self):
         client = MagicMock()
         with tempfile.TemporaryDirectory() as folder:
