@@ -16,7 +16,8 @@ from pathlib import Path
 from archive_units import ArchiveError, expand
 
 _TRANSFER_FIELDS = ("filename", "status", "size_bytes", "expected_size_bytes",
-                    "size_match", "size_match_basis", "checksum_method", "sha1_match", "error_type")
+                    "size_match", "size_match_basis", "checksum_method", "sha1_match", "lookup",
+                    "error_type")
 
 
 def _sha256(path: Path) -> str:
