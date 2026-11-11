@@ -94,7 +94,9 @@ def collect(roots: list) -> list:
                        unit_id=data.get("unit_id"), task_id=data.get("task_id"),
                        status=data.get("status"), failure_stage=data.get("failure_stage"),
                        error_type=data.get("error_type"), exit_code=data.get("exit_code"),
-                       reader_failure_kind=data.get("reader_failure_kind"))
+                       reader_failure_kind=data.get("reader_failure_kind"),
+                       download_failure_kind=data.get("download_failure_kind"),
+                       download_http_status=data.get("download_http_status"))
             if not ACCESSION.fullmatch(accession) or accession_dir.name != accession:
                 records.append(dict(rec, role="rejected", reject_reason="accession_mismatch"))
                 continue

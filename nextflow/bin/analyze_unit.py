@@ -104,6 +104,9 @@ def analyze(unit_dir: Path, output: Path, *, mass_error: bool = False,
         if unit["discovery_status"] != "success":
             result["failure_stage"] = unit.get("failure_stage", "archive_preparation")
             result["error_type"] = unit.get("error_type", "DiscoveryFailed")
+            for key in ("download_failure_kind", "download_http_status"):
+                if key in unit:
+                    result[key] = unit[key]
         else:
             source = unit_dir / unit["input_basename"]
             if source.is_symlink() or not source.exists():

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -22,6 +24,97 @@ class DownloadClient(Protocol):
         skip_if_downloaded_already: bool, protocol: str, username: str | None,
         password: str | None, aspera_maximum_bandwidth: str, checksum_check: bool,
     ) -> Any: ...
+
+
+# Fixed failure kinds. Receipts keep only these labels and HTTP status codes, never
+# upstream text (it can contain authenticated URLs). Order matters: first match wins.
+_KIND_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("checksum_mismatch", re.compile(r"checksum (validation failed|mismatch)|sha1 does not match", re.I)),
+    ("incomplete", re.compile(r"incomplete download|nonempty regular file", re.I)),
+    ("listing_unavailable", re.compile(r"could not list files|unable to list|returned no data", re.I)),
+    ("not_found", re.compile(r"\bno[tw] found\b|not present in pride|404 client error", re.I)),
+    ("access_denied", re.compile(r"40[13] client error|must provide a username|don't have access", re.I)),
+    ("http_server_error", re.compile(r"\b5\d\d server error", re.I)),
+    ("timeout", re.compile(r"timed? ?out|timeout", re.I)),
+    ("connection", re.compile(r"connection (aborted|reset|refused|error)|remotedisconnected|"
+                              r"max retries exceeded|name or service not known|broken pipe", re.I)),
+)
+_HTTP_STATUS = re.compile(r"\b([1-5]\d\d) (?:client|server) error", re.I)
+_TYPE_KINDS = {"TimeoutError": "timeout", "timeout": "timeout", "ReadTimeout": "timeout",
+               "ConnectTimeout": "timeout", "ConnectionError": "connection",
+               "RemoteDisconnected": "connection", "ConnectionResetError": "connection",
+               "ChunkedEncodingError": "connection", "IncompleteRead": "incomplete"}
+
+
+def classify_text(text: str) -> tuple[str | None, int | None]:
+    """Map one error or log message to (kind, HTTP status). The text itself is discarded."""
+    # pridepy get_file_from_api wraps every lookup error as "File not found " + original
+    # text, so a listing timeout must not read as not_found. Classify the inner text first.
+    inner = text[len("File not found "):] if text.startswith("File not found ") else None
+    if inner is not None:
+        kind, status = classify_text(inner)
+        return (kind or "not_found"), status
+    kind = next((k for k, p in _KIND_PATTERNS if p.search(text)), None)
+    match = _HTTP_STATUS.search(text)
+    status = int(match.group(1)) if match else None
+    if kind is None and status is not None:
+        kind = "http_server_error" if status >= 500 else "http_client_error"
+    return kind, status
+
+
+def classify_failure(exc: BaseException, log_messages: Iterable[str] = ()) -> dict[str, Any]:
+    """Safe download failure detail: kind, root exception class, HTTP codes, attempt kinds."""
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen and len(chain) < 10:
+        seen.add(id(current))
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    root = chain[-1]
+    statuses: set[int] = set()
+    kind = None
+    for item in reversed(chain):  # deepest cause first
+        response = getattr(item, "response", None)
+        code = getattr(response, "status_code", None)
+        if isinstance(code, int):
+            statuses.add(code)
+        k, s = classify_text(str(item))
+        if s is not None:
+            statuses.add(s)
+        kind = kind or _TYPE_KINDS.get(type(item).__name__) or k
+    attempts: Counter[str] = Counter()
+    for message in log_messages:
+        k, s = classify_text(message)
+        if k is not None:
+            attempts[k] += 1
+        if s is not None:
+            statuses.add(s)
+    if kind is None and attempts:
+        kind = attempts.most_common(1)[0][0]
+    detail: dict[str, Any] = {"failure_kind": kind or "unknown",
+                              "root_error_type": type(root).__name__}
+    if statuses:
+        detail["http_status"] = sorted(statuses)
+    if attempts:
+        detail["attempt_failure_kinds"] = dict(sorted(attempts.items()))
+    return detail
+
+
+class _MessageCapture(logging.Handler):
+    """Hold WARNING+ messages in memory only, for classification; never written out."""
+
+    def __init__(self, limit: int = 200) -> None:
+        super().__init__(logging.WARNING)
+        self.messages: list[str] = []
+        self.limit = limit
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if len(self.messages) < self.limit:
+            try:
+                self.messages.append(record.getMessage())
+            except Exception:  # noqa: BLE001 - a bad log record must not break a download
+                pass
 
 
 def _expected_size_bytes(client: Any, accession: str, name: str,
@@ -270,6 +363,8 @@ class PrideRepository:
                 record["checksum_method"] = ("listing_sha1" if expected_sha1 else
                                              "pridepy" if pridepy_checksum else
                                              "size_only" if expected_size is not None else "none")
+                capture = _MessageCapture()
+                logging.getLogger().addHandler(capture)
                 try:
                     with TemporaryDirectory(prefix=".prideqc-", dir=target) as staging:
                         by_records = getattr(_provider(client, accession), "download_files", None)
@@ -319,10 +414,13 @@ class PrideRepository:
                     # Upstream errors may contain authenticated URLs. Do not copy
                     # their text into manifests or the public CLI error message.
                     record["error_type"] = type(exc).__name__
+                    record.update(classify_failure(exc, capture.messages))
                     raise RuntimeError(
                         f"PRIDE download failed for {accession}/{name} ({type(exc).__name__}). "
                         f"See {target / 'download-manifest.json'}."
                     ) from None
+                finally:
+                    logging.getLogger().removeHandler(capture)
         finally:
             write_json(target / "download-manifest.json", {
                 "engine": "pridepy", "engine_version": dependency_version("pridepy"),

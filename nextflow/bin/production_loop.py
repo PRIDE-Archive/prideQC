@@ -32,7 +32,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -79,7 +79,8 @@ def scan_tag(tag_dir: Path) -> list[dict]:
         if not name:
             continue
         rows.append({"a": d["accession"].upper(), "f": name.casefold(), "s": d.get("status"),
-                     "st": d.get("failure_stage"), "x": d.get("exit_code"), "e": d.get("error_type")})
+                     "st": d.get("failure_stage"), "x": d.get("exit_code"), "e": d.get("error_type"),
+                     "k": d.get("download_failure_kind")})
     return rows
 
 
@@ -299,6 +300,9 @@ def evaluate(root: Path, tag: str, expected: int, min_success: float,
     analysed = len(keys - dl_keys)
     analysis_rate = len(ok_keys) / analysed if analysed else 0.0
     download_failure_rate = len(dl_keys) / expected if expected else 0.0
+    # Receipts before 2026-11-11 have no kind: they count as "unrecorded".
+    dl_kinds = Counter(r.get("k") or "unrecorded" for r in rows
+                       if (r["a"], r["f"]) in dl_keys and r.get("s") != "success")
     verdict = "PASS"
     if rc != 0 and not completed:
         verdict = "STOP_CONTROLLER_FAILED"
@@ -312,6 +316,7 @@ def evaluate(root: Path, tag: str, expected: int, min_success: float,
             "receipts": len(keys), "success": len(ok_keys), "expected": expected,
             "success_rate": round(rate, 4), "analysis_success_rate": round(analysis_rate, 4),
             "download_failures": len(dl_keys), "download_failure_rate": round(download_failure_rate, 4),
+            "download_failure_kinds": dict(sorted(dl_kinds.items())),
             "work_left": (root / "work" / tag).exists(), "verdict": verdict}
 
 

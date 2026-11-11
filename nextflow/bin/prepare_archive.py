@@ -17,7 +17,21 @@ from archive_units import ArchiveError, expand
 
 _TRANSFER_FIELDS = ("filename", "status", "size_bytes", "expected_size_bytes",
                     "size_match", "size_match_basis", "checksum_method", "sha1_match", "lookup",
-                    "error_type")
+                    "error_type", "failure_kind", "root_error_type", "http_status",
+                    "attempt_failure_kinds")
+
+
+def _download_detail(transfer_records: dict | None) -> dict:
+    """Failure kind and HTTP codes of the failed transfer record (fixed labels only)."""
+    failed = [rec for rec in (transfer_records or {}).get("files") or []
+              if rec.get("status") == "failed"]
+    if not failed:
+        return {}
+    rec = failed[-1]
+    detail = {"download_failure_kind": rec.get("failure_kind") or "unknown"}
+    if rec.get("http_status"):
+        detail["download_http_status"] = rec["http_status"]
+    return detail
 
 
 def _sha256(path: Path) -> str:
@@ -60,6 +74,7 @@ def prepare(task_file: Path, protocol: str, outdir: Path,
     transfer = outdir / "download"
     status = "success"
     error_type = None
+    detail: dict = {}
     evidence: dict = {"checksum_check_requested": bool(checksum),
                       "transfer": "local_source" if source is not None else protocol}
     try:
@@ -104,6 +119,7 @@ def prepare(task_file: Path, protocol: str, outdir: Path,
         # Never serialize upstream download exceptions; they may contain private URLs.
         status = "failed"
         error_type = type(exc).__name__
+        detail = _download_detail(_transfer_records(transfer))
         # Drop any partially materialized units: exactly one failure sentinel remains.
         shutil.rmtree(units, ignore_errors=True)
         units.mkdir()
@@ -115,6 +131,7 @@ def prepare(task_file: Path, protocol: str, outdir: Path,
             "discovery_status": "failed", "failure_stage": "archive_preparation",
             "error_type": error_type,
             "unit_id": f"archive-{task_id:09d}-failure",
+            **detail,
         }, indent=2, sort_keys=True) + "\n")
         count = 1
     summary = {"schema_version": 2, "accession": pxd, "task_id": task_id,
@@ -122,7 +139,7 @@ def prepare(task_file: Path, protocol: str, outdir: Path,
                "error_type": error_type, "emitted_units": count,
                "source_manifest": task.get("source_manifest"),
                "source_manifest_task_count": task["expected_runs"],
-               "source_evidence": evidence}
+               "source_evidence": evidence, **detail}
     transfer_records = _transfer_records(transfer)
     if transfer_records is not None:
         evidence["transfer_records"] = transfer_records

@@ -185,7 +185,8 @@ class ProductionLoopTests(unittest.TestCase):
                     dl = i < fail_first
                     receipt(self.root, prov["tag"], r["pxd_accession"], r["archive_file"], f"u{r['task_id']}",
                             status="failed" if dl else "success",
-                            failure_stage="archive_preparation" if dl else None)
+                            failure_stage="archive_preparation" if dl else None,
+                            **({"download_failure_kind": "timeout"} if dl and i == 0 else {}))
                 (ctrl / "nextflow.log").write_text(
                     f"Workflow completed > WorkflowStats[succeededCount={len(tasks)}; failedCount=0; ...]")
                 (ctrl / "controller.exitcode").write_text("0\n")
@@ -198,10 +199,14 @@ class ProductionLoopTests(unittest.TestCase):
                 if json.loads(line)["event"] == "RESULT"][-1]
         self.assertEqual((last["success_rate"], last["analysis_success_rate"], last["download_failures"]),
                          (0.8, 1.0, 1))
+        self.assertEqual(last["download_failure_kinds"], {"timeout": 1})
         # 2 of 5 (40%): above the limit -> STOP_DOWNLOAD_OUTAGE.
         result = L.Loop(self.args(batches=1, first_batch=8, loop_id="t5"), runner=runner(2),
                         sleep=lambda s: None).run()
         self.assertEqual(result, "STOP_DOWNLOAD_OUTAGE")
+        last = [json.loads(line) for line in (self.root / "work/loops/t5/loop.jsonl").read_text().splitlines()
+                if json.loads(line)["event"] == "RESULT"][-1]
+        self.assertEqual(last["download_failure_kinds"], {"timeout": 1, "unrecorded": 1})
 
     def test_mzml_lane_only_accession_runs_beside_raw_loop(self):
         with self.queue.open("a", newline="") as fh:

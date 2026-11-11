@@ -194,6 +194,39 @@ class NextflowArchiveTests(unittest.TestCase):
         self.assertEqual(result["failure_stage"], "archive_preparation")
         self.assertEqual(result["status"], "failed")
 
+    def test_download_failure_kind_reaches_sentinel_and_result(self):
+        from unittest.mock import patch
+
+        from prideqc import pride
+        prep = _load("nf_prep3", "prepare_archive.py")
+
+        def fail(self_, accession, names, destination, *, options=None):
+            Path(destination).mkdir(parents=True, exist_ok=True)
+            (Path(destination) / "download-manifest.json").write_text(json.dumps({
+                "engine": "pridepy", "options": {"protocol": "fire"},
+                "files": [{"filename": "a.raw", "status": "failed", "error_type": "RuntimeError",
+                           "failure_kind": "http_server_error", "root_error_type": "HTTPError",
+                           "http_status": [500], "url": "https://secret.example"}]}))
+            raise RuntimeError("PRIDE download failed")
+
+        task = self.root / "task.json"
+        task.write_text(json.dumps({"accession": "PXD041271", "task_id": 5, "archive_file": "a.raw",
+                                    "expected_runs": 1, "source_manifest": "t.tsv"}))
+        with patch.object(pride.PrideRepository, "download_files", fail):
+            status = prep.prepare(task, "ftp", self.root / "prepared")
+        self.assertEqual(status["download_failure_kind"], "http_server_error")
+        self.assertEqual(status["download_http_status"], [500])
+        self.assertNotIn("secret", (self.root / "prepared/prepare-status.json").read_text())
+        unit = next((self.root / "prepared/units").iterdir())
+        cmd = [sys.executable, str(ROOT / "nextflow/bin/analyze_unit.py"),
+               "--unit", str(unit), "--output", str(self.root / "result")]
+        run = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        result = json.loads((self.root / "result/result.json").read_text())
+        self.assertEqual((result["failure_stage"], result["download_failure_kind"],
+                          result["download_http_status"]),
+                         ("archive_preparation", "http_server_error", [500]))
+
     def test_one_failed_unit_blocks_study_and_creates_ledger(self):
         root = self.root / "results"
         root.mkdir()

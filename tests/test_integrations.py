@@ -245,6 +245,63 @@ class PrideTests(unittest.TestCase):
                 self.assertEqual(receipt["unprocessed"], ["b.mzML"])
                 self.assertEqual(len(list(Path(folder).iterdir())), 1)
 
+    def test_failure_kind_and_http_status_are_recorded_without_upstream_text(self):
+        import logging
+
+        class HTTPError(Exception):
+            def __init__(self, message, code):
+                super().__init__(message)
+                self.response = types.SimpleNamespace(status_code=code)
+
+        def http_503(**arguments):
+            try:
+                raise HTTPError("503 Server Error: for url https://u:secret@fire.example/x", 503)
+            except HTTPError as exc:
+                raise RuntimeError("Giving up after 3 HTTP attempts") from exc
+
+        def logged_timeouts(**arguments):
+            for _ in range(3):
+                logging.getLogger("pridepy").warning(
+                    "HTTP download attempt failed for https://u:secret@x: Read timed out.")
+            raise RuntimeError("Failed to download 1 file(s): a.raw")
+
+        def sha1_bad(**arguments):
+            raise RuntimeError("Checksum validation failed for 1 file(s): a.raw")
+
+        def not_found(**arguments):
+            raise Exception("File not found File name a.raw not found in dataset PXD008644")
+
+        cases = [(http_503, "http_server_error", [503], "HTTPError", None),
+                 (logged_timeouts, "timeout", None, "RuntimeError", {"timeout": 3}),
+                 (sha1_bad, "checksum_mismatch", None, "RuntimeError", None),
+                 (not_found, "not_found", None, "Exception", None),
+                 (lambda **a: (_ for _ in ()).throw(TimeoutError()), "timeout", None, "TimeoutError", None)]
+        for fail, kind, codes, root, attempts in cases:
+            with self.subTest(kind=kind, root=root), tempfile.TemporaryDirectory() as folder:
+                client = MagicMock()
+                client.download_file_by_name.side_effect = fail
+                with self.assertRaises(RuntimeError):
+                    PrideRepository(client).download_files("PXD008644", ["a.raw"], folder)
+                text = (Path(folder) / "download-manifest.json").read_text()
+                record = json.loads(text)["files"][0]
+                self.assertNotIn("secret", text)
+                self.assertNotIn("http", text.replace("http_status", "").replace("http_server_error", ""))
+                self.assertEqual(record["failure_kind"], kind)
+                self.assertEqual(record["root_error_type"], root)
+                self.assertEqual(record.get("http_status"), codes)
+                self.assertEqual(record.get("attempt_failure_kinds"), attempts)
+        self.assertFalse(any(type(h).__name__ == "_MessageCapture"
+                             for h in logging.getLogger().handlers))
+        from prideqc.pride import classify_text
+        self.assertEqual(classify_text("File not found HTTPSConnectionPool: Read timed out."),
+                         ("timeout", None))
+        self.assertEqual(classify_text("File not found 502 Server Error: Bad Gateway for url: x"),
+                         ("http_server_error", 502))
+        self.assertEqual(classify_text("File not found File name a.raw not found in dataset P"),
+                         ("not_found", None))
+        self.assertEqual(classify_text("418 Client Error: teapot"), ("http_client_error", 418))
+        self.assertEqual(classify_text("something new"), (None, None))
+
     def test_expected_api_size_rejects_nonempty_partial_download(self):
         client = MagicMock()
         client.get_file_from_api.return_value = [
