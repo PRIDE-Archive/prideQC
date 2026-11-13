@@ -39,11 +39,16 @@ _KIND_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("connection", re.compile(r"connection (aborted|reset|refused|error)|remotedisconnected|"
                               r"max retries exceeded|name or service not known|broken pipe", re.I)),
 )
-_HTTP_STATUS = re.compile(r"\b([1-5]\d\d) (?:client|server) error", re.I)
+_HTTP_STATUS = re.compile(r"\b([1-5]\d\d) (?:client|server) error|\bhttp error ([1-5]\d\d)\b", re.I)
 _TYPE_KINDS = {"TimeoutError": "timeout", "timeout": "timeout", "ReadTimeout": "timeout",
                "ConnectTimeout": "timeout", "ConnectionError": "connection",
                "RemoteDisconnected": "connection", "ConnectionResetError": "connection",
                "ChunkedEncodingError": "connection", "IncompleteRead": "incomplete"}
+
+
+def _status_kind(status: int) -> str:
+    return ("not_found" if status == 404 else "access_denied" if status in (401, 403) else
+            "http_server_error" if status >= 500 else "http_client_error")
 
 
 def classify_text(text: str) -> tuple[str | None, int | None]:
@@ -56,9 +61,9 @@ def classify_text(text: str) -> tuple[str | None, int | None]:
         return (kind or "not_found"), status
     kind = next((k for k, p in _KIND_PATTERNS if p.search(text)), None)
     match = _HTTP_STATUS.search(text)
-    status = int(match.group(1)) if match else None
+    status = int(match.group(1) or match.group(2)) if match else None
     if kind is None and status is not None:
-        kind = "http_server_error" if status >= 500 else "http_client_error"
+        kind = _status_kind(status)
     return kind, status
 
 
@@ -76,12 +81,17 @@ def classify_failure(exc: BaseException, log_messages: Iterable[str] = ()) -> di
     kind = None
     for item in reversed(chain):  # deepest cause first
         response = getattr(item, "response", None)
+        # requests: exc.response.status_code; urllib (pridepy checksum/listing calls): exc.code
         code = getattr(response, "status_code", None)
+        if not isinstance(code, int) and type(item).__name__ == "HTTPError":
+            code = getattr(item, "code", None)
         if isinstance(code, int):
             statuses.add(code)
         k, s = classify_text(str(item))
         if s is not None:
             statuses.add(s)
+        if k is None and isinstance(code, int) and 100 <= code <= 599:
+            k = _status_kind(code)
         kind = kind or _TYPE_KINDS.get(type(item).__name__) or k
     attempts: Counter[str] = Counter()
     for message in log_messages:

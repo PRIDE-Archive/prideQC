@@ -301,6 +301,17 @@ class PrideTests(unittest.TestCase):
                          ("not_found", None))
         self.assertEqual(classify_text("418 Client Error: teapot"), ("http_client_error", 418))
         self.assertEqual(classify_text("something new"), (None, None))
+        # pridepy calls urllib: HTTPError has .code and text "HTTP Error 503: ..." (batch 021: 77 'unknown')
+        import io
+        import urllib.error
+
+        from prideqc.pride import classify_failure
+        for code, kind in ((503, "http_server_error"), (500, "http_server_error"), (404, "not_found"),
+                           (403, "access_denied"), (429, "http_client_error")):
+            err = urllib.error.HTTPError("https://u:secret@x", code, "msg", {}, io.BytesIO())  # type: ignore[arg-type]
+            detail = classify_failure(err)
+            self.assertEqual((detail["failure_kind"], detail["http_status"]), (kind, [code]))
+            self.assertNotIn("secret", json.dumps(detail))
 
     def test_expected_api_size_rejects_nonempty_partial_download(self):
         client = MagicMock()
