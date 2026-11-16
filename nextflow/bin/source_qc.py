@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import signal
+import subprocess
+import sys
 from pathlib import Path
 
 from analyze_unit import analyze
@@ -98,7 +102,16 @@ def main() -> None:
     ap.add_argument("--tmt-profile-reporter-evidence", action="store_true")
     ap.add_argument("--attempt", type=int, default=1, help="Nextflow task.attempt")
     ap.add_argument("--max-attempts", type=int, default=1, help="Nextflow maxRetries + 1")
+    ap.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    if not args.worker:
+        raise SystemExit(supervise(args, sys.argv[1:]))
+    # Make the worker (and the prideqc child it starts) the first OOM victim, never the
+    # small supervisor. Raising the score needs no privilege; best effort.
+    try:
+        Path("/proc/self/oom_score_adj").write_text("1000\n")
+    except OSError:
+        pass
     result = run(args.task, args.protocol, args.scratch_dir, args.outdir,
                  source=args.local_source, checksum=not args.no_checksum_check,
                  mass_error=args.estimate_mass_error,
@@ -114,6 +127,59 @@ def retry_exit_code(result: dict, attempt: int, max_attempts: int) -> int:
     On the last attempt the fail-closed receipt stands and the task exits 0."""
     if result.get("error_type") == "AnalysisKilledResourceLimit" and attempt < max_attempts:
         return 137
+    return 0
+
+
+def killed_receipt(task_file: Path, scratch_dir: Path, outdir: Path, signal_number: int) -> dict:
+    """Fail-closed receipt for a worker that a signal killed (no receipt of its own).
+
+    Batch 041 (2026-11-15): PXD072437/2zup_RCC12F3.raw (0.8 GB) exceeded 16 GB, then 32 GB.
+    On attempt 2 the Slurm memory cgroup killed the worker python too, so no receipt was
+    written, the task exited 137 on its last attempt and Nextflow aborted the batch.
+    """
+    task = json.loads(task_file.read_text(encoding="utf-8"))
+    # The worker could not run its own cleanup: RAW must not stay in task scratch.
+    shutil.rmtree(scratch_dir, ignore_errors=True)
+    shutil.rmtree(outdir, ignore_errors=True)
+    unit_id = f"archive-{int(task['task_id']):09d}-worker-killed"
+    unit = outdir / "units" / unit_id
+    unit.mkdir(parents=True)
+    name = signal.Signals(signal_number).name if signal_number in signal.valid_signals() else str(signal_number)
+    result = {"schema_version": 2, "accession": task["accession"], "task_id": task["task_id"],
+              "source_archive": task["archive_file"], "source_member": None, "unit_id": unit_id,
+              "expected_file_tasks": task["expected_runs"], "status": "failed",
+              "failure_stage": "prideqc_analysis", "error_type": "AnalysisKilledResourceLimit",
+              "resource_failure_kind": "task_killed_by_signal", "exit_code": -signal_number,
+              "worker_signal": name}
+    (unit / "result.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    status = {"schema_version": 2, "accession": task["accession"], "task_id": task["task_id"],
+              "source_archive": task["archive_file"], "status": "unknown_worker_killed",
+              "error_type": "WorkerKilled", "emitted_units": 1,
+              "source_manifest": task.get("source_manifest"),
+              "source_manifest_task_count": task["expected_runs"], "source_evidence": {}}
+    (outdir / "prepare-status.json").write_text(json.dumps(status, indent=2, sort_keys=True) + "\n",
+                                                 encoding="utf-8")
+    return result
+
+
+def supervise(args: argparse.Namespace, argv: list[str],
+              runner: object = subprocess.run) -> int:
+    """Run the work in a child process; this small parent survives a memory kill of the child.
+
+    A signal kill before the last attempt exits 137 (Nextflow retries with 2x memory).
+    On the last attempt the parent writes a fail-closed receipt and exits 0, so one bad
+    file never aborts the batch.
+    """
+    cmd = [sys.executable, os.path.abspath(__file__), *argv, "--worker"]
+    proc = runner(cmd, check=False)  # type: ignore[operator]
+    code = proc.returncode
+    if code >= 0:
+        return code
+    if args.attempt < args.max_attempts:
+        shutil.rmtree(args.scratch_dir, ignore_errors=True)
+        return 137
+    result = killed_receipt(args.task, args.scratch_dir, args.outdir, -code)
+    print(json.dumps(result, sort_keys=True))
     return 0
 
 

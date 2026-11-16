@@ -118,6 +118,61 @@ class ScratchPilotTests(unittest.TestCase):
         self.assertEqual(source_qc.retry_exit_code(result, 2, 2), 0)     # last attempt: receipt stands
         self.assertEqual(source_qc.retry_exit_code({"error_type": "PrideqcNonzeroExit"}, 1, 2), 0)
 
+    def _args(self, attempt: int, max_attempts: int = 2):
+        return SimpleNamespace(task=self.task, scratch_dir=self.root / "node-local-raw",
+                               outdir=self.root / "ready", attempt=attempt, max_attempts=max_attempts)
+
+    def test_supervisor_passes_worker_exit_codes_through(self):
+        archive = self.root / "a.raw"
+        archive.write_bytes(b"x")
+        self._task(archive)
+        for code in (0, 137):
+            got = source_qc.supervise(self._args(1), [], runner=lambda cmd, check, _c=code: SimpleNamespace(returncode=_c))
+            self.assertEqual(got, code)
+        self.assertFalse((self.root / "ready").exists())
+
+    def test_supervisor_turns_a_killed_worker_into_retry_then_receipt(self):
+        import os
+        import signal
+        import subprocess
+        archive = self.root / "a.raw"
+        archive.write_bytes(b"x")
+        self._task(archive)
+
+        def real_kill(cmd, check):
+            # A real child process that the kernel-style SIGKILL ends (Slurm cgroup OOM).
+            return subprocess.run([sys.executable, "-c", "import os,signal; os.kill(os.getpid(), signal.SIGKILL)"],
+                                  check=check)
+
+        scratch = self.root / "node-local-raw"
+        (scratch / "prepared").mkdir(parents=True)
+        (scratch / "prepared" / "big.raw").write_bytes(b"RAW")
+        # Not the last attempt: 137 asks Nextflow for a 2x-memory retry; RAW scratch is removed.
+        self.assertEqual(source_qc.supervise(self._args(1), [], runner=real_kill), 137)
+        self.assertFalse(scratch.exists())
+        self.assertFalse((self.root / "ready").exists())
+        # Last attempt (batch 041 case): fail-closed receipt, exit 0, batch continues.
+        (scratch / "prepared").mkdir(parents=True)
+        (scratch / "prepared" / "big.raw").write_bytes(b"RAW")
+        (self.root / "ready" / "units" / "partial").mkdir(parents=True)
+        self.assertEqual(source_qc.supervise(self._args(2), [], runner=real_kill), 0)
+        self.assertFalse(scratch.exists())
+        units = list((self.root / "ready" / "units").iterdir())
+        self.assertEqual([u.name for u in units], ["archive-000000017-worker-killed"])
+        receipt = json.loads((units[0] / "result.json").read_text())
+        self.assertEqual((receipt["status"], receipt["failure_stage"], receipt["error_type"], receipt["exit_code"],
+                          receipt["worker_signal"], receipt["resource_failure_kind"]),
+                         ("failed", "prideqc_analysis", "AnalysisKilledResourceLimit", -signal.SIGKILL,
+                          "SIGKILL", "task_killed_by_signal"))
+        status = json.loads((self.root / "ready" / "prepare-status.json").read_text())
+        self.assertEqual(status["emitted_units"], 1)
+        # The finalizer accepts the receipt: the accession is incomplete, not an error.
+        summary = finalize_accession.finalize(receipt["accession"], 1, self.root / "ready" / "units",
+                                              self.root / "final")
+        self.assertEqual((summary["status"], summary["failed_runs"]), ("incomplete", 1))
+        self.assertIn("oom_score_adj", (ROOT / "nextflow/bin/source_qc.py").read_text())
+        self.assertTrue(os.path.exists(source_qc.__file__))
+
     def test_hung_analysis_times_out_fail_closed_and_is_not_retried(self):
         archive = self.root / "hung.raw"
         archive.write_bytes(b"x" * 64)
