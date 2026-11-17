@@ -152,6 +152,28 @@ class ProductionLoopTests(unittest.TestCase):
         with self.assertRaises(ValueError):                                    # same tag again: refused
             L.Loop(self.args(batches=1), runner=self.fake_runner(), sleep=lambda s: None).run()
 
+    def test_few_missing_receipts_pass_and_are_taken_again(self):
+        tag = "prideqc-prod-raw-b042-x-v1"
+        ctrl = self.root / "work/controllers" / tag
+        ctrl.mkdir(parents=True)
+        (ctrl / "controller.exitcode").write_text("0\n")
+        (ctrl / "nextflow.log").write_text(
+            "Workflow completed > WorkflowStats[succeededCount=198; failedCount=4; ignoredCount=2; ...]")
+        for i in range(198):
+            receipt(self.root, tag, "PXD000001", f"f{i}.raw", f"u{i}", status="success")
+        # 2 of 200 files (1%) have no receipt: Nextflow ignored them after the retry.
+        result = L.evaluate(self.root, tag, 200, 0.95, 0.25, 0.01)
+        self.assertEqual((result["verdict"], result["missing_receipts"]), ("PASS", 2))
+        self.assertEqual(L.evaluate(self.root, tag, 200, 0.95, 0.25, 0.0)["verdict"], "STOP_MISSING_RECEIPTS")
+        self.assertEqual(L.evaluate(self.root, tag, 220, 0.95, 0.25, 0.01)["verdict"], "STOP_MISSING_RECEIPTS")
+        # A file without a receipt is never skipped, so the next cut takes it again.
+        skip, _ = L.classify(L.scan_tag(self.root / "results" / tag))
+        self.assertNotIn(("PXD000001", "f198.raw"), skip)
+        self.assertIn(("PXD000001", "f0.raw"), skip)
+        self.assertEqual(L.parser().parse_args(["--root", "r", "--loop-id", "l", "--source", "s", "--sif", "x",
+                                                 "--sif-sha256", "h", "--queue", "q", "--batches", "1",
+                                                 "--first-batch", "1"]).max_missing_receipts, 0.01)
+
     def test_completed_workflow_with_controller_kill_still_passes(self):
         result = L.Loop(self.args(batches=1), runner=self.fake_runner(rc=137), sleep=lambda s: None).run()
         self.assertEqual(result, "DONE")

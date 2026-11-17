@@ -201,7 +201,10 @@ class ProductionSafetySourceTests(unittest.TestCase):
         module = (BIN.parent / "modules/local/source_qc/main.nf").read_text()
         config = (BIN.parent / "conf" / "codon_slurm.config").read_text()
         self.assertIn("--attempt ${task.attempt} --max-attempts ${(task.maxRetries ?: 0) + 1}", module)
-        self.assertIn("task.exitStatus in [137, 143] ? 'retry'", config)
+        # Batch 042: one lost task must never abort the batch. Retry once, then ignore (no receipt;
+        # the production loop takes the file again).
+        self.assertIn("errorStrategy = { task.attempt <= 1 ? 'retry' : 'ignore' }", config)
+        self.assertNotIn("'terminate'", config.split("withName: PRIDEQC_SOURCE_QC", 1)[1].split("}", 1)[0])
 
     def test_source_qc_tasks_are_submitted_largest_first(self):
         workflow = (BIN.parent / "workflows" / "prideqc.nf").read_text()
