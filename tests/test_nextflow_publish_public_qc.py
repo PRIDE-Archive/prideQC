@@ -93,6 +93,7 @@ class PublishTests(unittest.TestCase):
         self.assertEqual([json.loads(x)["projectAccession"] for x in lines], ["PXD000001", "PXD000002"])
         self.assertTrue((self.dest / "README.md").is_file())
         self.assertEqual(json.loads((self.dest / "manifest.json").read_text())["runs"], 3)
+        self.assertNotIn(str(self.root), (self.dest / "manifest.json").read_text(), "no internal path in public files")
         self.assertEqual([f.name for f in self.dest.rglob(".*tmp*")], [], "no temporary files left")
 
     def test_stats_equal_the_runs_ndjson_path(self):

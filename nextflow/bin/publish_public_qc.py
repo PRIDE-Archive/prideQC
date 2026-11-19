@@ -260,7 +260,7 @@ def publish(roots: list, dest: Path, workers: int = 8, tag_regex: str = DEFAULT_
                 "failedFilesWithoutQc": failed_files,
                 "projectsWithoutQc": len(projects) - len(with_qc),
                 "receipts": receipts, "roles": dict(sorted((str(k), v) for k, v in roles.items())),
-                "tagRegex": tag_regex, "resultsRoots": [str(r) for r in roots],
+                "tagRegex": tag_regex,
                 "mzqcFilesWritten": written, "bytesWritten": nbytes, "dryRun": dry_run}
     if not dry_run:
         (dest / "stats").mkdir(exist_ok=True)
