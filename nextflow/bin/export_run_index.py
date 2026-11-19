@@ -74,65 +74,66 @@ def _metric_value(mzqc: dict, accession: str) -> Any:
     return None
 
 
+def receipts(roots: list) -> list:
+    """(root, receipt) pairs in a fixed order."""
+    return [(Path(root), receipt) for root in roots
+            for receipt in sorted(Path(root).glob("*/*/_run_outputs/ready/units/*/result.json"))]
+
+
 def collect(roots: list) -> list:
     """Return one candidate record per receipt. Never raises on a bad receipt."""
-    records = []
-    for root in roots:
-        for receipt in sorted(Path(root).glob("*/*/_run_outputs/ready/units/*/result.json")):
-            unit_dir = receipt.parent
-            accession_dir = unit_dir.parents[3]
-            tag = accession_dir.parent.name
-            data = _json(receipt)
-            base: dict[str, Any] = {"run_tag": tag, "results_root": str(root),
-                                    "receipt": str(receipt.relative_to(root))}
-            if not isinstance(data, dict):
-                records.append(dict(base, role="rejected", reject_reason="unreadable_receipt"))
-                continue
-            accession = str(data.get("accession", ""))
-            source_file = Path(str(data.get("source_member") or data.get("source_archive") or "")).name
-            rec: dict[str, Any] = dict(base, accession=accession, source_file=source_file,
-                       unit_id=data.get("unit_id"), task_id=data.get("task_id"),
-                       status=data.get("status"), failure_stage=data.get("failure_stage"),
-                       error_type=data.get("error_type"), exit_code=data.get("exit_code"),
-                       reader_failure_kind=data.get("reader_failure_kind"),
-                       download_failure_kind=data.get("download_failure_kind"),
-                       download_http_status=data.get("download_http_status"))
-            if not ACCESSION.fullmatch(accession) or accession_dir.name != accession:
-                records.append(dict(rec, role="rejected", reject_reason="accession_mismatch"))
-                continue
-            if not SAFE_NAME.fullmatch(source_file) or source_file in {".", ".."}:
-                records.append(dict(rec, role="rejected", reject_reason="unsafe_source_name"))
-                continue
-            status_file = accession_dir / "_archive_status" / f"{data.get('task_id')}.prepare-status.json"
-            evidence = (_json(status_file) or {}).get("source_evidence") or {}
-            rec["source_sha256"] = evidence.get("sha256")
-            rec["source_size_bytes"] = evidence.get("size_bytes")
-            rec["source_evidence"] = "computed_on_scratch" if evidence.get("sha256") else "absent"
-            if data.get("status") != "success":
-                records.append(dict(rec, role="failed"))
-                continue
-            qc = unit_dir / "qc"
-            mzqc_path = qc / str(data.get("mzqc_file", ""))
-            obo_path = qc / str(data.get("obo_file", ""))
-            if not (mzqc_path.is_file() and obo_path.is_file()) or mzqc_path.is_symlink() or obo_path.is_symlink():
-                records.append(dict(rec, role="rejected", reject_reason="missing_qc_files"))
-                continue
-            if sha256(mzqc_path) != data.get("mzqc_sha256") or sha256(obo_path) != data.get("obo_sha256"):
-                records.append(dict(rec, role="rejected", reject_reason="qc_sha256_mismatch"))
-                continue
-            mzqc = (_json(mzqc_path) or {}).get("mzQC") or {}
-            summary = sorted(qc.glob("*.summary.json"))
-            rec.update(_software(mzqc))
-            rec.update(mzqc_sha256=data["mzqc_sha256"], obo_sha256=data["obo_sha256"],
-                       mzqc_creation_date=mzqc.get("creationDate"),
-                       mzqc_version=mzqc.get("version"),
-                       metric_count=sum(len(r.get("qualityMetrics", [])) for r in mzqc.get("runQualities", [])),
-                       ms1_spectra=_metric_value(mzqc, MS1_COUNT),
-                       ms2_spectra=_metric_value(mzqc, MS2_COUNT),
-                       _mzqc=str(mzqc_path), _obo=str(obo_path),
-                       _summary=str(summary[0]) if len(summary) == 1 else None)
-            records.append(dict(rec, role="candidate"))
-    return records
+    return [collect_one(root, receipt) for root, receipt in receipts(roots)]
+
+
+def collect_one(root: Path, receipt: Path) -> dict:
+    """The record of one receipt (a candidate, failed or rejected run)."""
+    unit_dir = receipt.parent
+    accession_dir = unit_dir.parents[3]
+    tag = accession_dir.parent.name
+    data = _json(receipt)
+    base: dict[str, Any] = {"run_tag": tag, "results_root": str(root),
+                            "receipt": str(receipt.relative_to(root))}
+    if not isinstance(data, dict):
+        return dict(base, role="rejected", reject_reason="unreadable_receipt")
+    accession = str(data.get("accession", ""))
+    source_file = Path(str(data.get("source_member") or data.get("source_archive") or "")).name
+    rec: dict[str, Any] = dict(base, accession=accession, source_file=source_file,
+                               unit_id=data.get("unit_id"), task_id=data.get("task_id"),
+                               status=data.get("status"), failure_stage=data.get("failure_stage"),
+                               error_type=data.get("error_type"), exit_code=data.get("exit_code"),
+                               reader_failure_kind=data.get("reader_failure_kind"),
+                               download_failure_kind=data.get("download_failure_kind"),
+                               download_http_status=data.get("download_http_status"))
+    if not ACCESSION.fullmatch(accession) or accession_dir.name != accession:
+        return dict(rec, role="rejected", reject_reason="accession_mismatch")
+    if not SAFE_NAME.fullmatch(source_file) or source_file in {".", ".."}:
+        return dict(rec, role="rejected", reject_reason="unsafe_source_name")
+    status_file = accession_dir / "_archive_status" / f"{data.get('task_id')}.prepare-status.json"
+    evidence = (_json(status_file) or {}).get("source_evidence") or {}
+    rec["source_sha256"] = evidence.get("sha256")
+    rec["source_size_bytes"] = evidence.get("size_bytes")
+    rec["source_evidence"] = "computed_on_scratch" if evidence.get("sha256") else "absent"
+    if data.get("status") != "success":
+        return dict(rec, role="failed")
+    qc = unit_dir / "qc"
+    mzqc_path = qc / str(data.get("mzqc_file", ""))
+    obo_path = qc / str(data.get("obo_file", ""))
+    if not (mzqc_path.is_file() and obo_path.is_file()) or mzqc_path.is_symlink() or obo_path.is_symlink():
+        return dict(rec, role="rejected", reject_reason="missing_qc_files")
+    if sha256(mzqc_path) != data.get("mzqc_sha256") or sha256(obo_path) != data.get("obo_sha256"):
+        return dict(rec, role="rejected", reject_reason="qc_sha256_mismatch")
+    mzqc = (_json(mzqc_path) or {}).get("mzQC") or {}
+    summary = sorted(qc.glob("*.summary.json"))
+    rec.update(_software(mzqc))
+    rec.update(mzqc_sha256=data["mzqc_sha256"], obo_sha256=data["obo_sha256"],
+               mzqc_creation_date=mzqc.get("creationDate"),
+               mzqc_version=mzqc.get("version"),
+               metric_count=sum(len(r.get("qualityMetrics", [])) for r in mzqc.get("runQualities", [])),
+               ms1_spectra=_metric_value(mzqc, MS1_COUNT),
+               ms2_spectra=_metric_value(mzqc, MS2_COUNT),
+               _mzqc=str(mzqc_path), _obo=str(obo_path),
+               _summary=str(summary[0]) if len(summary) == 1 else None)
+    return dict(rec, role="candidate")
 
 
 def _rank(rec: dict) -> tuple:

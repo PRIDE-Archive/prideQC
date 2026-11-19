@@ -230,13 +230,18 @@ class Accumulator:
         self._reset_project()
 
     def add(self, run: dict) -> None:
-        accession = str(run.get("pxd_accession") or "")
+        values, cats, ptms = run_values(run)
+        mass_shift = any(m.get("accession") == MASS_SHIFTS for m in run.get("metrics") or [])
+        self.add_values(str(run.get("pxd_accession") or ""), values, cats, ptms, mass_shift)
+
+    def add_values(self, accession: str, values: dict[str, float], cats: dict[str, str],
+                   ptms: set[tuple[str, str, float | None]], mass_shift: bool) -> None:
+        """Add one run from the output of run_values (publish_public_qc.py computes it in a worker)."""
         if accession != self.current:
             if accession in self.done:
                 raise ValueError("runs.ndjson must be sorted by project; " + accession + " appears twice")
             self._close_project()
             self.current = accession
-        values, cats, ptms = run_values(run)
         self.runs += 1
         for k, v in values.items():
             self.run_values[k].append(v)
@@ -244,7 +249,7 @@ class Accumulator:
         for k, c in cats.items():
             self.run_cats[k][c] += 1
             self.cur_cats[k][c] += 1
-        if any(m.get("accession") == MASS_SHIFTS for m in run.get("metrics") or []):
+        if mass_shift:
             self.runs_with_mass_shift += 1
             self.cur_mass_shift = True
         run_ptm_names: set[str] = set()
