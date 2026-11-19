@@ -127,6 +127,15 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(doc["runs"][0]["runTag"], "prideqc-prod-raw-b003-x")
         self.assertEqual(doc["failedRuns"], [])
 
+    def test_repeated_failures_give_one_entry(self):
+        self._run("prideqc-prod-raw-b001-x", "PXD000001", "a.raw", task=1)
+        self._run("prideqc-prod-raw-b001-x", "PXD000001", "z.raw", task=2, status="failed")
+        self._run("prideqc-prod-raw-b002-x", "PXD000001", "z.raw", task=1, status="failed")
+        manifest = self._publish()
+        doc = json.loads((self.dest / "PXD000001/project.json").read_text())
+        self.assertEqual([r["sourceFile"] for r in doc["failedRuns"]], ["z.raw"])
+        self.assertEqual(manifest["failedFilesWithoutQc"], 1)
+
     def test_second_run_writes_only_new_files(self):
         self._run("prideqc-prod-raw-b001-x", "PXD000001", "a.raw", task=1)
         first = self._publish()

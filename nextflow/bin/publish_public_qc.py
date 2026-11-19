@@ -195,9 +195,12 @@ def publish_project(job: tuple) -> dict:
             "metrics": compact_metrics(metrics),
         })
     summary = PS._summary(accession, len(runs), values, cats)
+    latest: dict = {}
+    for r in sorted(failed, key=lambda r: str(r.get("run_tag") or "")):
+        latest[r["source_file"].casefold()] = r  # one entry per file: the newest batch wins
     failed_runs = [dict({"sourceFile": r["source_file"]},
                         **{k: r.get(k) for k in FAILED_KEYS if r.get(k) is not None})
-                   for r in sorted(failed, key=lambda r: r["source_file"].casefold())]
+                   for r in sorted(latest.values(), key=lambda r: r["source_file"].casefold())]
     doc = {"schemaVersion": SCHEMA_VERSION, "pxdAccession": accession, "generatedAt": generated,
            "scientificApproval": False, "summary": summary, "runs": runs, "failedRuns": failed_runs}
     if not dry_run:
