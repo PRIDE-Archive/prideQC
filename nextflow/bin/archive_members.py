@@ -256,15 +256,19 @@ class HttpRangeFile(io.RawIOBase):
         return len(data)
 
 
-def list_zip(source: str | Path | IO[bytes], *, opener: Callable | None = None, attempts: int = 2) -> dict:
+def list_zip(source: str | Path | IO[bytes], *, opener: Callable | None = None, attempts: int = 4,
+             backoff: float = 5.0) -> dict:
     """Classify the members of a local ZIP path, a file object, or a remote https URL.
 
-    A remote listing that is not a valid ZIP is read again once (a bad response is not a
-    bad archive). Raises ArchiveMemberError.
+    A remote listing that is not a valid ZIP is read again after a wait (a bad response is
+    not a bad archive: trial 7, 24 PXD010595 ZIPs gave BadZipFile under load and listed
+    without error alone). Raises ArchiveMemberError.
     """
     remote = isinstance(source, str) and source.startswith(("http://", "https://"))
     for attempt in range(attempts if remote else 1):
         if remote:
+            if attempt:
+                time.sleep(backoff * attempt)
             handle: IO[bytes] = io.BufferedReader(HttpRangeFile(str(source), opener=opener), buffer_size=1 << 16)
         elif isinstance(source, (str, Path)):
             handle = open(source, "rb")
