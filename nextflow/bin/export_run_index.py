@@ -112,6 +112,13 @@ def collect_one(root: Path, receipt: Path) -> dict:
     evidence = (_json(status_file) or {}).get("source_evidence") or {}
     rec["source_sha256"] = evidence.get("sha256")
     rec["source_size_bytes"] = evidence.get("size_bytes")
+    if data.get("source_kind") == "archive_member":
+        # Archive lane: the run is one ZIP member. Its own bytes identify it; the archive is
+        # the PRIDE file that holds it (the link for SDRF: archive name plus member path).
+        rec.update(source_archive=data.get("source_archive"), source_member=data.get("source_member"),
+                   source_sha256=data.get("source_member_sha256"),
+                   source_size_bytes=data.get("source_member_size_bytes"),
+                   source_archive_sha256=data.get("source_archive_sha256"))
     rec["source_evidence"] = "computed_on_scratch" if evidence.get("sha256") else "absent"
     if data.get("status") != "success":
         return dict(rec, role="failed")
@@ -221,6 +228,8 @@ def export(roots: list, outdir: Path) -> dict:
                          "mzqc_creation_date": rec.get("mzqc_creation_date"),
                          "run_tag": rec["run_tag"], "metrics": metrics,
                          "scientific_approval": False})
+            if rec.get("source_archive"):
+                runs[-1].update(source_archive=rec["source_archive"], source_member=rec.get("source_member"))
             per_accession.setdefault(rec["accession"], []).append(rec)
         for rec in records:
             if rec.get("role") == "failed":

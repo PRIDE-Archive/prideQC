@@ -60,6 +60,25 @@ def _transfer_records(transfer: Path) -> dict | None:
     }
 
 
+def acquire(pxd: str, archive_name: str, protocol: str, transfer: Path,
+            *, source: Path | None = None, checksum: bool = True) -> Path:
+    """Download one PRIDE file to `transfer` with pridepy (or use a local fixture)."""
+    if source is not None:
+        return source.resolve(strict=True)
+    from prideqc.pride import DownloadOptions, PrideRepository
+
+    if protocol == "fire":
+        from pridepy.pridepy import PROTOCOL_CHOICES
+        choices = getattr(PROTOCOL_CHOICES, "choices", PROTOCOL_CHOICES)
+        if "fire" not in choices:
+            raise RuntimeError("FIRE capability missing in installed pridepy")
+    paths = PrideRepository().download_files(
+        pxd, [archive_name], transfer,
+        options=DownloadOptions(protocol=protocol, checksum_check=checksum),
+    )
+    return Path(paths[0])
+
+
 def prepare(task_file: Path, protocol: str, outdir: Path,
             *, source: Path | None = None, checksum: bool = True) -> dict:
     task = json.loads(task_file.read_text(encoding="utf-8"))
@@ -78,21 +97,7 @@ def prepare(task_file: Path, protocol: str, outdir: Path,
     evidence: dict = {"checksum_check_requested": bool(checksum),
                       "transfer": "local_source" if source is not None else protocol}
     try:
-        if source is None:
-            from prideqc.pride import DownloadOptions, PrideRepository
-
-            if protocol == "fire":
-                from pridepy.pridepy import PROTOCOL_CHOICES
-                choices = getattr(PROTOCOL_CHOICES, "choices", PROTOCOL_CHOICES)
-                if "fire" not in choices:
-                    raise RuntimeError("FIRE capability missing in installed pridepy")
-            paths = PrideRepository().download_files(
-                pxd, [archive_name], transfer,
-                options=DownloadOptions(protocol=protocol, checksum_check=checksum),
-            )
-            archive = paths[0]
-        else:
-            archive = source.resolve(strict=True)
+        archive = acquire(pxd, archive_name, protocol, transfer, source=source, checksum=checksum)
         # Byte-level provenance of the exact acquired source, computed on node-local
         # scratch before expansion. This is the identity later deduplication uses.
         evidence["size_bytes"] = archive.stat().st_size

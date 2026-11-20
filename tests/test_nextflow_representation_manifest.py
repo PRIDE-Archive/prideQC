@@ -208,8 +208,8 @@ class ProductionSafetySourceTests(unittest.TestCase):
 
     def test_source_qc_tasks_are_submitted_largest_first(self):
         workflow = (BIN.parent / "workflows" / "prideqc.nf").read_text()
-        self.assertIn("(record.file_size_bytes ?: 0) as Long)", workflow)
-        self.assertIn(".toSortedList { a, b -> (b[5] <=> a[5]) ?: (a[2] as Long) <=> (b[2] as Long) }", workflow)
+        self.assertIn("(record.member_bytes ?: record.file_size_bytes ?: 0) as Long)", workflow)
+        self.assertIn(".toSortedList { a, b -> (b[6] <=> a[6]) ?: (a[2] as Long) <=> (b[2] as Long) }", workflow)
         planner = (BIN / "plan_manifest.py").read_text()
         self.assertIn('"file_size_bytes": size,', planner)
 
@@ -218,8 +218,11 @@ class ProductionSafetySourceTests(unittest.TestCase):
         module = (BIN.parent / "modules/local/source_qc/main.nf").read_text()
         workflow = (BIN.parent / "workflows" / "prideqc.nf").read_text()
         self.assertIn("(memory_gb as Integer) * (1 << (task.attempt - 1)), 128)", config)
-        self.assertIn("val(memory_gb), path(task_json)", module)
-        self.assertIn("(record.memory_gb ?: 32) as Integer, task_file,", workflow)
-        self.assertIn("tuple(accession, expected, task_id, memory_gb, task_file)", workflow)
+        self.assertIn("val(memory_gb), val(time_hours), path(task_json)", module)
+        self.assertIn("(record.memory_gb ?: 32) as Integer,", workflow)
+        self.assertIn("(record.time_hours ?: 4) as Integer, task_file,", workflow)
+        self.assertIn("tuple(accession, expected, task_id, memory_gb, time_hours, task_file)", workflow)
+        # direct files keep 4 h per attempt; the archive lane scales with member bytes
+        self.assertIn('time = { "${Math.min((time_hours as Integer) * task.attempt, 144)}h" }', config)
         self.assertNotIn("PRIDEQC_ANALYZE", config)
         self.assertNotIn("PRIDEQC_PREPARE", config)

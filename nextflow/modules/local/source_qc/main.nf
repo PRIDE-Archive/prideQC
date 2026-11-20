@@ -1,4 +1,6 @@
-// First-flight lane only: one source archive MUST contain exactly one logical run.
+// One source file per task. A direct run file or a one-run archive gives one receipt.
+// Archive lane (task source_kind archive_members): one receipt per ZIP run member,
+// one member on node scratch at a time.
 // No RAW-containing path is a declared output or publishDir pattern.
 process PRIDEQC_SOURCE_QC {
     tag "${accession}:archive-${task_id}"
@@ -11,11 +13,12 @@ process PRIDEQC_SOURCE_QC {
     publishDir { "${params.outdir}/${accession}/_run_outputs" },
         mode: 'copy', pattern: 'ready/units/*', overwrite: true
     input:
-    tuple val(accession), val(expected_archives), val(task_id), val(memory_gb), path(task_json)
+    tuple val(accession), val(expected_archives), val(task_id), val(memory_gb), val(time_hours), path(task_json)
     path runner
     path prepare_script
     path archive_script
     path analyzer
+    path archive_lane_scripts
     output:
     tuple val(accession), val(expected_archives), val(task_id),
         path('ready/units/*'), path('ready/prepare-status.json'), emit: completed

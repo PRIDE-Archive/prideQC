@@ -33,6 +33,26 @@ def memory_tier_gb(size_bytes: int | None) -> int:
     return MEMORY_MAX_GB
 
 
+ARCHIVE_MEMBERS = "archive_members"
+# Archive lane time: download + all members in sequence. Direct-file evidence: p99.9 is
+# 16.7 min/GB (b002); 30 min/GB plus 1 h covers it with a margin. Attempt 2 doubles it.
+ARCHIVE_HOURS_PER_GB = 0.5
+ARCHIVE_MIN_HOURS = 4
+ARCHIVE_MAX_HOURS = 72
+
+
+def archive_time_hours(member_bytes: int) -> int:
+    hours = 1 + ARCHIVE_HOURS_PER_GB * member_bytes / 1e9
+    return int(min(ARCHIVE_MAX_HOURS, max(ARCHIVE_MIN_HOURS, -(-hours // 1))))
+
+
+def _int_field(row: dict[str, str], key: str) -> int:
+    text = (row.get(key) or "").strip()
+    if not text.isascii() or not text.isdecimal() or int(text) < 1:
+        raise ValueError(f"Task {row.get('task_id')}: invalid {key} {text!r}")
+    return int(text)
+
+
 def _size(row: dict[str, str], task_id: str) -> int | None:
     text = (row.get("file_size_bytes") or "").strip()
     if not text:
@@ -160,6 +180,9 @@ def prepare(file_manifest: Path, report_manifest: Path, output: Path, accessions
     for pxd in sorted(by_accession):
         for row in sorted(by_accession[pxd], key=lambda x: int(x["task_id"])):
             size = _size(row, row["task_id"])
+            kind = (row.get("source_kind") or "").strip()
+            if kind not in ("", ARCHIVE_MEMBERS):
+                raise ValueError(f"Task {row['task_id']}: unknown source_kind {kind!r}")
             entry = {
                 "schema_version": 1,
                 "task_id": int(row["task_id"]),
@@ -173,6 +196,17 @@ def prepare(file_manifest: Path, report_manifest: Path, output: Path, accessions
                 "file_size_bytes": size,
                 "memory_gb": memory_tier_gb(size),
             }
+            if kind == ARCHIVE_MEMBERS:
+                # Archive lane: one run member at a time on scratch. Memory follows the largest
+                # member (the QC peak), time follows the bytes of all members (they run in sequence).
+                if not row["archive_file"].casefold().endswith(".zip"):
+                    raise ValueError(f"Task {row['task_id']}: archive_members needs a .zip")
+                largest = _int_field(row, "largest_member_bytes")
+                total = _int_field(row, "member_bytes")
+                if largest > total:
+                    raise ValueError(f"Task {row['task_id']}: largest member exceeds member bytes")
+                entry.update(source_kind=ARCHIVE_MEMBERS, largest_member_bytes=largest, member_bytes=total,
+                             memory_gb=memory_tier_gb(largest), time_hours=archive_time_hours(total))
             (tasks / f"{pxd}__{int(row['task_id']):09d}.json").write_text(
                 json.dumps(entry, sort_keys=True, indent=2) + "\n", encoding="utf-8"
             )

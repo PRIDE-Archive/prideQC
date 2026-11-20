@@ -40,22 +40,25 @@ workflow PRIDEQC_WORKFLOW {
     def archive_tasks = PRIDEQC_MANIFEST.out.tasks.flatten().map { task_file ->
         def record = new groovy.json.JsonSlurper().parse(task_file)
         tuple(record.accession, record.expected_runs as Integer,
-              record.task_id.toString(), (record.memory_gb ?: 32) as Integer, task_file,
-              (record.file_size_bytes ?: 0) as Long)
+              record.task_id.toString(), (record.memory_gb ?: 32) as Integer,
+              (record.time_hours ?: 4) as Integer, task_file,
+              (record.member_bytes ?: record.file_size_bytes ?: 0) as Long)
     }
-    .toSortedList { a, b -> (b[5] <=> a[5]) ?: (a[2] as Long) <=> (b[2] as Long) }
+    .toSortedList { a, b -> (b[6] <=> a[6]) ?: (a[2] as Long) <=> (b[2] as Long) }
     .flatMap { sorted -> sorted }
-    .map { accession, expected, task_id, memory_gb, task_file, _size ->
-        tuple(accession, expected, task_id, memory_gb, task_file)
+    .map { accession, expected, task_id, memory_gb, time_hours, task_file, _size ->
+        tuple(accession, expected, task_id, memory_gb, time_hours, task_file)
     }
-    // A single Slurm scratch task downloads, expands and analyzes one logical
-    // source run. Multi-run archives emit a failure receipt in this pilot lane.
+    // A single Slurm scratch task downloads, expands and analyzes one source file.
+    // A multi-run archive emits a failure receipt, except in the archive lane
+    // (one receipt per run member).
     // Only QC outputs/receipts, never extracted RAW, travel between processes.
     PRIDEQC_SOURCE_QC(archive_tasks,
         file("${projectDir}/bin/source_qc.py"),
         file("${projectDir}/bin/prepare_archive.py"),
         file("${projectDir}/bin/archive_units.py"),
-        file("${projectDir}/bin/analyze_unit.py"))
+        file("${projectDir}/bin/analyze_unit.py"),
+        [file("${projectDir}/bin/archive_member_qc.py"), file("${projectDir}/bin/archive_members.py")])
 
     def units = PRIDEQC_SOURCE_QC.out.completed.flatMap { accession, _expected_archives, _task_id, unit_dirs, _status ->
         def results = unit_dirs instanceof List ? unit_dirs : [unit_dirs]

@@ -75,6 +75,9 @@ The QC is a preview. It is not yet scientifically validated (scientificApproval 
   mzqcSha256 is the SHA-256 of the mzQC file. metrics holds the numeric metrics and the
   short form of the metric objects. The full metrics are in the mzQC file.
 - failedRuns: files that prideQC tried but for which it has no QC, with the failure stage.
+- A run from a ZIP file of the dataset has sourceArchive (the PRIDE file name of the ZIP)
+  and sourceMember (the path of the run in the ZIP). sourceFile is then the run file name,
+  and sourceSha256 is the SHA-256 of the run file itself, not of the ZIP.
 
 A project without QC has no folder. A project folder can get more runs in a later release.
 """
@@ -194,12 +197,18 @@ def publish_project(job: tuple) -> dict:
                                       sorted(ptms, key=lambda p: (p[0], p[1]))],
             "metrics": compact_metrics(metrics),
         })
+        if rec.get("source_archive"):
+            # the run is a member of a PRIDE ZIP: the archive file name plus the member path
+            runs[-1].update(sourceArchive=rec["source_archive"], sourceMember=rec.get("source_member"),
+                            sourceArchiveSha256=rec.get("source_archive_sha256"))
     summary = PS._summary(accession, len(runs), values, cats)
     latest: dict = {}
     for r in sorted(failed, key=lambda r: str(r.get("run_tag") or "")):
         latest[r["source_file"].casefold()] = r  # one entry per file: the newest batch wins
     failed_runs = [dict({"sourceFile": r["source_file"]},
-                        **{k: r.get(k) for k in FAILED_KEYS if r.get(k) is not None})
+                        **{k: r.get(k) for k in FAILED_KEYS if r.get(k) is not None},
+                        **({"sourceArchive": r["source_archive"], "sourceMember": r.get("source_member")}
+                           if r.get("source_archive") else {}))
                    for r in sorted(latest.values(), key=lambda r: r["source_file"].casefold())]
     doc = {"schemaVersion": SCHEMA_VERSION, "pxdAccession": accession, "generatedAt": generated,
            "scientificApproval": False, "summary": summary, "runs": runs, "failedRuns": failed_runs}

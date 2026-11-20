@@ -46,7 +46,10 @@ FILE_NAME = re.compile(r"[A-Za-z0-9_.+\-]+\.raw\Z", flags=re.IGNORECASE)
 LANE_FILE_NAME = {
     "QUEUE_NATIVE_RAW": FILE_NAME,
     "QUEUE_MZML_NO_VENDOR": re.compile(r"[A-Za-z0-9_.+\-]+\.mzml(\.gz)?\Z", flags=re.IGNORECASE),
+    # inspect_archives.py queue: one task per ZIP, one receipt per run member
+    "QUEUE_ARCHIVE_RUNS": re.compile(r"[A-Za-z0-9_.+\-]+\.zip\Z", flags=re.IGNORECASE),
 }
+ARCHIVE_LANE = "QUEUE_ARCHIVE_RUNS"
 ACCESSION = re.compile(r"PXD\d{6,}\Z")
 
 
@@ -75,7 +78,11 @@ def scan_tag(tag_dir: Path) -> list[dict]:
             continue
         if not isinstance(d, dict) or not isinstance(d.get("accession"), str):
             continue
-        name = Path(str(d.get("source_member") or d.get("source_archive") or "")).name
+        # Archive lane: the queue unit is the ZIP, so its member receipts key on the archive.
+        if d.get("source_kind") == "archive_member":
+            name = Path(str(d.get("source_archive") or "")).name
+        else:
+            name = Path(str(d.get("source_member") or d.get("source_archive") or "")).name
         if not name:
             continue
         rows.append({"a": d["accession"].upper(), "f": name.casefold(), "s": d.get("status"),
@@ -222,13 +229,18 @@ def write_controller(root: Path, tag: str, picked: list[dict], *, source: Path, 
     tasks = [{"task_id": str(i), "pxd_accession": r["accession"], "archive_file": r["file_name"],
               "sdrf_path": "", "needs_file_map": "0", "file_size_bytes": str(r["file_size_bytes"])}
              for i, r in enumerate(picked, 1)]
+    fields = ["task_id", "pxd_accession", "archive_file", "sdrf_path", "needs_file_map", "file_size_bytes"]
+    if lane == ARCHIVE_LANE:
+        for i, r in enumerate(picked):
+            tasks[i].update(source_kind="archive_members", largest_member_bytes=str(r["largest_run_bytes"]),
+                            member_bytes=str(r["run_bytes"]))
+        fields += ["source_kind", "largest_member_bytes", "member_bytes"]
     per: dict[str, int] = defaultdict(int)
     for r in picked:
         per[r["accession"]] += 1
     reports = [{"report_id": str(i), "pxd_accession": a, "expected_file_tasks": str(n)}
                for i, (a, n) in enumerate(sorted(per.items()), 1)]
-    write_tsv(ctrl / "file-manifest.tsv", ["task_id", "pxd_accession", "archive_file", "sdrf_path",
-                                           "needs_file_map", "file_size_bytes"], tasks)
+    write_tsv(ctrl / "file-manifest.tsv", fields, tasks)
     write_tsv(ctrl / "report-manifest.tsv", ["report_id", "pxd_accession", "expected_file_tasks"], reports)
     (ctrl / "resources.config").write_text(resources_config(max_forks), encoding="utf-8")
     params = {"input": str(ctrl / "file-manifest.tsv"), "report_manifest": str(ctrl / "report-manifest.tsv"),
@@ -251,7 +263,8 @@ def write_controller(root: Path, tag: str, picked: list[dict], *, source: Path, 
     (ctrl / "run-nextflow.sh").chmod(0o750)
     tiers: dict[str, int] = defaultdict(int)
     for r in picked:
-        tiers[str(memory_tier_gb(int(r["file_size_bytes"])))] += 1
+        size = int(r["largest_run_bytes"]) if lane == ARCHIVE_LANE else int(r["file_size_bytes"])
+        tiers[str(memory_tier_gb(size))] += 1
     names = ("file-manifest.tsv", "report-manifest.tsv", "resources.config", "params.json", "run-nextflow.sh")
     prov = {"scope": "PRODUCTION_LOOP_ENGINEERING_QUALIFIED_LANE", "scientific_approval": False,
             "loop_id": loop_id, "tag": tag, "source": str(source),
@@ -398,7 +411,8 @@ class Loop:
         Q = load_queue_module(src)
         only = {a.upper() for a in self.a.only_accession}
         with Path(self.a.queue).open(encoding="utf-8", newline="") as fh:
-            keep = ("accession", "file_name", "file_size_bytes", "memory_gb", "decision")
+            keep = ("accession", "file_name", "file_size_bytes", "memory_gb", "decision", "runs", "run_bytes",
+                    "largest_run_bytes")
             rows = [{k: r.get(k, "") for k in keep} for r in csv.DictReader(fh, delimiter="\t")
                     if r.get("decision") == self.a.lane
                     and (not only or r.get("accession", "").upper() in only)]

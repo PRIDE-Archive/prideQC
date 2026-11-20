@@ -58,14 +58,14 @@ class CompleteProjectsTests(unittest.TestCase):
                            obo_sha256=_sha(obo))
         (unit / "result.json").write_text(json.dumps(receipt))
 
-    def run_it(self):
+    def run_it(self, archives=None):
         inv = self.dir / "inventory.tsv"
         with inv.open("w", newline="") as h:
             w = csv.DictWriter(h, fieldnames=INV_FIELDS, delimiter="\t", lineterminator="\n")
             w.writeheader()
             w.writerows(self.rows)
         out, exc = self.dir / "complete.tsv", self.dir / "excluded.tsv"
-        summary = CP.run(inv, [self.root], out, exc, workers=2)
+        summary = CP.run(inv, [self.root], out, exc, workers=2, archives=archives)
         def read(p):
             return {r["pride_accession"]: r for r in csv.DictReader(p.open(), delimiter="\t")}
 
@@ -130,6 +130,46 @@ class CompleteProjectsTests(unittest.TestCase):
         self.assertEqual(summary["complete_projects"], 4)
         self.assertEqual(summary["complete_runs"], 6)
         self.assertEqual(summary["projects_with_qc_inputs"], 8)
+
+    def test_archive_members_are_qc_inputs(self):
+        tag = "prideqc-prod-archive-b001-x"
+        z = "SKIP_ARCHIVE_CONTENTS_NOT_INSPECTED"
+        # J: zip with two runs (both QC) + results zip -> complete, 2 runs from archives
+        self.inv("PXD000020", "runs.zip", "SKIP", z, "zip_archive")
+        self.inv("PXD000020", "results.zip", "SKIP", z, "zip_archive")
+        # K: zip with one run QC and one Bruker member -> no reader
+        self.inv("PXD000021", "k.zip", "SKIP", z, "zip_archive")
+        # L: only a 7z (not inspected) -> no QC input yet
+        self.inv("PXD000022", "l.7z", "SKIP", z, "7z_archive")
+        # M: zip download failed (one archive receipt) -> failed_run
+        self.inv("PXD000023", "m.zip", "SKIP", z, "zip_archive")
+        for pxd, name, task in (("PXD000020", "a.raw", 1), ("PXD000020", "b.mzML", 2), ("PXD000021", "k1.raw", 3)):
+            self.receipt(tag, pxd, name, task=task)
+        self.receipt(tag, "PXD000023", "m.zip", task=4, status="failed")
+        folder = self.dir / "arch"
+        folder.mkdir()
+        (folder / "archives.tsv").write_text(
+            "accession\tfile_name\tdecision\n"
+            "PXD000020\truns.zip\tQUEUE_ARCHIVE_RUNS\nPXD000020\tresults.zip\tSKIP_ARCHIVE_NO_RUNS\n"
+            "PXD000021\tk.zip\tQUEUE_ARCHIVE_RUNS\nPXD000022\tl.7z\tSKIP_ARCHIVE_FORMAT_NOT_INSPECTED\n"
+            "PXD000023\tm.zip\tQUEUE_ARCHIVE_RUNS\n")
+        (folder / "members.tsv").write_text(
+            "accession\tarchive_file\tmember\tmember_file\tmember_size_bytes\tmember_format\tkind\n"
+            "PXD000020\truns.zip\tx/a.raw\ta.raw\t100\traw\trun\n"
+            "PXD000020\truns.zip\tb.mzML\tb.mzML\t50\tmzml\trun\n"
+            "PXD000021\tk.zip\tk1.raw\tk1.raw\t10\traw\trun\n"
+            "PXD000021\tk.zip\tk2.d/\tk2.d\t\t\tunsupported\n"
+            "PXD000023\tm.zip\tm1.raw\tm1.raw\t10\traw\trun\n")
+        summary, done, excluded = self.run_it(archives=folder)
+        self.assertEqual(sorted(done), ["PXD000020"])
+        self.assertEqual((done["PXD000020"]["runs_with_qc"], done["PXD000020"]["runs_from_archives"],
+                          done["PXD000020"]["representation"]), ("2", "2", "vendor_raw+mzml"))
+        self.assertEqual({k: v["reason"] for k, v in excluded.items()},
+                         {"PXD000021": "no_reader_archive_member", "PXD000022": "no_qc_input",
+                          "PXD000023": "failed_run"})
+        # without --archives every zip blocks
+        _, done2, _ = self.run_it()
+        self.assertEqual(done2, {})
 
     def test_listing_not_verified_blocks(self):
         self.inv("PXD000010", "x.raw", "SKIP", "SKIP_PROJECT_LISTING_NOT_VERIFIED")

@@ -27,7 +27,7 @@ from collections import defaultdict
 from pathlib import Path
 
 DECISION = "QUEUE_NATIVE_RAW"
-LANES = ("QUEUE_NATIVE_RAW", "QUEUE_MZML_NO_VENDOR")
+LANES = ("QUEUE_NATIVE_RAW", "QUEUE_MZML_NO_VENDOR", "QUEUE_ARCHIVE_RUNS")
 
 
 def sha256(path: Path) -> str:

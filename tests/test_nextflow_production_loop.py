@@ -253,6 +253,48 @@ class ProductionLoopTests(unittest.TestCase):
         self.assertEqual((prov["rules"]["lane"], prov["rules"]["only_accession"]),
                          ("QUEUE_MZML_NO_VENDOR", ["PXD082223"]))
 
+    def test_archive_lane_manifest_and_member_receipts_key_on_archive(self):
+        with self.queue.open("a", newline="") as fh:
+            fh.write("PXD000050\truns.zip\tzip_archive\t5000000000\t\t32\tQUEUE_ARCHIVE_RUNS\n")
+        # the archive queue has three extra columns; rewrite with them
+        rows = list(csv.DictReader(self.queue.open(), delimiter="\t"))
+        for r in rows:
+            r.update(runs="3" if r["file_name"] == "runs.zip" else "", run_bytes="7000000000" if
+                     r["file_name"] == "runs.zip" else "", largest_run_bytes="4000000000" if
+                     r["file_name"] == "runs.zip" else "")
+        with self.queue.open("w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(rows[0]), delimiter="\t")
+            w.writeheader()
+            w.writerows(rows)
+
+        def run(ctrl, env):
+            prov = json.loads((ctrl / "screen-provenance.json").read_text())
+            (ctrl / "launch-attempt.txt").write_text("x")
+            for i, member in enumerate(("a/x.raw", "a/y.raw", "z.raw")):
+                receipt(self.root, prov["tag"], "PXD000050", member, f"m{i}", source_archive="runs.zip",
+                        source_kind="archive_member", status="failed" if i == 1 else "success")
+            (ctrl / "nextflow.log").write_text("Workflow completed > WorkflowStats[succeededCount=1; failedCount=0; ...]")
+            (ctrl / "controller.exitcode").write_text("0\n")
+            return 0
+
+        result = L.Loop(self.args(batches=1, lane="QUEUE_ARCHIVE_RUNS", max_gb=100.0), runner=run,
+                        sleep=lambda s: None).run()
+        self.assertEqual(result, "DONE")
+        ctrl = next((self.root / "work/controllers").iterdir())
+        with (ctrl / "file-manifest.tsv").open() as fh:
+            tasks = list(csv.DictReader(fh, delimiter="\t"))
+        self.assertEqual([(t["archive_file"], t["source_kind"], t["largest_member_bytes"], t["member_bytes"])
+                          for t in tasks], [("runs.zip", "archive_members", "4000000000", "7000000000")])
+        prov = json.loads((ctrl / "screen-provenance.json").read_text())
+        self.assertEqual(prov["memory_gb_tiers"], {"64": 1})
+        rows = L.scan_tag(self.root / "results" / prov["tag"])
+        self.assertEqual({r["f"] for r in rows}, {"runs.zip"})
+        skip, _ = L.classify(rows)
+        self.assertIn(("PXD000050", "runs.zip"), skip)
+        # the planner accepts the controller manifest
+        plan = PLAN.prepare(ctrl / "file-manifest.tsv", ctrl / "report-manifest.tsv", self.root / "plan", set())
+        self.assertEqual(plan["tasks"], 1)
+
     def test_killed_runner_still_gets_exitcode(self):
         def killed(ctrl, env):
             (ctrl / "launch-attempt.txt").write_text("x")

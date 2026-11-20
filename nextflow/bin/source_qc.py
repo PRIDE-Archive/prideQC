@@ -18,6 +18,9 @@ from pathlib import Path
 from analyze_unit import analyze
 from prepare_archive import prepare
 
+ARCHIVE_MEMBERS = "archive_members"
+MEMBER_PLAN = "member-plan.json"
+
 
 def run(task_file: Path, protocol: str, scratch_dir: Path, outdir: Path,
         *, source: Path | None = None, checksum: bool = True,
@@ -30,6 +33,11 @@ def run(task_file: Path, protocol: str, scratch_dir: Path, outdir: Path,
     outdir.mkdir(parents=True, exist_ok=True)
     ready_units = outdir / "units"
     ready_units.mkdir()
+    task = json.loads(task_file.read_text(encoding="utf-8"))
+    if task.get("source_kind") == ARCHIVE_MEMBERS:
+        return run_archive(task, protocol, scratch_dir, outdir, source=source, checksum=checksum,
+                           mass_error=mass_error, mass_shifts=mass_shifts, tmt_reporter=tmt_reporter,
+                           tmt_profile=tmt_profile)
     try:
         prepared = scratch_dir / "prepared"
         status = prepare(task_file, protocol, prepared, source=source, checksum=checksum)
@@ -88,6 +96,31 @@ def run(task_file: Path, protocol: str, scratch_dir: Path, outdir: Path,
         shutil.rmtree(scratch_dir, ignore_errors=True)
 
 
+def run_archive(task: dict, protocol: str, scratch_dir: Path, outdir: Path, *, source: Path | None,
+                checksum: bool, mass_error: bool, mass_shifts: bool, tmt_reporter: bool,
+                tmt_profile: bool) -> dict:
+    """Archive lane: one receipt per run member (archive_member_qc.py)."""
+    from archive_member_qc import run_members
+
+    requested = {"mass_error": bool(mass_error), "mass_shifts": bool(mass_shifts),
+                 "tmt_reporter_evidence": bool(tmt_reporter), "tmt_profile_reporter_evidence": bool(tmt_profile)}
+
+    def analyzer(unit: Path, output: Path, **kw: object) -> dict:
+        result = analyze(unit, output, mass_error=mass_error, mass_shifts=mass_shifts,
+                         tmt_reporter=tmt_reporter, tmt_profile=tmt_profile, **kw)  # type: ignore[arg-type]
+        result["requested_estimators"] = requested
+        return result
+
+    try:
+        status = run_members(task, protocol, scratch_dir, outdir / "units", source=source, checksum=checksum,
+                             analyzer=analyzer, plan_file=outdir / MEMBER_PLAN)
+    finally:
+        shutil.rmtree(scratch_dir, ignore_errors=True)
+    (outdir / "prepare-status.json").write_text(json.dumps(status, indent=2, sort_keys=True) + "\n",
+                                                 encoding="utf-8")
+    return status
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--task", required=True, type=Path)
@@ -124,8 +157,11 @@ def main() -> None:
 
 def retry_exit_code(result: dict, attempt: int, max_attempts: int) -> int:
     """137 asks Nextflow to retry with more memory; only for a resource kill before the last attempt.
-    On the last attempt the fail-closed receipt stands and the task exits 0."""
+    On the last attempt the fail-closed receipt stands and the task exits 0.
+    Archive lane: the summary has no error_type of its own; a killed member counts."""
     if result.get("error_type") == "AnalysisKilledResourceLimit" and attempt < max_attempts:
+        return 137
+    if result.get("members_killed") and attempt < max_attempts:
         return 137
     return 0
 
@@ -140,6 +176,8 @@ def killed_receipt(task_file: Path, scratch_dir: Path, outdir: Path, signal_numb
     task = json.loads(task_file.read_text(encoding="utf-8"))
     # The worker could not run its own cleanup: RAW must not stay in task scratch.
     shutil.rmtree(scratch_dir, ignore_errors=True)
+    if task.get("source_kind") == ARCHIVE_MEMBERS and (outdir / MEMBER_PLAN).is_file():
+        return killed_archive_receipts(task, outdir, signal_number)
     shutil.rmtree(outdir, ignore_errors=True)
     unit_id = f"archive-{int(task['task_id']):09d}-worker-killed"
     unit = outdir / "units" / unit_id
@@ -160,6 +198,41 @@ def killed_receipt(task_file: Path, scratch_dir: Path, outdir: Path, signal_numb
     (outdir / "prepare-status.json").write_text(json.dumps(status, indent=2, sort_keys=True) + "\n",
                                                  encoding="utf-8")
     return result
+
+
+def killed_archive_receipts(task: dict, outdir: Path, signal_number: int) -> dict:
+    """Archive lane: keep the receipts of finished members; fail closed for the others.
+
+    The member in progress (result folder without result.json) gets a resource-kill receipt.
+    A member that did not start gets NotAttemptedAfterWorkerKill. So every planned member
+    has exactly one receipt and no member is lost.
+    """
+    plan = json.loads((outdir / MEMBER_PLAN).read_text(encoding="utf-8"))
+    units = outdir / "units"
+    name = signal.Signals(signal_number).name if signal_number in signal.valid_signals() else str(signal_number)
+    killed = 0
+    for entry in plan["members"]:
+        unit = units / entry["unit_id"]
+        if (unit / "result.json").is_file():
+            continue
+        started = unit.is_dir()
+        shutil.rmtree(unit, ignore_errors=True)
+        unit.mkdir(parents=True)
+        result = dict(plan["base"], unit_id=entry["unit_id"], source_member=entry["member"],
+                      member_index=entry["member_index"], member_count=len(plan["members"]), status="failed",
+                      failure_stage="prideqc_analysis" if started else "archive_member_extraction",
+                      error_type="AnalysisKilledResourceLimit" if started else "NotAttemptedAfterWorkerKill",
+                      worker_signal=name)
+        if started:
+            result.update(resource_failure_kind="task_killed_by_signal", exit_code=-signal_number)
+            killed += 1
+        (unit / "result.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    status = dict(plan["base"], status="unknown_worker_killed", error_type="WorkerKilled",
+                  emitted_units=len(plan["members"]), members_killed=killed,
+                  source_manifest=task.get("source_manifest"), source_manifest_task_count=task["expected_runs"])
+    (outdir / "prepare-status.json").write_text(json.dumps(status, indent=2, sort_keys=True) + "\n",
+                                                 encoding="utf-8")
+    return status
 
 
 def supervise(args: argparse.Namespace, argv: list[str],
