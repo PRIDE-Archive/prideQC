@@ -78,6 +78,12 @@ class PlanMembersTest(unittest.TestCase):
                 with self.assertRaises(AM.ArchiveMemberError):
                     self.plan(entries)
 
+    def test_unsafe_name_of_a_non_run_member_is_ignored(self):
+        # PXD010595: the run ZIPs also hold '../mqpar.xml'
+        plan = self.plan({"../mqpar.xml": b"x", "r1.raw": b"r"})
+        self.assertEqual([r["member"] for r in plan["runs"]], ["r1.raw"])
+        self.assertEqual(plan["unsafe_ignored"], 1)
+
     def test_not_a_zip(self):
         with self.assertRaises(AM.ArchiveMemberError):
             AM.list_zip(io.BytesIO(b"not a zip at all" * 100))
@@ -105,6 +111,27 @@ class RemoteListingTest(unittest.TestCase):
             return FakeResponse(b"x", 0, 1, status=200)
         with self.assertRaises(AM.ArchiveMemberError):
             AM.list_zip("https://example.org/a.zip", opener=opener)
+
+    def test_network_error_is_retried(self):
+        import urllib.error
+        blob = make_zip({"r.raw": b"x"})
+        log: list = []
+        good = range_opener(blob, log)
+        calls = [0]
+
+        def flaky(request, timeout=None):
+            calls[0] += 1
+            if calls[0] <= 2:
+                raise urllib.error.URLError("Connection reset")
+            return good(request, timeout)
+        f = AM.HttpRangeFile("https://example.org/a.zip", opener=flaky, backoff=0)
+        self.assertEqual(f.size, len(blob))
+        self.assertEqual(calls[0], 3)
+
+        def gone(request, timeout=None):
+            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
+        with self.assertRaises(urllib.error.HTTPError):
+            AM.HttpRangeFile("https://example.org/a.zip", opener=gone, backoff=0)
 
 
 class ExtractMemberTest(unittest.TestCase):

@@ -22,6 +22,8 @@ import hashlib
 import io
 import re
 import stat
+import time
+import urllib.error
 import urllib.request
 import zipfile
 from collections.abc import Callable, Iterator
@@ -100,8 +102,18 @@ def plan_members(infos: list[zipfile.ZipInfo]) -> dict:
     mzmls: dict[str, dict] = {}
     unsupported: list[str] = []
     ignored = 0
+    unsafe_ignored = 0
     for info in infos:
-        path = _safe_member(info.filename)
+        kind = member_kind(info.filename)
+        try:
+            path = _safe_member(info.filename)
+        except ArchiveMemberError:
+            # Only run members are extracted (by basename). An unsafe name of another member
+            # (PXD010595: '../mqpar.xml' next to the runs) is not a risk: ignore it.
+            if kind != "ignored":
+                raise
+            unsafe_ignored += 1
+            continue
         key = path.as_posix().rstrip("/").casefold()
         if key in names:
             raise ArchiveMemberError(f"Duplicate case-insensitive ZIP member: {info.filename}")
@@ -140,7 +152,8 @@ def plan_members(infos: list[zipfile.ZipInfo]) -> dict:
             raise ArchiveMemberError(f"Duplicate run file name in archive: {r['basename']}")
         seen.add(r["basename"].casefold())
     runs.sort(key=lambda r: r["member"].casefold())
-    return {"runs": runs, "unsupported": sorted(unsupported, key=str.casefold), "ignored": ignored,
+    return {"runs": runs, "unsupported": sorted(unsupported, key=str.casefold), "ignored": ignored + unsafe_ignored,
+            "unsafe_ignored": unsafe_ignored,
             "skipped_mzml_with_raw": sum(1 for stem in mzmls if stem in raws)}
 
 
@@ -153,9 +166,10 @@ class HttpRangeFile(io.RawIOBase):
     """
 
     def __init__(self, url: str, *, opener: Callable | None = None, timeout: int = 60,
-                 tail: int = 1 << 20, block: int = 1 << 20) -> None:
+                 tail: int = 1 << 20, block: int = 1 << 20, retries: int = 4, backoff: float = 2.0) -> None:
         super().__init__()
         self.url, self.pos, self.timeout, self.block = url, 0, timeout, block
+        self.retries, self.backoff = retries, backoff
         self.opener = opener or urllib.request.urlopen
         self.requests = 0
         data, total = self._fetch(f"-{tail}")
@@ -177,6 +191,19 @@ class HttpRangeFile(io.RawIOBase):
         return self.pos
 
     def _fetch(self, spec: str) -> tuple[bytes, int]:
+        """One range request, retried on a network error (trial 2 with 32 threads: 1,202 of 1,321
+        archives had a URLError; one of them, tried again alone, listed without error)."""
+        for attempt in range(self.retries + 1):
+            try:
+                return self._fetch_once(spec)
+            except (urllib.error.URLError, OSError) as err:
+                code = getattr(err, "code", None)
+                if attempt == self.retries or (code is not None and code < 500 and code != 429):
+                    raise
+                time.sleep(self.backoff * (2 ** attempt))
+        raise ArchiveMemberError("unreachable")
+
+    def _fetch_once(self, spec: str) -> tuple[bytes, int]:
         self.requests += 1
         request = urllib.request.Request(self.url, headers={"Range": f"bytes={spec}",
                                                            "User-Agent": "prideqc-archive-inspect/1"})

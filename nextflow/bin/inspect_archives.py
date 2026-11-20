@@ -28,6 +28,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -118,7 +119,10 @@ def inspect_one(accession: str, name: str, size: int, url: str | None, lister: C
         row.update(status="unreadable", decision="SKIP_ARCHIVE_UNREADABLE", reason=_reason(str(err)))
         return row
     except (OSError, urllib.error.URLError, ValueError, EOFError) as err:
-        row.update(status="unreadable", decision="SKIP_ARCHIVE_UNREADABLE", reason=type(err).__name__)
+        detail = str(getattr(err, "reason", "") or getattr(err, "code", "") or "")
+        detail = re.sub(r"[^A-Za-z0-9_ .:-]", "", detail)[:60]
+        row.update(status="unreadable", decision="SKIP_ARCHIVE_UNREADABLE",
+                   reason=type(err).__name__ + (f":{detail}" if detail else ""))
         return row
     runs = plan["runs"]
     row.update(status="inspected", runs=len(runs), run_bytes=sum(r["size"] for r in runs),
