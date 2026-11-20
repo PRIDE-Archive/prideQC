@@ -19,6 +19,7 @@ Python 3.9 compatible (Codon host python3). No network library beyond urllib.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import io
 import re
 import stat
@@ -34,7 +35,7 @@ RUN_SUFFIXES = (".mzml.gz", ".mzml", ".raw")
 UNSUPPORTED_SUFFIXES = (".raw.gz", ".zip", ".tar.gz", ".tgz", ".tar", ".7z", ".rar", ".wiff", ".wiff2",
                         ".wiff.scan", ".baf", ".tdf", ".tdf_bin", ".yep", ".lcd", ".mzxml", ".mzxml.gz")
 FOLDER_RUN_SUFFIXES = (".d", ".raw")
-MAX_MEMBERS = 100_000
+MAX_MEMBERS = 1_000_000
 MAX_MEMBER_BYTES = 200 * 1024**3
 SAFE_BASENAME = re.compile(r"[A-Za-z0-9_.+\-]{1,255}\Z")
 
@@ -90,6 +91,15 @@ def _safe_member(name: str) -> PurePosixPath:
     return path
 
 
+def safe_basename(name: str) -> str:
+    """The local file name of a run member: other characters become '_'.
+
+    PXD011935 has 'hog1_exp1a_5min_GPF(1,2).RAW'. The member path in the receipt keeps the
+    original name (the SDRF link); only the scratch file and the mzQC name use this form.
+    """
+    return re.sub(r"[^A-Za-z0-9_.+\-]", "_", name)
+
+
 def plan_members(infos: list[zipfile.ZipInfo]) -> dict:
     """Classify the members of one ZIP. Raises ArchiveMemberError on an unsafe or ambiguous archive.
 
@@ -134,7 +144,7 @@ def plan_members(infos: list[zipfile.ZipInfo]) -> dict:
             continue
         if info.file_size > MAX_MEMBER_BYTES or (info.compress_size == 0 and info.file_size > 0):
             raise ArchiveMemberError(f"Invalid ZIP member size: {info.filename}")
-        basename = path.name
+        basename = safe_basename(path.name)
         if not SAFE_BASENAME.fullmatch(basename):
             raise ArchiveMemberError(f"Unsafe run file name in archive: {info.filename!r}")
         lower = basename.casefold()
@@ -196,7 +206,7 @@ class HttpRangeFile(io.RawIOBase):
         for attempt in range(self.retries + 1):
             try:
                 return self._fetch_once(spec)
-            except (urllib.error.URLError, OSError) as err:
+            except (urllib.error.URLError, OSError, http.client.HTTPException) as err:
                 code = getattr(err, "code", None)
                 if attempt == self.retries or (code is not None and code < 500 and code != 429):
                     raise

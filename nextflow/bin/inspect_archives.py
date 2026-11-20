@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import http.client
 import json
 import os
 import re
@@ -73,7 +74,7 @@ def http_json(url: str, *, retries: int = 4, timeout: int = 60) -> Any:
                                                        "User-Agent": "prideqc-archive-inspect/1"})
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, ValueError, ConnectionError) as err:
+        except (urllib.error.URLError, TimeoutError, ValueError, ConnectionError, http.client.HTTPException) as err:
             if attempt == retries or getattr(err, "code", None) in (400, 404):
                 raise
             time.sleep(delay)
@@ -132,7 +133,7 @@ def inspect_one(accession: str, name: str, size: int, url: str | None, lister: C
     except AM.ArchiveMemberError as err:
         row.update(status="unreadable", decision="SKIP_ARCHIVE_UNREADABLE", reason=_reason(str(err)))
         return row
-    except (OSError, urllib.error.URLError, ValueError, EOFError) as err:
+    except (OSError, urllib.error.URLError, ValueError, EOFError, http.client.HTTPException) as err:
         detail = str(getattr(err, "reason", "") or getattr(err, "code", "") or "")
         detail = re.sub(r"[^A-Za-z0-9_ .:-]", "", detail)[:60]
         row.update(status="unreadable", decision="SKIP_ARCHIVE_UNREADABLE",
@@ -212,7 +213,7 @@ def project_urls(accession: str, files: list, fetch: Fetcher) -> dict:
         return {}
     try:
         return public_urls(fetch, accession, [n for n, _, _ in files])
-    except (OSError, urllib.error.URLError, ValueError):
+    except (OSError, urllib.error.URLError, ValueError, http.client.HTTPException):
         return {}
 
 
@@ -252,7 +253,11 @@ def build(inventory: Path, outdir: Path, *, cache: Path | None = None, workers: 
 
         def one(job: tuple) -> dict:
             acc, name, size, category = job
-            row = inspect_one(acc, name, size, urls[acc].get(name), lister)
+            try:
+                row = inspect_one(acc, name, size, urls[acc].get(name), lister)
+            except Exception as err:  # noqa: BLE001 - one bad archive never stops the inspection
+                row = inspect_one(acc, name, size, None, lister)
+                row.update(status="unreadable", reason=f"unexpected_{type(err).__name__}")
             row["_category"] = category
             _store(cache, row)
             return row

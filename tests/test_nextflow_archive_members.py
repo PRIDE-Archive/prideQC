@@ -73,7 +73,7 @@ class PlanMembersTest(unittest.TestCase):
 
     def test_unsafe_and_duplicate_members_fail_closed(self):
         for entries in ({"../evil.raw": b"x"}, {"/abs.raw": b"x"}, {"a/r.raw": b"x", "b/R.RAW": b"y"},
-                        {"bad name.raw": b"x"}):
+                        {"bad name.raw": b"x", "bad_name.raw": b"y"}):
             with self.subTest(entries=list(entries)):
                 with self.assertRaises(AM.ArchiveMemberError):
                     self.plan(entries)
@@ -83,6 +83,17 @@ class PlanMembersTest(unittest.TestCase):
         plan = self.plan({"../mqpar.xml": b"x", "r1.raw": b"r"})
         self.assertEqual([r["member"] for r in plan["runs"]], ["r1.raw"])
         self.assertEqual(plan["unsafe_ignored"], 1)
+
+    def test_run_name_with_other_characters_gets_a_safe_local_name(self):
+        # PXD011935: 'hog1_exp1a_5min_GPF(1,2).RAW'
+        plan = self.plan({"d/hog1_GPF(1,2).RAW": b"r"})
+        self.assertEqual([(r["member"], r["basename"]) for r in plan["runs"]],
+                         [("d/hog1_GPF(1,2).RAW", "hog1_GPF_1_2_.RAW")])
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "a.zip"
+            archive.write_bytes(make_zip({"d/hog1_GPF(1,2).RAW": b"r"}))
+            self.assertEqual(AM.extract_member(archive, "d/hog1_GPF(1,2).RAW", Path(tmp) / "w")["path"].name,
+                             "hog1_GPF_1_2_.RAW")
 
     def test_not_a_zip(self):
         with self.assertRaises(AM.ArchiveMemberError):
@@ -120,9 +131,12 @@ class RemoteListingTest(unittest.TestCase):
         calls = [0]
 
         def flaky(request, timeout=None):
+            import http.client
             calls[0] += 1
-            if calls[0] <= 2:
+            if calls[0] == 1:
                 raise urllib.error.URLError("Connection reset")
+            if calls[0] == 2:
+                raise http.client.IncompleteRead(b"", 1048576)
             return good(request, timeout)
         f = AM.HttpRangeFile("https://example.org/a.zip", opener=flaky, backoff=0)
         self.assertEqual(f.size, len(blob))
