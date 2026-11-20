@@ -81,9 +81,16 @@ def http_json(url: str, *, retries: int = 4, timeout: int = 60) -> Any:
     raise RuntimeError("unreachable")
 
 
-def public_urls(fetch: Fetcher, accession: str) -> dict:
-    """file name -> https URL of the PRIDE FTP copy (from the v3 API file list)."""
+def public_urls(fetch: Fetcher, accession: str, names: list | None = None, max_pages: int = 3) -> dict:
+    """file name -> https URL of the PRIDE FTP copy (from the v3 API file list).
+
+    A PRIDE project keeps all its files in one FTP folder. For a large project (more than
+    max_pages pages; PXD010595 has 18, 127 s, and failed under load in trial 3) the folder
+    of the first page plus the file name gives the URL. A wrong URL fails later as HTTP 404
+    (reason HTTPError:404), not silently.
+    """
     out: dict = {}
+    folders: set = set()
     page = 0
     while True:
         batch = fetch(f"{API}/projects/{accession}/files?pageSize={PAGE}&page={page}")
@@ -93,10 +100,17 @@ def public_urls(fetch: Fetcher, accession: str) -> dict:
             for loc in rec.get("publicFileLocations") or []:
                 value = str(loc.get("value") or "")
                 if value.startswith("ftp://ftp.pride.ebi.ac.uk/"):
-                    out[str(rec.get("fileName"))] = "https://" + value[len("ftp://"):]
+                    url = "https://" + value[len("ftp://"):]
+                    out[str(rec.get("fileName"))] = url
+                    folders.add(url.rsplit("/", 1)[0])
         if len(batch) < PAGE:
             break
         page += 1
+        if page >= max_pages and names and len(folders) == 1:
+            folder = next(iter(folders))
+            for name in names:
+                out.setdefault(name, f"{folder}/{name}")
+            break
     return out
 
 
@@ -197,7 +211,7 @@ def project_urls(accession: str, files: list, fetch: Fetcher) -> dict:
     if not any(n.casefold().endswith(ZIP_SUFFIXES) for n, _, _ in files):
         return {}
     try:
-        return public_urls(fetch, accession)
+        return public_urls(fetch, accession, [n for n, _, _ in files])
     except (OSError, urllib.error.URLError, ValueError):
         return {}
 

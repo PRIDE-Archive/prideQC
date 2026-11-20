@@ -227,6 +227,19 @@ class InspectArchivesTest(unittest.TestCase):
         self.assertEqual([IA.memory_tier_gb(s) for s in (0, 2_000_000_000, 5_000_000_000, 9_000_000_000)],
                          [16, 32, 64, 128])
 
+    def test_large_project_urls_from_folder(self):
+        calls: list = []
+
+        def fetch(url):
+            calls.append(url)
+            page = int(url.rsplit("page=", 1)[1])
+            return [{"fileName": f"f{page}_{i}.raw", "publicFileLocations": [
+                {"value": f"ftp://ftp.pride.ebi.ac.uk/pride/data/archive/2019/05/PXD9/f{page}_{i}.raw"}]}
+                for i in range(IA.PAGE)]
+        urls = IA.public_urls(fetch, "PXD9", ["late.zip"], max_pages=2)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(urls["late.zip"], "https://ftp.pride.ebi.ac.uk/pride/data/archive/2019/05/PXD9/late.zip")
+
 
 class ArchiveLaneTest(unittest.TestCase):
     """source_qc archive lane: one receipt per run member, RAW never leaves scratch."""
