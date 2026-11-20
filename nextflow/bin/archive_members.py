@@ -208,7 +208,9 @@ class HttpRangeFile(io.RawIOBase):
                 return self._fetch_once(spec)
             except (urllib.error.URLError, OSError, http.client.HTTPException) as err:
                 code = getattr(err, "code", None)
-                if attempt == self.retries or (code is not None and code < 500 and code != 429):
+                # 403 is throttling on ftp.pride.ebi.ac.uk (trial 6: 244 x 403 for PXD010595 under
+                # load, the same file gave 206 alone); 404 and other 4xx are final
+                if attempt == self.retries or (code is not None and code < 500 and code not in (403, 429)):
                     raise
                 time.sleep(self.backoff * (2 ** attempt))
         raise ArchiveMemberError("unreachable")
