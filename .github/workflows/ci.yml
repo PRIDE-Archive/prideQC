@@ -44,4 +44,5 @@ jobs:
           uv run --python 3.9 --no-project python -m unittest -v
           tests.test_nextflow_production_loop tests.test_nextflow_queue_to_manifest tests.test_nextflow_pride_inventory
           tests.test_nextflow_upload_qc_mongo tests.test_nextflow_qc_archive_stats
-          tests.test_nextflow_qc_project_summary
+          tests.test_nextflow_qc_project_summary tests.test_nextflow_publish_public_qc tests.test_nextflow_run_index
+          tests.test_nextflow_complete_projects tests.test_nextflow_archive_members
