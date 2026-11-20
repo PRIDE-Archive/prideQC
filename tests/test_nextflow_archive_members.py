@@ -254,6 +254,15 @@ class InspectArchivesTest(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(urls["late.zip"], "https://ftp.pride.ebi.ac.uk/pride/data/archive/2019/05/PXD9/late.zip")
 
+        def fails_on_page_1(url):
+            if url.endswith("page=1"):
+                raise OSError("timeout")
+            return fetch(url)
+        urls = IA.public_urls(fails_on_page_1, "PXD9", ["late.zip"], max_pages=5)
+        self.assertEqual(urls["late.zip"], "https://ftp.pride.ebi.ac.uk/pride/data/archive/2019/05/PXD9/late.zip")
+        with self.assertRaises(OSError):
+            IA.public_urls(lambda url: (_ for _ in ()).throw(OSError("down")), "PXD9", ["late.zip"])
+
 
 class ArchiveLaneTest(unittest.TestCase):
     """source_qc archive lane: one receipt per run member, RAW never leaves scratch."""

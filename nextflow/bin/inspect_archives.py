@@ -94,8 +94,18 @@ def public_urls(fetch: Fetcher, accession: str, names: list | None = None, max_p
     folders: set = set()
     page = 0
     while True:
-        batch = fetch(f"{API}/projects/{accession}/files?pageSize={PAGE}&page={page}")
+        try:
+            batch = fetch(f"{API}/projects/{accession}/files?pageSize={PAGE}&page={page}")
+        except (OSError, urllib.error.URLError, ValueError, http.client.HTTPException):
+            # trial 5: a later page failed under load and the project lost all its URLs
+            if not folders:
+                raise
+            batch = None
         if not isinstance(batch, list) or not batch:
+            if batch is None and names and len(folders) == 1:
+                folder = next(iter(folders))
+                for name in names:
+                    out.setdefault(name, f"{folder}/{name}")
             break
         for rec in batch:
             for loc in rec.get("publicFileLocations") or []:
